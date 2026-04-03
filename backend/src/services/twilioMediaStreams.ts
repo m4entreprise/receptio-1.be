@@ -851,28 +851,56 @@ function convertWavToULaw(wavBuffer: Buffer): Buffer {
 }
 
 function parseWavPcm16(wavBuffer: Buffer): { channels: number; sampleRate: number; samples: Int16Array } {
-  const audioFormat = wavBuffer.readUInt16LE(20);
-  const channels = wavBuffer.readUInt16LE(22);
-  const sampleRate = wavBuffer.readUInt32LE(24);
-  const bitsPerSample = wavBuffer.readUInt16LE(34);
-
-  if (audioFormat !== 1 || bitsPerSample !== 16) {
-    throw new Error('Unsupported WAV format for Twilio streaming conversion');
+  if (wavBuffer.length < 44 || wavBuffer.subarray(0, 4).toString('ascii') !== 'RIFF' || wavBuffer.subarray(8, 12).toString('ascii') !== 'WAVE') {
+    throw new Error('Invalid WAV buffer for Twilio streaming conversion');
   }
 
-  const dataChunkOffset = wavBuffer.indexOf('data');
+  let fmtChunkOffset = -1;
+  let fmtChunkLength = 0;
+  let dataChunkOffset = -1;
+  let dataChunkLength = 0;
+  let cursor = 12;
 
-  if (dataChunkOffset === -1) {
+  while (cursor + 8 <= wavBuffer.length) {
+    const chunkId = wavBuffer.subarray(cursor, cursor + 4).toString('ascii');
+    const chunkSize = wavBuffer.readUInt32LE(cursor + 4);
+    const chunkDataOffset = cursor + 8;
+
+    if (chunkId === 'fmt ') {
+      fmtChunkOffset = chunkDataOffset;
+      fmtChunkLength = chunkSize;
+    } else if (chunkId === 'data') {
+      dataChunkOffset = chunkDataOffset;
+      dataChunkLength = chunkSize;
+      break;
+    }
+
+    cursor = chunkDataOffset + chunkSize + (chunkSize % 2);
+  }
+
+  if (fmtChunkOffset === -1 || fmtChunkLength < 16) {
+    throw new Error('Invalid WAV buffer: fmt chunk not found');
+  }
+
+  if (dataChunkOffset === -1 || dataChunkLength <= 0) {
     throw new Error('Invalid WAV buffer: data chunk not found');
   }
 
-  const dataLength = wavBuffer.readUInt32LE(dataChunkOffset + 4);
-  const dataStart = dataChunkOffset + 8;
-  const sampleCount = Math.floor(dataLength / 2);
+  const audioFormat = wavBuffer.readUInt16LE(fmtChunkOffset);
+  const channels = wavBuffer.readUInt16LE(fmtChunkOffset + 2);
+  const sampleRate = wavBuffer.readUInt32LE(fmtChunkOffset + 4);
+  const bitsPerSample = wavBuffer.readUInt16LE(fmtChunkOffset + 14);
+
+  if (audioFormat !== 1 || bitsPerSample !== 16) {
+    throw new Error(`Unsupported WAV format for Twilio streaming conversion: format=${audioFormat}, bits=${bitsPerSample}`);
+  }
+
+  const availableDataLength = Math.min(dataChunkLength, wavBuffer.length - dataChunkOffset);
+  const sampleCount = Math.floor(availableDataLength / 2);
   const samples = new Int16Array(sampleCount);
 
   for (let index = 0; index < sampleCount; index += 1) {
-    samples[index] = wavBuffer.readInt16LE(dataStart + (index * 2));
+    samples[index] = wavBuffer.readInt16LE(dataChunkOffset + (index * 2));
   }
 
   return { channels, sampleRate, samples };

@@ -197,7 +197,7 @@ export async function textToSpeech(text: string, format: string = 'mp3'): Promis
         model: OPENAI_TTS_MODEL,
         voice: OPENAI_TTS_VOICE,
         input: text,
-        format,
+        response_format: format,
       },
       {
         headers: {
