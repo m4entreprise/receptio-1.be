@@ -32,10 +32,42 @@ export default function CallDetail() {
   const [call, setCall] = useState<CallDetailItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [recordingBlobUrl, setRecordingBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCallDetail();
   }, [id]);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+
+    const fetchRecording = async () => {
+      if (!call?.recording_url || !id) {
+        setRecordingBlobUrl(null);
+        return;
+      }
+
+      try {
+        const response = await axios.get(`/api/calls/${id}/recording`, {
+          responseType: 'blob',
+        });
+
+        objectUrl = URL.createObjectURL(response.data);
+        setRecordingBlobUrl(objectUrl);
+      } catch (error) {
+        console.error('Error fetching call recording:', error);
+        setRecordingBlobUrl(null);
+      }
+    };
+
+    fetchRecording();
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [call?.recording_url, id]);
 
   const fetchCallDetail = async () => {
     try {
@@ -249,16 +281,16 @@ export default function CallDetail() {
               </div>
             )}
 
-            {call.recording_url && (
+            {call.recording_url && recordingBlobUrl && (
               <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
                 <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#171821]">Enregistrement audio</h2>
                 <div className="mt-4 rounded-[24px] border border-black/5 bg-[#f7f4ee] p-4 sm:p-5">
                   <audio controls className="w-full">
-                    <source src={call.recording_url} type="audio/mpeg" />
+                    <source src={recordingBlobUrl} type="audio/mpeg" />
                     Votre navigateur ne supporte pas l'élément audio.
                   </audio>
                   <a
-                    href={call.recording_url}
+                    href={recordingBlobUrl}
                     download
                     className="mt-4 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium text-[#171821] transition hover:bg-[#fcfbf8]"
                   >

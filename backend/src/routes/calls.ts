@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -76,6 +77,69 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
       events: eventsResult.rows,
     });
   } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const { id } = req.params;
+
+    const result = await query(
+      'SELECT recording_url FROM calls WHERE id = $1 AND company_id = $2',
+      [id, companyId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new AppError('Call not found', 404);
+    }
+
+    const recordingUrl = result.rows[0].recording_url as string | null;
+
+    if (!recordingUrl) {
+      throw new AppError('Recording not found', 404);
+    }
+
+    const isTwilioRecording = /twilio\.com/i.test(recordingUrl);
+    const auth = isTwilioRecording && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+      ? {
+          username: process.env.TWILIO_ACCOUNT_SID,
+          password: process.env.TWILIO_AUTH_TOKEN,
+        }
+      : undefined;
+
+    const response = await axios.get(recordingUrl, {
+      responseType: 'stream',
+      auth,
+    });
+
+    const contentType = typeof response.headers['content-type'] === 'string'
+      ? response.headers['content-type']
+      : 'audio/mpeg';
+    const contentLength = response.headers['content-length'];
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="call-${id}.mp3"`);
+
+    if (typeof contentLength === 'string') {
+      res.setHeader('Content-Length', contentLength);
+    }
+
+    response.data.on('error', (streamError: Error) => {
+      logger.error('Recording stream error', { callId: id, error: streamError.message });
+      if (!res.headersSent) {
+        next(streamError);
+      }
+    });
+
+    response.data.pipe(res);
+  } catch (error: any) {
+    logger.error('Recording proxy error', {
+      callId: req.params.id,
+      error: error.message,
+      status: error.response?.status,
+    });
     next(error);
   }
 });
