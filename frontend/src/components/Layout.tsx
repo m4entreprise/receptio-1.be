@@ -11,6 +11,7 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const userLabel = user?.email ?? 'Compte connecté';
 
   const handleLogout = () => {
     logout();
@@ -24,54 +25,89 @@ export default function Layout({ children }: LayoutProps) {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <Phone className="h-8 w-8 text-primary-600" />
-                <span className="ml-2 text-xl font-bold text-gray-900">Receptio</span>
+    <div className="min-h-screen bg-[#f4f1ea] text-[#171821]">
+      <div className="border-b border-black/5 bg-[#f7f4ee]/95 backdrop-blur-xl">
+        <nav className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-start justify-between gap-3">
+              <Link to="/dashboard" className="flex min-w-0 items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#111118] text-[#f4efe5] shadow-[0_16px_40px_rgba(17,17,24,0.16)]">
+                  <Phone className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.28em] text-[#7a7267]">Receptio</p>
+                  <p className="truncate text-base font-semibold text-[#171821] sm:text-lg">Tableau de bord</p>
+                </div>
+              </Link>
+
+              <button
+                onClick={handleLogout}
+                className="inline-flex shrink-0 items-center gap-2 rounded-full border border-black/10 bg-white/80 px-3 py-2 text-sm font-medium text-[#171821] transition hover:bg-white"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Déconnexion</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 rounded-2xl border border-black/5 bg-white/70 px-4 py-3 shadow-sm">
+                <p className="text-[11px] uppercase tracking-[0.24em] text-[#8b8478]">Compte actif</p>
+                <p className="mt-1 truncate text-sm font-medium text-[#171821]">{userLabel}</p>
               </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+
+              <div className="hidden flex-wrap gap-2 sm:flex">
                 {navItems.map((item) => {
                   const Icon = item.icon;
                   const isActive = location.pathname === item.path;
+
                   return (
                     <Link
                       key={item.path}
                       to={item.path}
-                      className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
                         isActive
-                          ? 'border-primary-500 text-gray-900'
-                          : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                          ? 'bg-[#111118] text-white shadow-[0_14px_30px_rgba(17,17,24,0.18)]'
+                          : 'border border-black/10 bg-white/70 text-[#4f4b45] hover:bg-white'
                       }`}
                     >
-                      <Icon className="h-4 w-4 mr-2" />
+                      <Icon className="h-4 w-4" />
                       {item.label}
                     </Link>
                   );
                 })}
               </div>
             </div>
-            <div className="flex items-center">
-              <span className="text-sm text-gray-700 mr-4">
-                {user?.email}
-              </span>
-              <button
-                onClick={handleLogout}
-                className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200"
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Déconnexion
-              </button>
-            </div>
           </div>
-        </div>
-      </nav>
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        </nav>
+      </div>
+
+      <main className="mx-auto max-w-7xl px-4 py-5 pb-24 sm:px-6 sm:py-8 sm:pb-8 lg:px-8">
         {children}
       </main>
+
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-[#fbf8f3]/95 px-3 py-3 backdrop-blur-xl sm:hidden">
+        <div className="mx-auto grid max-w-md grid-cols-3 gap-2 rounded-2xl border border-black/5 bg-white/80 p-2 shadow-[0_-12px_30px_rgba(17,17,24,0.08)]">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-2 text-[11px] font-medium transition ${
+                  isActive
+                    ? 'bg-[#111118] text-white'
+                    : 'text-[#625d55] hover:bg-black/[0.04]'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
