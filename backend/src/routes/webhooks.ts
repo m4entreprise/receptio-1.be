@@ -3,6 +3,7 @@ import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
 import { detectIntent, generateResponse, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
 import { buildKnowledgeBaseContext, defaultEscalationPolicy, getCompanyOfferBSettings, shouldUseOfferBAgent } from '../services/offerB';
+import { shouldUseOfferBStreamingPipeline } from '../services/twilioMediaStreams';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -71,6 +72,12 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
          VALUES ($1, $2, $3)`,
         [callId, 'twilio.offer_b.started', { settings: offerBSettings, callSid: payload.CallSid }]
       );
+
+      if (shouldUseOfferBStreamingPipeline()) {
+        const streamUrl = buildOfferBStreamingUrl(baseUrl, callId, company.id);
+        res.type('text/xml').send(buildOfferBStreamingTwiml(streamUrl));
+        return;
+      }
 
       res.type('text/xml').send(buildOfferBWelcomeTwiml(baseUrl, company, callId, offerBSettings));
       return;
@@ -448,6 +455,18 @@ function getBaseUrl(req: Request): string {
   return (process.env.PUBLIC_WEBHOOK_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
 }
 
+function toWebSocketBaseUrl(baseUrl: string): string {
+  if (baseUrl.startsWith('https://')) {
+    return `wss://${baseUrl.slice('https://'.length)}`;
+  }
+
+  if (baseUrl.startsWith('http://')) {
+    return `ws://${baseUrl.slice('http://'.length)}`;
+  }
+
+  return baseUrl;
+}
+
 function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
@@ -456,6 +475,17 @@ function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: st
   return buildTwiml(
     `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
   );
+}
+
+function buildOfferBStreamingUrl(baseUrl: string, callId: string, companyId: string): string {
+  return joinUrl(
+    toWebSocketBaseUrl(baseUrl),
+    `/api/media-streams/twilio?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`
+  );
+}
+
+function buildOfferBStreamingTwiml(streamUrl: string): string {
+  return buildTwiml(`<Connect><Stream url="${escapeXml(streamUrl)}" /></Connect>`);
 }
 
 function buildOfferBWelcomeTwiml(baseUrl: string, company: any, callId: string, settings: any): string {

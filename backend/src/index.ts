@@ -2,10 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
 import { connectRedis } from './config/redis';
 import { errorHandler } from './middleware/errorHandler';
+import { attachTwilioMediaStreamsServer } from './services/twilioMediaStreams';
 import logger from './utils/logger';
 
 import authRoutes from './routes/auth';
@@ -50,12 +52,15 @@ app.use('/api/webhooks', webhooksRoutes);
 
 app.use(errorHandler);
 
+const server = createServer(app);
+attachTwilioMediaStreamsServer(server);
+
 const startServer = async () => {
   try {
     await connectRedis();
     logger.info('Redis connected');
 
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
       console.log(`🚀 Receptio API running on http://localhost:${PORT}`);
       console.log(`📊 Health check: http://localhost:${PORT}/health`);

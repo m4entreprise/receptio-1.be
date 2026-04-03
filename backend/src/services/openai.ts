@@ -81,6 +81,63 @@ function hasMeaningfulTranscription(transcription: string): boolean {
   return normalizeTranscription(transcription).length > 3;
 }
 
+export async function transcribeAudioBuffer(
+  audioBuffer: Buffer,
+  options: {
+    fileName?: string;
+    language?: string;
+    mimeType?: string;
+  } = {}
+): Promise<{
+  text: string;
+  confidence: number;
+  language: string;
+}> {
+  try {
+    ensureOpenAiConfigured();
+
+    const formData = new FormData();
+    const language = options.language || 'fr';
+    const mimeType = options.mimeType || 'audio/wav';
+    const fileName = options.fileName || 'audio.wav';
+
+    formData.append('file', new Blob([audioBuffer], { type: mimeType }), fileName);
+    formData.append('model', OPENAI_STT_MODEL);
+    formData.append('language', language);
+
+    const response = await fetch(`${OPENAI_API_URL}/audio/transcriptions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: formData,
+    });
+
+    const data = await response.json() as { text?: string; error?: { message?: string } };
+
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'OpenAI transcription failed');
+    }
+
+    logger.info('Audio buffer transcribed with OpenAI', {
+      model: OPENAI_STT_MODEL,
+      textLength: data.text?.length || 0,
+      mimeType,
+    });
+
+    return {
+      text: data.text || '',
+      confidence: 1,
+      language,
+    };
+  } catch (error: any) {
+    logger.error('OpenAI audio buffer transcription error', {
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
 export async function transcribeAudio(audioUrl: string, language: string = 'fr'): Promise<{
   text: string;
   confidence: number;
@@ -130,7 +187,7 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
   }
 }
 
-export async function textToSpeech(text: string): Promise<Buffer> {
+export async function textToSpeech(text: string, format: string = 'mp3'): Promise<Buffer> {
   try {
     ensureOpenAiConfigured();
 
@@ -140,7 +197,7 @@ export async function textToSpeech(text: string): Promise<Buffer> {
         model: OPENAI_TTS_MODEL,
         voice: OPENAI_TTS_VOICE,
         input: text,
-        format: 'mp3',
+        format,
       },
       {
         headers: {
