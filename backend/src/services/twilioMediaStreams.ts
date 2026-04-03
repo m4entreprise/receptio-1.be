@@ -26,6 +26,7 @@ interface StreamSessionState {
   fallbackToVoicemail: boolean;
   finalized: boolean;
   greetingSent: boolean;
+  initialized: boolean;
   greetingText: string;
   humanTransferNumber: string;
   knowledgeContext: string;
@@ -46,6 +47,7 @@ interface TwilioStreamStartEvent {
   event?: string;
   start?: {
     callSid?: string;
+    customParameters?: Record<string, string>;
     streamSid?: string;
   };
   streamSid?: string;
@@ -96,75 +98,57 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
   const callId = String(requestUrl.searchParams.get('callId') || '');
   const companyId = String(requestUrl.searchParams.get('companyId') || '');
 
-  if (!callId || !companyId || !OPENAI_API_KEY) {
+  if (!OPENAI_API_KEY) {
     logger.warn('Twilio media stream rejected', { callId, companyId, hasOpenAiKey: Boolean(OPENAI_API_KEY) });
     twilioSocket.close();
     return;
   }
 
-  try {
-    const [callContext, offerBSettings] = await Promise.all([
-      getStreamingCallContext(callId, companyId),
-      getCompanyOfferBSettings(companyId),
-    ]);
+  const state: StreamSessionState = {
+    callId,
+    callSid: '',
+    companyId,
+    companyName: '',
+    fallbackToVoicemail: false,
+    finalized: false,
+    greetingSent: false,
+    initialized: false,
+    greetingText: '',
+    humanTransferNumber: '',
+    knowledgeContext: '',
+    lastIntent: 'autre',
+    pendingAudioChunks: [],
+    pendingProcessScheduled: false,
+    playbackGeneration: 0,
+    processingUtterance: false,
+    silenceDurationMs: 0,
+    speechDetected: false,
+    speechDurationMs: 0,
+    streamSid: '',
+    transcriptMessages: [],
+    twilioStartedAt: null,
+  };
 
-    if (!callContext) {
-      logger.warn('Twilio media stream call context missing', { callId, companyId });
+  twilioSocket.on('message', (data) => {
+    void handleTwilioMessage(data, twilioSocket, state);
+  });
+
+  twilioSocket.on('close', async () => {
+    await finalizeStreamingCall(state, 'twilio_socket_closed');
+  });
+
+  twilioSocket.on('error', async (error) => {
+    logger.error('Twilio media stream socket error', { error: error.message, callId: state.callId, companyId: state.companyId });
+    await finalizeStreamingCall(state, 'twilio_socket_error');
+  });
+
+  if (callId && companyId) {
+    try {
+      await initializeStreamingSession(state, callId, companyId);
+    } catch (error: any) {
+      logger.error('Twilio media stream setup error', { error: error.message, callId, companyId });
       twilioSocket.close();
-      return;
     }
-
-    const knowledgeContext = offerBSettings.knowledgeBaseEnabled
-      ? await buildKnowledgeBaseContext(companyId)
-      : '';
-
-    await ensureConversationExists(callId);
-    await ensureCallSummaryExists(callId);
-    await appendCallEvent(callId, 'twilio.media_stream.connection_opened', {
-      companyId,
-      provider: 'twilio',
-      mode: 'stt_llm_tts',
-    });
-
-    const state: StreamSessionState = {
-      callId,
-      callSid: callContext.callSid,
-      companyId,
-      companyName: callContext.companyName,
-      fallbackToVoicemail: offerBSettings.fallbackToVoicemail,
-      finalized: false,
-      greetingSent: false,
-      greetingText: offerBSettings.greetingText || `Bonjour, vous êtes bien chez ${callContext.companyName}. Comment puis-je vous aider aujourd’hui ?`,
-      humanTransferNumber: offerBSettings.humanTransferNumber,
-      knowledgeContext,
-      lastIntent: 'autre',
-      pendingAudioChunks: [],
-      pendingProcessScheduled: false,
-      playbackGeneration: 0,
-      processingUtterance: false,
-      silenceDurationMs: 0,
-      speechDetected: false,
-      speechDurationMs: 0,
-      streamSid: '',
-      transcriptMessages: [],
-      twilioStartedAt: null,
-    };
-
-    twilioSocket.on('message', (data) => {
-      void handleTwilioMessage(data, twilioSocket, state);
-    });
-
-    twilioSocket.on('close', async () => {
-      await finalizeStreamingCall(state, 'twilio_socket_closed');
-    });
-
-    twilioSocket.on('error', async (error) => {
-      logger.error('Twilio media stream socket error', { error: error.message, callId });
-      await finalizeStreamingCall(state, 'twilio_socket_error');
-    });
-  } catch (error: any) {
-    logger.error('Twilio media stream setup error', { error: error.message, callId, companyId });
-    twilioSocket.close();
   }
 }
 
@@ -184,6 +168,34 @@ async function handleTwilioMessage(
   switch (eventType) {
     case 'start': {
       const startEvent = payload as TwilioStreamStartEvent;
+      const customParameters = startEvent.start?.customParameters || {};
+      const resolvedCallId = state.callId || String(customParameters.callId || '');
+      const resolvedCompanyId = state.companyId || String(customParameters.companyId || '');
+
+      if (!state.initialized) {
+        if (!resolvedCallId || !resolvedCompanyId) {
+          logger.warn('Twilio media stream rejected', {
+            callId: resolvedCallId,
+            companyId: resolvedCompanyId,
+            hasOpenAiKey: Boolean(OPENAI_API_KEY),
+          });
+          twilioSocket.close();
+          return;
+        }
+
+        try {
+          await initializeStreamingSession(state, resolvedCallId, resolvedCompanyId);
+        } catch (error: any) {
+          logger.error('Twilio media stream setup error', {
+            error: error.message,
+            callId: resolvedCallId,
+            companyId: resolvedCompanyId,
+          });
+          twilioSocket.close();
+          return;
+        }
+      }
+
       state.streamSid = startEvent.start?.streamSid || startEvent.streamSid || '';
       state.callSid = startEvent.start?.callSid || state.callSid;
       state.twilioStartedAt = Date.now();
@@ -205,6 +217,10 @@ async function handleTwilioMessage(
       break;
     }
     case 'media': {
+      if (!state.initialized) {
+        return;
+      }
+
       const mediaEvent = payload as TwilioStreamMediaEvent;
       const audioPayload = String(mediaEvent.media?.payload || '');
 
@@ -252,6 +268,13 @@ async function handleTwilioMessage(
       break;
     }
     case 'stop': {
+      if (!state.initialized || !state.callId) {
+        if (twilioSocket.readyState === WebSocket.OPEN) {
+          twilioSocket.close();
+        }
+        break;
+      }
+
       const stopEvent = payload as TwilioStreamStopEvent;
       await appendCallEvent(state.callId, 'twilio.media_stream.stopped', {
         callSid: stopEvent.stop?.callSid || state.callSid,
@@ -266,6 +289,40 @@ async function handleTwilioMessage(
     default:
       break;
   }
+}
+
+async function initializeStreamingSession(state: StreamSessionState, callId: string, companyId: string) {
+  const [callContext, offerBSettings] = await Promise.all([
+    getStreamingCallContext(callId, companyId),
+    getCompanyOfferBSettings(companyId),
+  ]);
+
+  if (!callContext) {
+    logger.warn('Twilio media stream call context missing', { callId, companyId });
+    throw new Error('Streaming call context missing');
+  }
+
+  const knowledgeContext = offerBSettings.knowledgeBaseEnabled
+    ? await buildKnowledgeBaseContext(companyId)
+    : '';
+
+  await ensureConversationExists(callId);
+  await ensureCallSummaryExists(callId);
+  await appendCallEvent(callId, 'twilio.media_stream.connection_opened', {
+    companyId,
+    provider: 'twilio',
+    mode: 'stt_llm_tts',
+  });
+
+  state.callId = callId;
+  state.callSid = callContext.callSid;
+  state.companyId = companyId;
+  state.companyName = callContext.companyName;
+  state.fallbackToVoicemail = offerBSettings.fallbackToVoicemail;
+  state.greetingText = offerBSettings.greetingText || `Bonjour, vous êtes bien chez ${callContext.companyName}. Comment puis-je vous aider aujourd’hui ?`;
+  state.humanTransferNumber = offerBSettings.humanTransferNumber;
+  state.knowledgeContext = knowledgeContext;
+  state.initialized = true;
 }
 
 async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSessionState) {
@@ -583,7 +640,7 @@ async function appendCallEvent(callId: string, eventType: string, data: Record<s
 }
 
 async function finalizeStreamingCall(state: StreamSessionState, reason: string) {
-  if (state.finalized) {
+  if (state.finalized || !state.callId) {
     return;
   }
 

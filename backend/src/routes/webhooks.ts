@@ -75,7 +75,7 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
 
       if (shouldUseOfferBStreamingPipeline()) {
         const streamUrl = buildOfferBStreamingUrl(baseUrl, callId, company.id);
-        res.type('text/xml').send(buildOfferBStreamingTwiml(streamUrl));
+        res.type('text/xml').send(buildOfferBStreamingTwiml(streamUrl, callId, company.id));
         return;
       }
 
@@ -455,6 +455,10 @@ function getBaseUrl(req: Request): string {
   return (process.env.PUBLIC_WEBHOOK_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
 }
 
+function joinUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
 function toWebSocketBaseUrl(baseUrl: string): string {
   if (baseUrl.startsWith('https://')) {
     return `wss://${baseUrl.slice('https://'.length)}`;
@@ -467,16 +471,6 @@ function toWebSocketBaseUrl(baseUrl: string): string {
   return baseUrl;
 }
 
-function joinUrl(baseUrl: string, path: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
-}
-
-function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string): string {
-  return buildTwiml(
-    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
-  );
-}
-
 function buildOfferBStreamingUrl(baseUrl: string, callId: string, companyId: string): string {
   return joinUrl(
     toWebSocketBaseUrl(baseUrl),
@@ -484,8 +478,16 @@ function buildOfferBStreamingUrl(baseUrl: string, callId: string, companyId: str
   );
 }
 
-function buildOfferBStreamingTwiml(streamUrl: string): string {
-  return buildTwiml(`<Connect><Stream url="${escapeXml(streamUrl)}" /></Connect>`);
+function buildOfferBStreamingTwiml(streamUrl: string, callId: string, companyId: string): string {
+  return buildTwiml(
+    `<Connect><Stream url="${escapeXml(streamUrl)}"><Parameter name="callId" value="${escapeXml(callId)}" /><Parameter name="companyId" value="${escapeXml(companyId)}" /></Stream></Connect>`
+  );
+}
+
+function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string): string {
+  return buildTwiml(
+    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+  );
 }
 
 function buildOfferBWelcomeTwiml(baseUrl: string, company: any, callId: string, settings: any): string {
