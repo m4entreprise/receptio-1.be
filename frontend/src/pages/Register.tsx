@@ -24,7 +24,7 @@ export default function Register() {
 
     try {
       await register(formData);
-      navigate('/');
+      navigate('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Erreur lors de l\'inscription');
     } finally {

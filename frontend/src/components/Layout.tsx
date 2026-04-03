@@ -18,7 +18,7 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   const navItems = [
-    { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/calls', icon: Phone, label: 'Appels' },
     { path: '/settings', icon: Settings, label: 'Paramètres' },
   ];
