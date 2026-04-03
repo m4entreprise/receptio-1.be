@@ -165,10 +165,8 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
 
     const conversation = await getOrCreateConversation(call.id);
     const consecutiveFailures = Number(conversation.context?.consecutiveFailures || 0);
-    const requestedByCaller = /humain|personne|conseiller|rappel|rappeler|transf[ée]r|coll[èe]gue/i.test(speechResult);
-    const knowledgeContext = offerBSettings.knowledgeBaseEnabled
-      ? await buildKnowledgeBaseContext(company.id, speechResult)
-      : '';
+    const fastIntent = detectOfferBIntent(speechResult);
+    const requestedByCaller = fastIntent.intent === 'human_transfer';
 
     if (!speechResult) {
       const escalation = defaultEscalationPolicy.evaluate({
@@ -205,7 +203,51 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
       return;
     }
 
-    const intentData = await detectIntent(speechResult);
+    if (fastIntent.intent === 'greeting') {
+      const greetingReply = `Bonjour, je suis le réceptionniste de ${company.name}. Comment puis-je vous aider ?`;
+
+      await persistConversationTurn(call.id, conversation, speechResult, greetingReply, {
+        consecutiveFailures: 0,
+        lastIntent: 'autre',
+        lastAction: 'agent_replied',
+      });
+      await upsertOfferBSummary(call.id, speechResult, 'autre');
+      await registerOfferBAction(call.id, 'agent_replied', { intent: 'autre', input: speechResult });
+
+      res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, greetingReply));
+      return;
+    }
+
+    if (fastIntent.intent === 'goodbye') {
+      const goodbyeReply = 'Merci, au revoir et bonne journée.';
+
+      await persistConversationTurn(call.id, conversation, speechResult, goodbyeReply, {
+        consecutiveFailures: 0,
+        lastIntent: 'autre',
+        lastAction: 'call_closed_by_agent',
+      });
+      await upsertOfferBSummary(call.id, speechResult, 'autre');
+      await registerOfferBAction(call.id, 'agent_closed_call', { input: speechResult });
+      await query(
+        `UPDATE calls
+         SET status = $1, ended_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        ['completed', call.id]
+      );
+
+      res.type('text/xml').send(buildOfferBHangupTwiml(baseUrl, goodbyeReply));
+      return;
+    }
+
+    const knowledgeContext = offerBSettings.knowledgeBaseEnabled
+      ? await buildKnowledgeBaseContext(company.id, speechResult)
+      : '';
+
+    const intentData = {
+      intent: mapFastIntentToSummaryIntent(fastIntent.intent),
+      confidence: fastIntent.confidence,
+      entities: {},
+    };
     const agentReply = await generateOfferBReply({
       companyName: company.name,
       callerInput: speechResult,
@@ -429,6 +471,11 @@ function buildOfferBFollowupTwiml(baseUrl: string, callId: string, prompt: strin
   return buildGatherTwiml(actionUrl, promptUrl);
 }
 
+function buildOfferBHangupTwiml(baseUrl: string, prompt: string): string {
+  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?text=${encodeURIComponent(prompt)}`);
+  return buildTwiml(`<Play>${escapeXml(promptUrl)}</Play><Hangup />`);
+}
+
 function buildGatherTwiml(actionUrl: string, promptUrl: string): string {
   return buildTwiml(
     `<Gather input="speech" action="${escapeXml(actionUrl)}" actionOnEmptyResult="true" method="POST" language="fr-FR" speechTimeout="auto" timeout="5"><Play>${escapeXml(promptUrl)}</Play></Gather>`
@@ -588,6 +635,7 @@ async function registerOfferBAction(callId: string, eventType: string, data: Rec
     fallback_to_voicemail: 'Retour automatique vers la messagerie de l’offre A.',
     agent_replied: 'Réponse temps réel fournie par le réceptionniste IA.',
     agent_needs_clarification: 'L’agent a demandé une reformulation au lieu d’escalader immédiatement.',
+    agent_closed_call: 'L’agent a conclu l’appel après une formule de clôture.',
   };
 
   const summaryResult = await query(
@@ -637,6 +685,47 @@ async function generateOfferBReply(params: {
   );
 
   return response.trim();
+}
+
+function detectOfferBIntent(text: string): { intent: 'greeting' | 'goodbye' | 'human_transfer' | 'info' | 'other'; confidence: number } {
+  const normalizedText = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
+  if (!normalizedText) {
+    return { intent: 'other', confidence: 0 };
+  }
+
+  if (/^(salut|bonjour|bonsoir|allo|hello)[ !?.]*$/.test(normalizedText)) {
+    return { intent: 'greeting', confidence: 0.95 };
+  }
+
+  if (/(au revoir|a bientot|a plus|merci au revoir|bonne journee|bye)/.test(normalizedText)) {
+    return { intent: 'goodbye', confidence: 0.95 };
+  }
+
+  if (/(humain|personne|conseiller|rappel|rappeler|transfer|transfert|collegue)/.test(normalizedText)) {
+    return { intent: 'human_transfer', confidence: 0.95 };
+  }
+
+  if (/(horaire|heure|ouvert|ouverture|ferme|adresse|service|prix|tarif|rendez-vous|rdv|information|infos)/.test(normalizedText)) {
+    return { intent: 'info', confidence: 0.8 };
+  }
+
+  return { intent: 'other', confidence: 0.5 };
+}
+
+function mapFastIntentToSummaryIntent(intent: 'greeting' | 'goodbye' | 'human_transfer' | 'info' | 'other'): string {
+  switch (intent) {
+    case 'human_transfer':
+      return 'autre';
+    case 'info':
+      return 'info';
+    default:
+      return 'autre';
+  }
 }
 
 async function handleCallInitiated(payload: any) {
