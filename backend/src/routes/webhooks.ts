@@ -52,7 +52,20 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
     const baseUrl = getBaseUrl(req);
     const offerBSettings = await getCompanyOfferBSettings(company.id);
 
+    await query(
+      `INSERT INTO call_events (call_id, event_type, data)
+       VALUES ($1, $2, $3)`,
+      [callId, 'twilio.voice.inbound', payload]
+    );
+
+    await query(
+      `UPDATE calls SET status = $1 WHERE id = $2`,
+      ['answered', callId]
+    );
+
     if (shouldUseOfferBAgent(offerBSettings)) {
+      await getOrCreateConversation(callId);
+
       await query(
         `INSERT INTO call_events (call_id, event_type, data)
          VALUES ($1, $2, $3)`,
@@ -97,7 +110,7 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/twilio/agent-turn', async (req: Request, res: Response) => {
+router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
   try {
     const { callId } = req.query;
     const speechResult = String(req.body.SpeechResult || '').trim();
@@ -228,7 +241,31 @@ router.post('/twilio/agent-turn', async (req: Request, res: Response) => {
     res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, agentReply));
   } catch (error: any) {
     logger.error('Twilio Offer B agent turn error', { error: error.message });
-    res.type('text/xml').send(buildTwiml('<Hangup />'));
+
+    try {
+      const { callId } = req.query;
+      const fallbackCallResult = await query(
+        `SELECT c.id, c.company_id
+         FROM calls c
+         WHERE c.id = $1`,
+        [String(callId || '')]
+      );
+
+      if (fallbackCallResult.rows.length > 0) {
+        const call = fallbackCallResult.rows[0];
+        const baseUrl = getBaseUrl(req);
+        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${call.company_id}`);
+        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+
+        await registerOfferBAction(call.id, 'fallback_to_voicemail', { reason: 'agent_turn_error' });
+        res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+        return;
+      }
+    } catch (fallbackError: any) {
+      logger.error('Twilio Offer B fallback error', { error: fallbackError.message });
+    }
+
+    res.type('text/xml').send(buildTwiml('<Say language="fr-FR" voice="alice">Une erreur est survenue. Merci de rappeler plus tard.</Say><Hangup />'));
   }
 });
 
@@ -357,7 +394,7 @@ function buildOfferBFollowupTwiml(baseUrl: string, callId: string, prompt: strin
 
 function buildGatherTwiml(actionUrl: string, prompt: string): string {
   return buildTwiml(
-    `<Gather input="speech" action="${escapeXml(actionUrl)}" method="POST" language="fr-FR" speechTimeout="auto" timeout="3"><Say language="fr-FR" voice="alice">${escapeXml(prompt)}</Say></Gather><Redirect method="POST">${escapeXml(actionUrl)}</Redirect>`
+    `<Gather input="speech" action="${escapeXml(actionUrl)}" actionOnEmptyResult="true" method="POST" language="fr-FR" speechTimeout="auto" timeout="5"><Say language="fr-FR" voice="alice">${escapeXml(prompt)}</Say></Gather>`
   );
 }
 
