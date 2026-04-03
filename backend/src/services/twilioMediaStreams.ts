@@ -7,6 +7,10 @@ import { generateResponse, summarizeCall, textToSpeech, transcribeAudioBuffer } 
 import logger from '../utils/logger';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_STT_MODEL = process.env.OPENAI_STT_MODEL || 'gpt-4o-mini-transcribe';
+const OPENAI_REALTIME_ENABLED = process.env.OFFER_B_OPENAI_REALTIME_ENABLED === 'true';
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-4o-realtime-preview';
+const OPENAI_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || process.env.OPENAI_TTS_VOICE || 'ash';
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const STREAMING_ENABLED = process.env.OFFER_B_STREAMING_ENABLED !== 'false';
@@ -29,6 +33,7 @@ interface StreamSessionState {
   finalized: boolean;
   greetingSent: boolean;
   initialized: boolean;
+  openAiRealtimeSocket: WebSocket | null;
   greetingText: string;
   humanTransferNumber: string;
   knowledgeContext: string;
@@ -37,6 +42,13 @@ interface StreamSessionState {
   pendingProcessScheduled: boolean;
   playbackGeneration: number;
   processingUtterance: boolean;
+  realtimeActive: boolean;
+  realtimeAssistantTranscriptBuffer: string;
+  realtimeCloseAfterResponse: boolean;
+  realtimeGreetingRequested: boolean;
+  realtimePendingActionType: string;
+  realtimePendingAssistantSource: string;
+  realtimeReady: boolean;
   silenceDurationMs: number;
   speechDetected: boolean;
   speechDurationMs: number;
@@ -116,6 +128,7 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     finalized: false,
     greetingSent: false,
     initialized: false,
+    openAiRealtimeSocket: null,
     greetingText: '',
     humanTransferNumber: '',
     knowledgeContext: '',
@@ -124,6 +137,13 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     pendingProcessScheduled: false,
     playbackGeneration: 0,
     processingUtterance: false,
+    realtimeActive: false,
+    realtimeAssistantTranscriptBuffer: '',
+    realtimeCloseAfterResponse: false,
+    realtimeGreetingRequested: false,
+    realtimePendingActionType: 'agent_replied',
+    realtimePendingAssistantSource: 'realtime_llm',
+    realtimeReady: false,
     silenceDurationMs: 0,
     speechDetected: false,
     speechDurationMs: 0,
@@ -137,11 +157,13 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
   });
 
   twilioSocket.on('close', async () => {
+    closeOpenAiRealtimeSocket(state);
     await finalizeStreamingCall(state, 'twilio_socket_closed');
   });
 
   twilioSocket.on('error', async (error) => {
     logger.error('Twilio media stream socket error', { error: error.message, callId: state.callId, companyId: state.companyId });
+    closeOpenAiRealtimeSocket(state);
     await finalizeStreamingCall(state, 'twilio_socket_error');
   });
 
@@ -208,7 +230,11 @@ async function handleTwilioMessage(
         streamSid: state.streamSid,
       });
 
-      if (!state.greetingSent) {
+      if (OPENAI_REALTIME_ENABLED) {
+        await initializeOpenAiRealtimeBridge(twilioSocket, state);
+      }
+
+      if (!state.greetingSent && !state.realtimeActive) {
         state.greetingSent = true;
         void speakAssistantText(twilioSocket, state, state.greetingText, {
           actionType: 'agent_replied',
@@ -240,6 +266,14 @@ async function handleTwilioMessage(
       const audioBuffer = Buffer.from(audioPayload, 'base64');
 
       if (audioBuffer.length === 0) {
+        return;
+      }
+
+      if (state.realtimeActive && state.openAiRealtimeSocket?.readyState === WebSocket.OPEN) {
+        sendOpenAiRealtimeEvent(state, {
+          type: 'input_audio_buffer.append',
+          audio: audioPayload,
+        });
         return;
       }
 
@@ -296,6 +330,7 @@ async function handleTwilioMessage(
         callSid: stopEvent.stop?.callSid || state.callSid,
         streamSid: stopEvent.streamSid || state.streamSid,
       });
+      closeOpenAiRealtimeSocket(state);
       await finalizeStreamingCall(state, 'twilio_stop_event');
       if (twilioSocket.readyState === WebSocket.OPEN) {
         twilioSocket.close();
@@ -327,7 +362,7 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
   await appendCallEvent(callId, 'twilio.media_stream.connection_opened', {
     companyId,
     provider: 'twilio',
-    mode: 'stt_llm_tts',
+    mode: OPENAI_REALTIME_ENABLED ? 'openai_realtime' : 'stt_llm_tts',
   });
 
   state.callId = callId;
@@ -339,6 +374,264 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
   state.humanTransferNumber = offerBSettings.humanTransferNumber;
   state.knowledgeContext = knowledgeContext;
   state.initialized = true;
+}
+
+async function initializeOpenAiRealtimeBridge(twilioSocket: WebSocket, state: StreamSessionState): Promise<boolean> {
+  if (!OPENAI_REALTIME_ENABLED || !OPENAI_API_KEY) {
+    return false;
+  }
+
+  if (state.openAiRealtimeSocket && state.openAiRealtimeSocket.readyState === WebSocket.OPEN) {
+    state.realtimeActive = true;
+    return true;
+  }
+
+  const realtimeSocket = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(OPENAI_REALTIME_MODEL)}`, {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'OpenAI-Beta': 'realtime=v1',
+    },
+  });
+
+  state.openAiRealtimeSocket = realtimeSocket;
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+
+    const finish = (result: boolean) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      resolve(result);
+    };
+
+    const timeout = setTimeout(() => {
+      logger.warn('OpenAI realtime initialization timed out', {
+        callId: state.callId,
+        companyId: state.companyId,
+      });
+      closeOpenAiRealtimeSocket(state);
+      finish(false);
+    }, 4000);
+
+    realtimeSocket.on('open', () => {
+      state.realtimeActive = true;
+
+      sendOpenAiRealtimeEvent(state, {
+        type: 'session.update',
+        session: {
+          modalities: ['audio', 'text'],
+          instructions: buildRealtimeInstructions(state),
+          voice: OPENAI_REALTIME_VOICE,
+          input_audio_format: 'g711_ulaw',
+          output_audio_format: 'g711_ulaw',
+          input_audio_transcription: {
+            model: OPENAI_STT_MODEL,
+          },
+          turn_detection: {
+            type: 'server_vad',
+            interrupt_response: true,
+            create_response: false,
+            prefix_padding_ms: 240,
+            silence_duration_ms: SILENCE_THRESHOLD_MS,
+          },
+          temperature: 0.4,
+        },
+      });
+    });
+
+    realtimeSocket.on('message', (rawData) => {
+      void handleOpenAiRealtimeMessage(rawData, twilioSocket, state, finish, timeout);
+    });
+
+    realtimeSocket.on('close', () => {
+      clearTimeout(timeout);
+      state.realtimeActive = false;
+      state.realtimeReady = false;
+      state.openAiRealtimeSocket = null;
+      finish(false);
+    });
+
+    realtimeSocket.on('error', (error) => {
+      logger.error('OpenAI realtime socket error', {
+        error: error.message,
+        callId: state.callId,
+        companyId: state.companyId,
+      });
+      clearTimeout(timeout);
+      closeOpenAiRealtimeSocket(state);
+      finish(false);
+    });
+  });
+}
+
+async function handleOpenAiRealtimeMessage(
+  rawData: RawData,
+  twilioSocket: WebSocket,
+  state: StreamSessionState,
+  finishInitialization: (result: boolean) => void,
+  initializationTimeout: NodeJS.Timeout
+) {
+  const payload = parseSocketMessage(rawData) as { [key: string]: any } | null;
+
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
+
+  const eventType = String(payload.type || '');
+
+  switch (eventType) {
+    case 'session.updated': {
+      clearTimeout(initializationTimeout);
+      state.realtimeReady = true;
+      finishInitialization(true);
+
+      if (!state.realtimeGreetingRequested && !state.greetingSent) {
+        state.greetingSent = true;
+        state.realtimeGreetingRequested = true;
+        requestOpenAiRealtimeResponse(state, {
+          actionType: 'agent_replied',
+          closeAfterPlayback: false,
+          instructions: `Commence l'appel maintenant en disant exactement : ${state.greetingText}`,
+          source: 'realtime_greeting',
+        });
+      }
+      break;
+    }
+    case 'input_audio_buffer.speech_started': {
+      state.playbackGeneration += 1;
+      state.assistantPlaybackUntil = 0;
+
+      if (state.streamSid && twilioSocket.readyState === WebSocket.OPEN) {
+        twilioSocket.send(JSON.stringify({ event: 'clear', streamSid: state.streamSid }));
+      }
+
+      sendOpenAiRealtimeEvent(state, { type: 'response.cancel' });
+      break;
+    }
+    case 'conversation.item.input_audio_transcription.completed': {
+      const callerText = normalizeCallerText(String(payload.transcript || ''));
+
+      if (!callerText) {
+        break;
+      }
+
+      await appendTranscriptLine(state.callId, 'Client', callerText);
+      state.transcriptMessages.push({ role: 'user', content: callerText });
+      trimConversationHistory(state);
+
+      const detectedIntent = detectStreamingIntent(callerText);
+      state.lastIntent = detectedIntent.summaryIntent;
+
+      if (detectedIntent.kind === 'human_transfer' && state.humanTransferNumber) {
+        await appendOfferBAction(state.callId, 'transfer_to_human', {
+          input: callerText,
+          transferNumber: state.humanTransferNumber,
+          source: 'realtime_user_request',
+        });
+        await redirectTwilioCall(state.callSid, buildTransferTwiml(state.humanTransferNumber));
+        closeOpenAiRealtimeSocket(state);
+        await finalizeStreamingCall(state, 'human_transfer_requested');
+
+        if (twilioSocket.readyState === WebSocket.OPEN) {
+          twilioSocket.close();
+        }
+        break;
+      }
+
+      if (detectedIntent.kind === 'goodbye') {
+        sendOpenAiRealtimeEvent(state, { type: 'response.cancel' });
+        requestOpenAiRealtimeResponse(state, {
+          actionType: 'agent_closed_call',
+          closeAfterPlayback: true,
+          instructions: 'Réponds exactement : Merci, au revoir et bonne journée.',
+          source: 'realtime_goodbye',
+        });
+        break;
+      }
+
+      if (detectedIntent.kind === 'greeting') {
+        requestOpenAiRealtimeResponse(state, {
+          actionType: 'agent_replied',
+          closeAfterPlayback: false,
+          instructions: `Réponds brièvement avec cette idée : Bonjour, je suis le réceptionniste de ${state.companyName}. Comment puis-je vous aider ?`,
+          source: 'realtime_greeting_followup',
+        });
+        break;
+      }
+
+      requestOpenAiRealtimeResponse(state, {
+        actionType: 'agent_replied',
+        closeAfterPlayback: false,
+        source: 'realtime_llm',
+      });
+      break;
+    }
+    case 'response.audio.delta': {
+      const audioDelta = String(payload.delta || '');
+
+      if (!audioDelta || !state.streamSid || twilioSocket.readyState !== WebSocket.OPEN) {
+        break;
+      }
+
+      state.assistantPlaybackUntil = Date.now() + 400;
+      twilioSocket.send(JSON.stringify({
+        event: 'media',
+        streamSid: state.streamSid,
+        media: {
+          payload: audioDelta,
+        },
+      }));
+      break;
+    }
+    case 'response.audio_transcript.delta': {
+      state.realtimeAssistantTranscriptBuffer += String(payload.delta || '');
+      break;
+    }
+    case 'response.audio_transcript.done': {
+      const assistantText = normalizeCallerText(String(payload.transcript || state.realtimeAssistantTranscriptBuffer || ''));
+      state.realtimeAssistantTranscriptBuffer = '';
+
+      if (!assistantText) {
+        break;
+      }
+
+      await appendTranscriptLine(state.callId, 'IA', assistantText);
+      state.transcriptMessages.push({ role: 'assistant', content: assistantText });
+      trimConversationHistory(state);
+      await appendOfferBAction(state.callId, state.realtimePendingActionType, {
+        source: state.realtimePendingAssistantSource,
+        transcript: assistantText,
+      });
+      break;
+    }
+    case 'response.done': {
+      state.assistantPlaybackUntil = 0;
+
+      if (state.realtimeCloseAfterResponse) {
+        state.realtimeCloseAfterResponse = false;
+        closeOpenAiRealtimeSocket(state);
+        await finalizeStreamingCall(state, 'goodbye_completed');
+
+        if (twilioSocket.readyState === WebSocket.OPEN) {
+          twilioSocket.close();
+        }
+      }
+      break;
+    }
+    case 'error': {
+      logger.error('OpenAI realtime event error', {
+        callId: state.callId,
+        companyId: state.companyId,
+        error: payload.error?.message || 'Unknown realtime error',
+      });
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSessionState) {
@@ -463,14 +756,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
 }
 
 async function generateStreamingReply(state: StreamSessionState, callerText: string): Promise<string> {
-  const systemPrompt = [
-    `Tu es le réceptionniste téléphonique de ${state.companyName}.`,
-    'Réponds en français, en deux phrases maximum, de manière utile et concise.',
-    'Si le client demande explicitement un humain, un rappel ou un transfert, réponds exactement __TRANSFER__.',
-    'Si une information manque, n’invente pas et pose une seule question courte de clarification.',
-    state.knowledgeContext ? `Informations métier disponibles:\n${state.knowledgeContext}` : 'Aucune information métier fiable n’est disponible.',
-    state.humanTransferNumber ? `Numéro humain disponible : ${state.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.',
-  ].join('\n\n');
+  const systemPrompt = buildStreamingSystemPrompt(state);
 
   const messages = [
     ...state.transcriptMessages,
@@ -538,6 +824,89 @@ async function speakAssistantText(
       source: options.source,
     });
     throw error;
+  }
+}
+
+function buildStreamingSystemPrompt(state: StreamSessionState): string {
+  return [
+    `Tu es le réceptionniste téléphonique de ${state.companyName}.`,
+    'Réponds en français, en deux phrases maximum, de manière utile et concise.',
+    'Si le client demande explicitement un humain, un rappel ou un transfert, réponds exactement __TRANSFER__.',
+    'Si une information manque, n’invente pas et pose une seule question courte de clarification.',
+    state.knowledgeContext ? `Informations métier disponibles:\n${state.knowledgeContext}` : 'Aucune information métier fiable n’est disponible.',
+    state.humanTransferNumber ? `Numéro humain disponible : ${state.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.',
+  ].join('\n\n');
+}
+
+function buildRealtimeInstructions(state: StreamSessionState): string {
+  return [
+    `Tu es le réceptionniste téléphonique en temps réel de ${state.companyName}.`,
+    'Réponds toujours en français avec des phrases courtes, naturelles et utiles.',
+    'Ne dépasse pas deux phrases sauf nécessité absolue.',
+    'Si une information manque, dis-le franchement et pose une seule question courte.',
+    'Quand le client demande un humain, annonce brièvement que tu le transfères ; le backend gère techniquement le transfert.',
+    'Évite les listes et les formulations trop longues car la réponse est lue à voix haute au téléphone.',
+    state.knowledgeContext ? `Informations métier disponibles :\n${state.knowledgeContext}` : 'Aucune information métier fiable n’est disponible.',
+    state.humanTransferNumber ? `Numéro humain disponible : ${state.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.',
+  ].join('\n\n');
+}
+
+function requestOpenAiRealtimeResponse(
+  state: StreamSessionState,
+  options: {
+    actionType: string;
+    closeAfterPlayback: boolean;
+    instructions?: string;
+    source: string;
+  }
+): boolean {
+  if (!state.openAiRealtimeSocket || state.openAiRealtimeSocket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+
+  state.realtimeAssistantTranscriptBuffer = '';
+  state.realtimeCloseAfterResponse = options.closeAfterPlayback;
+  state.realtimePendingActionType = options.actionType;
+  state.realtimePendingAssistantSource = options.source;
+
+  const response: Record<string, unknown> = {
+    modalities: ['audio', 'text'],
+  };
+
+  if (options.instructions) {
+    response.instructions = options.instructions;
+  }
+
+  sendOpenAiRealtimeEvent(state, {
+    type: 'response.create',
+    response,
+  });
+
+  return true;
+}
+
+function sendOpenAiRealtimeEvent(state: StreamSessionState, payload: Record<string, unknown>) {
+  if (!state.openAiRealtimeSocket || state.openAiRealtimeSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  state.openAiRealtimeSocket.send(JSON.stringify(payload));
+}
+
+function closeOpenAiRealtimeSocket(state: StreamSessionState) {
+  const realtimeSocket = state.openAiRealtimeSocket;
+  state.openAiRealtimeSocket = null;
+  state.realtimeActive = false;
+  state.realtimeAssistantTranscriptBuffer = '';
+  state.realtimeCloseAfterResponse = false;
+  state.realtimeReady = false;
+
+  if (!realtimeSocket) {
+    return;
+  }
+
+  if (realtimeSocket.readyState === WebSocket.OPEN || realtimeSocket.readyState === WebSocket.CONNECTING) {
+    realtimeSocket.close();
   }
 }
 
