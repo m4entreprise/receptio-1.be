@@ -24,9 +24,21 @@ export default function Calls() {
 
   useEffect(() => {
     fetchCalls();
+
+    const intervalId = window.setInterval(() => {
+      fetchCalls(false);
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [statusFilter]);
 
-  const fetchCalls = async () => {
+  const fetchCalls = async (showLoader: boolean = true) => {
+    if (showLoader) {
+      setLoading(true);
+    }
+
     try {
       const params: Record<string, string | number> = { limit: 100 };
       if (statusFilter !== 'all') {
@@ -37,7 +49,9 @@ export default function Calls() {
     } catch (error) {
       console.error('Error fetching calls:', error);
     } finally {
-      setLoading(false);
+      if (showLoader) {
+        setLoading(false);
+      }
     }
   };
 

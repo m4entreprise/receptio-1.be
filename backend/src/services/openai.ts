@@ -73,6 +73,14 @@ function extractTextContent(content: unknown): string {
   return '';
 }
 
+function normalizeTranscription(transcription: string): string {
+  return transcription.replace(/\s+/g, ' ').trim();
+}
+
+function hasMeaningfulTranscription(transcription: string): boolean {
+  return normalizeTranscription(transcription).length > 3;
+}
+
 export async function transcribeAudio(audioUrl: string, language: string = 'fr'): Promise<{
   text: string;
   confidence: number;
@@ -208,6 +216,14 @@ export async function detectIntent(transcription: string): Promise<{
   entities: Record<string, unknown>;
 }> {
   try {
+    if (!hasMeaningfulTranscription(transcription)) {
+      return {
+        intent: 'autre',
+        confidence: 0,
+        entities: {},
+      };
+    }
+
     const systemPrompt = `Tu analyses des appels entrants pour une PME. Retourne uniquement un JSON valide avec les clés intent, confidence et entities. intent doit être parmi rdv, info, urgence, reclamation, autre.`;
 
     const response = await generateResponse(
@@ -234,6 +250,10 @@ export async function detectIntent(transcription: string): Promise<{
 
 export async function summarizeCall(transcription: string): Promise<string> {
   try {
+    if (!hasMeaningfulTranscription(transcription)) {
+      return 'Aucun message vocal exploitable n’a été détecté après le bip.';
+    }
+
     return await generateResponse(
       [{ role: 'user', content: `Résume cet appel en 2 ou 3 phrases maximum : ${transcription}` }],
       'Tu es un assistant qui résume les appels téléphoniques de manière concise, professionnelle et actionnable.'

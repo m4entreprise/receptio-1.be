@@ -26,9 +26,21 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
+
+    const intervalId = window.setInterval(() => {
+      fetchDashboardData(false);
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (showLoader: boolean = true) => {
+    if (showLoader) {
+      setLoading(true);
+    }
+
     try {
       const [callsRes] = await Promise.all([
         axios.get('/api/calls?limit=5'),
@@ -51,7 +63,9 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
-      setLoading(false);
+      if (showLoader) {
+        setLoading(false);
+      }
     }
   };
 
