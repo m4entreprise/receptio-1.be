@@ -1,5 +1,6 @@
 import { query } from '../config/database';
 import { KnowledgeBaseEntry, OfferBSettings } from '../types';
+import logger from '../utils/logger';
 
 export interface TelephonyProvider {
   provider: string;
@@ -50,34 +51,43 @@ export async function getCompanyOfferBSettings(companyId: string): Promise<Requi
 }
 
 export async function getKnowledgeBaseEntries(companyId: string, search?: string): Promise<KnowledgeBaseEntry[]> {
-  if (search?.trim()) {
+  try {
+    if (search?.trim()) {
+      const result = await query(
+        `SELECT id, company_id AS "companyId", title, category, content, priority, enabled, created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM knowledge_base_entries
+         WHERE company_id = $1
+           AND enabled = true
+           AND (
+             title ILIKE $2
+             OR COALESCE(category, '') ILIKE $2
+             OR content ILIKE $2
+           )
+         ORDER BY priority DESC, updated_at DESC
+         LIMIT 8`,
+        [companyId, `%${search.trim()}%`]
+      );
+
+      return result.rows;
+    }
+
     const result = await query(
       `SELECT id, company_id AS "companyId", title, category, content, priority, enabled, created_at AS "createdAt", updated_at AS "updatedAt"
        FROM knowledge_base_entries
-       WHERE company_id = $1
-         AND enabled = true
-         AND (
-           title ILIKE $2
-           OR COALESCE(category, '') ILIKE $2
-           OR content ILIKE $2
-         )
-       ORDER BY priority DESC, updated_at DESC
-       LIMIT 8`,
-      [companyId, `%${search.trim()}%`]
+       WHERE company_id = $1 AND enabled = true
+       ORDER BY priority DESC, updated_at DESC`,
+      [companyId]
     );
 
     return result.rows;
+  } catch (error: any) {
+    if (error?.code === '42P01') {
+      logger.warn('Knowledge base table missing, skipping Offer B company lookup', { companyId });
+      return [];
+    }
+
+    throw error;
   }
-
-  const result = await query(
-    `SELECT id, company_id AS "companyId", title, category, content, priority, enabled, created_at AS "createdAt", updated_at AS "updatedAt"
-     FROM knowledge_base_entries
-     WHERE company_id = $1 AND enabled = true
-     ORDER BY priority DESC, updated_at DESC`,
-    [companyId]
-  );
-
-  return result.rows;
 }
 
 export async function buildKnowledgeBaseContext(companyId: string, search?: string): Promise<string> {

@@ -452,7 +452,7 @@ async function getOrCreateConversation(callId: string) {
     `INSERT INTO conversations (call_id, state, context, messages)
      VALUES ($1, $2, $3, $4)
      RETURNING id, state, context, messages`,
-    [callId, 'active', { consecutiveFailures: 0 }, []]
+    [callId, 'active', JSON.stringify({ consecutiveFailures: 0 }), JSON.stringify([])]
   );
 
   return result.rows[0];
@@ -485,7 +485,7 @@ async function persistConversationTurn(
     `UPDATE conversations
      SET context = $1, messages = $2, updated_at = CURRENT_TIMESTAMP
      WHERE call_id = $3`,
-    [nextContext, messages, callId]
+    [JSON.stringify(nextContext), JSON.stringify(messages), callId]
   );
 
   const transcriptParts = [userText ? `Client: ${userText}` : '', assistantText ? `IA: ${assistantText}` : '']
