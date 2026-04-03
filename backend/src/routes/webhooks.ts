@@ -49,8 +49,8 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
 
     const callId = await createOrUpdateTwilioCall(payload, company.id);
     const baseUrl = getBaseUrl(req);
-    const greetingUrl = `${baseUrl}/api/webhooks/twilio/greeting?companyId=${company.id}`;
-    const recordingCompleteUrl = `${baseUrl}/api/webhooks/twilio/recording-complete`;
+    const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
+    const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data)
@@ -198,7 +198,11 @@ function normalizePhoneNumber(value: string | null | undefined): string {
 }
 
 function getBaseUrl(req: Request): string {
-  return process.env.PUBLIC_WEBHOOK_URL || `${req.protocol}://${req.get('host')}`;
+  return (process.env.PUBLIC_WEBHOOK_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+}
+
+function joinUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
 
 async function findCompanyByPhoneNumber(phoneNumber: string) {

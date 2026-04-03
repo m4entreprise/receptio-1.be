@@ -5,7 +5,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Companies table
-CREATE TABLE companies (
+CREATE TABLE IF NOT EXISTS companies (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     phone_number VARCHAR(50),
@@ -16,7 +16,7 @@ CREATE TABLE companies (
 );
 
 -- Users table (for dashboard access)
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -29,7 +29,7 @@ CREATE TABLE users (
 );
 
 -- Calls table
-CREATE TABLE calls (
+CREATE TABLE IF NOT EXISTS calls (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
     caller_number VARCHAR(50),
@@ -46,7 +46,7 @@ CREATE TABLE calls (
 );
 
 -- Transcriptions table
-CREATE TABLE transcriptions (
+CREATE TABLE IF NOT EXISTS transcriptions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     call_id UUID REFERENCES calls(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE transcriptions (
 );
 
 -- Call summaries (AI-generated)
-CREATE TABLE call_summaries (
+CREATE TABLE IF NOT EXISTS call_summaries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     call_id UUID REFERENCES calls(id) ON DELETE CASCADE,
     summary TEXT,
@@ -67,7 +67,7 @@ CREATE TABLE call_summaries (
 );
 
 -- Conversations (for Offre B - real-time AI agent)
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     call_id UUID REFERENCES calls(id) ON DELETE CASCADE,
     state VARCHAR(50) DEFAULT 'active',
@@ -78,7 +78,7 @@ CREATE TABLE conversations (
 );
 
 -- Call events (for analytics and debugging)
-CREATE TABLE call_events (
+CREATE TABLE IF NOT EXISTS call_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     call_id UUID REFERENCES calls(id) ON DELETE CASCADE,
     event_type VARCHAR(100) NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE call_events (
 );
 
 -- Business rules (configurable per company)
-CREATE TABLE business_rules (
+CREATE TABLE IF NOT EXISTS business_rules (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
     rule_type VARCHAR(100) NOT NULL,
@@ -101,16 +101,16 @@ CREATE TABLE business_rules (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_calls_company_id ON calls(company_id);
-CREATE INDEX idx_calls_created_at ON calls(created_at DESC);
-CREATE INDEX idx_calls_status ON calls(status);
-CREATE INDEX idx_transcriptions_call_id ON transcriptions(call_id);
-CREATE INDEX idx_call_summaries_call_id ON call_summaries(call_id);
-CREATE INDEX idx_conversations_call_id ON conversations(call_id);
-CREATE INDEX idx_call_events_call_id ON call_events(call_id);
-CREATE INDEX idx_call_events_timestamp ON call_events(timestamp DESC);
-CREATE INDEX idx_users_company_id ON users(company_id);
-CREATE INDEX idx_business_rules_company_id ON business_rules(company_id);
+CREATE INDEX IF NOT EXISTS idx_calls_company_id ON calls(company_id);
+CREATE INDEX IF NOT EXISTS idx_calls_created_at ON calls(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status);
+CREATE INDEX IF NOT EXISTS idx_transcriptions_call_id ON transcriptions(call_id);
+CREATE INDEX IF NOT EXISTS idx_call_summaries_call_id ON call_summaries(call_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_call_id ON conversations(call_id);
+CREATE INDEX IF NOT EXISTS idx_call_events_call_id ON call_events(call_id);
+CREATE INDEX IF NOT EXISTS idx_call_events_timestamp ON call_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_users_company_id ON users(company_id);
+CREATE INDEX IF NOT EXISTS idx_business_rules_company_id ON business_rules(company_id);
 
 -- Update timestamp trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -136,4 +136,5 @@ CREATE TRIGGER update_business_rules_updated_at BEFORE UPDATE ON business_rules
 
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES
-('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}');
+('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}')
+ON CONFLICT (email) DO NOTHING;
