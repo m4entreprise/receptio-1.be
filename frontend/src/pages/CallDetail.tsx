@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck } from 'lucide-react';
+import { useRef } from 'react';
+import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2 } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -29,10 +30,15 @@ interface CallDetailItem {
 export default function CallDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [call, setCall] = useState<CallDetailItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [recordingBlobUrl, setRecordingBlobUrl] = useState<string | null>(null);
+  const [recordingLoading, setRecordingLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
 
   useEffect(() => {
     fetchCallDetail();
@@ -44,8 +50,14 @@ export default function CallDetail() {
     const fetchRecording = async () => {
       if (!call?.recording_url || !id) {
         setRecordingBlobUrl(null);
+        setRecordingLoading(false);
+        setIsPlaying(false);
+        setCurrentTime(0);
+        setAudioDuration(0);
         return;
       }
+
+      setRecordingLoading(true);
 
       try {
         const response = await axios.get(`/api/calls/${id}/recording`, {
@@ -57,17 +69,51 @@ export default function CallDetail() {
       } catch (error) {
         console.error('Error fetching call recording:', error);
         setRecordingBlobUrl(null);
+      } finally {
+        setRecordingLoading(false);
       }
     };
 
     fetchRecording();
 
     return () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+      setAudioDuration(0);
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
       }
     };
   }, [call?.recording_url, id]);
+
+  const handleTogglePlayback = async () => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    try {
+      await audioRef.current.play();
+      setIsPlaying(true);
+    } catch (error) {
+      console.error('Error playing audio:', error);
+      setIsPlaying(false);
+    }
+  };
+
+  const handleSeek = (value: number) => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    audioRef.current.currentTime = value;
+    setCurrentTime(value);
+  };
 
   const fetchCallDetail = async () => {
     try {
@@ -281,22 +327,84 @@ export default function CallDetail() {
               </div>
             )}
 
-            {call.recording_url && recordingBlobUrl && (
+            {call.recording_url && (
               <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
                 <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#171821]">Enregistrement audio</h2>
                 <div className="mt-4 rounded-[24px] border border-black/5 bg-[#f7f4ee] p-4 sm:p-5">
-                  <audio controls className="w-full">
-                    <source src={recordingBlobUrl} type="audio/mpeg" />
-                    Votre navigateur ne supporte pas l'élément audio.
-                  </audio>
-                  <a
-                    href={recordingBlobUrl}
-                    download
-                    className="mt-4 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium text-[#171821] transition hover:bg-[#fcfbf8]"
-                  >
-                    <Download className="h-4 w-4" />
-                    Télécharger l'enregistrement
-                  </a>
+                  {recordingLoading && (
+                    <div className="flex items-center gap-3 rounded-2xl border border-black/5 bg-white px-4 py-4 text-sm text-[#5f5a52]">
+                      <Loader2 className="h-4 w-4 animate-spin text-[#171821]" />
+                      Chargement de l’enregistrement...
+                    </div>
+                  )}
+
+                  {!recordingLoading && recordingBlobUrl && (
+                    <>
+                      <audio
+                        ref={audioRef}
+                        src={recordingBlobUrl}
+                        onLoadedMetadata={(event) => {
+                          const nextDuration = Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0;
+                          setAudioDuration(nextDuration);
+                        }}
+                        onTimeUpdate={(event) => {
+                          setCurrentTime(event.currentTarget.currentTime);
+                        }}
+                        onPause={() => setIsPlaying(false)}
+                        onPlay={() => setIsPlaying(true)}
+                        onEnded={() => {
+                          setIsPlaying(false);
+                          setCurrentTime(0);
+                          if (audioRef.current) {
+                            audioRef.current.currentTime = 0;
+                          }
+                        }}
+                        className="hidden"
+                      />
+
+                      <div className="flex flex-col gap-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                          <button
+                            type="button"
+                            onClick={handleTogglePlayback}
+                            className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#171821] text-white transition hover:bg-[#262837]"
+                          >
+                            {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
+                          </button>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-4 text-sm text-[#6f685d]">
+                              <span className="font-medium text-[#171821]">Message vocal</span>
+                              <span>
+                                {formatAudioTime(currentTime)} / {formatAudioTime(audioDuration)}
+                              </span>
+                            </div>
+
+                            <input
+                              type="range"
+                              min={0}
+                              max={audioDuration || 0}
+                              step={0.1}
+                              value={Math.min(currentTime, audioDuration || 0)}
+                              onChange={(event) => handleSeek(Number(event.target.value))}
+                              className="mt-3 h-2 w-full cursor-pointer appearance-none rounded-full bg-black/10 accent-[#171821]"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          <a
+                            href={recordingBlobUrl}
+                            download={`appel-${call.id}.mp3`}
+                            className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium text-[#171821] transition hover:bg-[#fcfbf8]"
+                          >
+                            <Download className="h-4 w-4" />
+                            Télécharger l'enregistrement
+                          </a>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -305,4 +413,15 @@ export default function CallDetail() {
       </div>
     </Layout>
   );
+}
+
+function formatAudioTime(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0:00';
+  }
+
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.floor(value % 60);
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
