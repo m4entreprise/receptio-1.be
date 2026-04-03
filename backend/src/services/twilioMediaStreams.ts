@@ -212,6 +212,12 @@ async function handleTwilioMessage(
           closeAfterPlayback: false,
           persistTranscript: true,
           source: 'streaming_greeting',
+        }).catch((error: any) => {
+          logger.error('Twilio streaming greeting playback failed', {
+            error: error.message,
+            callId: state.callId,
+            companyId: state.companyId,
+          });
         });
       }
       break;
@@ -482,30 +488,40 @@ async function speakAssistantText(
     return;
   }
 
-  if (options.persistTranscript) {
-    await appendTranscriptLine(state.callId, 'IA', cleanText);
-  }
-
-  state.transcriptMessages.push({ role: 'assistant', content: cleanText });
-  trimConversationHistory(state);
-
-  await appendOfferBAction(state.callId, options.actionType, {
-    source: options.source,
-    transcript: cleanText,
-  });
-
-  const wavAudio = await textToSpeech(cleanText, 'wav');
-  const ulawAudio = convertWavToULaw(wavAudio);
-  const playbackGeneration = ++state.playbackGeneration;
-  await sendULawAudioToTwilio(twilioSocket, state.streamSid, ulawAudio, () => playbackGeneration === state.playbackGeneration);
-
-  if (options.closeAfterPlayback) {
-    await wait(calculateAudioDurationMs(ulawAudio) + 250);
-    await finalizeStreamingCall(state, 'goodbye_completed');
-
-    if (twilioSocket.readyState === WebSocket.OPEN) {
-      twilioSocket.close();
+  try {
+    if (options.persistTranscript) {
+      await appendTranscriptLine(state.callId, 'IA', cleanText);
     }
+
+    state.transcriptMessages.push({ role: 'assistant', content: cleanText });
+    trimConversationHistory(state);
+
+    await appendOfferBAction(state.callId, options.actionType, {
+      source: options.source,
+      transcript: cleanText,
+    });
+
+    const wavAudio = await textToSpeech(cleanText, 'wav');
+    const ulawAudio = convertWavToULaw(wavAudio);
+    const playbackGeneration = ++state.playbackGeneration;
+    await sendULawAudioToTwilio(twilioSocket, state.streamSid, ulawAudio, () => playbackGeneration === state.playbackGeneration);
+
+    if (options.closeAfterPlayback) {
+      await wait(calculateAudioDurationMs(ulawAudio) + 250);
+      await finalizeStreamingCall(state, 'goodbye_completed');
+
+      if (twilioSocket.readyState === WebSocket.OPEN) {
+        twilioSocket.close();
+      }
+    }
+  } catch (error: any) {
+    logger.error('Twilio assistant playback error', {
+      error: error.message,
+      callId: state.callId,
+      companyId: state.companyId,
+      source: options.source,
+    });
+    throw error;
   }
 }
 
@@ -725,15 +741,20 @@ async function sendULawAudioToTwilio(
     }
 
     const chunk = ulawBuffer.subarray(offset, Math.min(offset + ULaw_FRAME_BYTES, ulawBuffer.length));
+    const paddedChunk = chunk.length === ULaw_FRAME_BYTES
+      ? chunk
+      : Buffer.concat([chunk, Buffer.alloc(ULaw_FRAME_BYTES - chunk.length, 0xff)]);
     twilioSocket.send(
       JSON.stringify({
         event: 'media',
         streamSid,
         media: {
-          payload: chunk.toString('base64'),
+          payload: paddedChunk.toString('base64'),
         },
       })
     );
+
+    await wait(ULaw_FRAME_DURATION_MS);
   }
 }
 
