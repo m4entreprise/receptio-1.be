@@ -1,6 +1,15 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
+import {
+  buildLiveKitSipUri,
+  createLiveKitAgentToken,
+  getLiveKitSipTrunkPassword,
+  getLiveKitSipTrunkUsername,
+  getLiveKitUrl,
+  shouldUseOfferBLiveKit,
+  verifyLiveKitWebhook,
+} from '../services/livekit';
 import { detectIntent, generateResponse, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
 import { buildKnowledgeBaseContext, defaultEscalationPolicy, getCompanyOfferBSettings, shouldUseOfferBAgent } from '../services/offerB';
 import { shouldUseOfferBStreamingPipeline } from '../services/twilioMediaStreams';
@@ -73,6 +82,25 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
         [callId, 'twilio.offer_b.started', { settings: offerBSettings, callSid: payload.CallSid }]
       );
 
+      if (shouldUseOfferBLiveKit()) {
+        const sipUri = buildLiveKitSipUri({
+          callId,
+          companyId: company.id,
+          companyName: company.name,
+          destinationNumber: formatPhoneNumberForSip(payload.To),
+        });
+        const statusCallbackUrl = buildOfferBLiveKitStatusCallbackUrl(baseUrl, callId, company.id);
+        res.type('text/xml').send(
+          buildOfferBLiveKitTwiml({
+            sipUri,
+            sipUsername: getLiveKitSipTrunkUsername() || undefined,
+            sipPassword: getLiveKitSipTrunkPassword() || undefined,
+            statusCallbackUrl,
+          })
+        );
+        return;
+      }
+
       if (shouldUseOfferBStreamingPipeline()) {
         const streamUrl = buildOfferBStreamingUrl(baseUrl, callId, company.id);
         res.type('text/xml').send(buildOfferBStreamingTwiml(streamUrl, callId, company.id));
@@ -89,6 +117,59 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
   } catch (error: any) {
     logger.error('Twilio voice webhook error', { error: error.message });
     res.type('text/xml').send(buildTwiml('<Hangup />'));
+  }
+});
+
+router.post('/twilio/livekit-status', async (req: Request, res: Response) => {
+  try {
+    const callId = String(req.query.callId || '');
+    await handleTwilioLiveKitStatus(callId, req.body || {});
+    res.status(200).send('ok');
+  } catch (error: any) {
+    logger.error('Twilio LiveKit SIP status callback error', { error: error.message });
+    res.status(200).send('ok');
+  }
+});
+
+router.post('/livekit/events', async (req: Request, res: Response) => {
+  try {
+    const authorizationHeader = req.get('Authorization') || undefined;
+    const webhookEvent = await verifyLiveKitWebhook(req.body as Buffer, authorizationHeader);
+    await handleLiveKitWebhookEvent(webhookEvent as Record<string, any>);
+    res.status(200).json({ received: true });
+  } catch (error: any) {
+    logger.error('LiveKit webhook error', { error: error.message });
+    res.status(400).json({ error: 'invalid_livekit_webhook' });
+  }
+});
+
+router.post('/livekit/agent-token', async (req: Request, res: Response) => {
+  try {
+    const roomName = String(req.body.roomName || '').trim();
+    const callId = String(req.body.callId || '').trim();
+    const companyId = String(req.body.companyId || '').trim();
+    const participantName = String(req.body.participantName || '').trim() || undefined;
+
+    if (!roomName || !callId || !companyId) {
+      res.status(400).json({ error: 'roomName, callId and companyId are required' });
+      return;
+    }
+
+    const token = await createLiveKitAgentToken({
+      roomName,
+      callId,
+      companyId,
+      participantName,
+    });
+
+    res.json({
+      roomName,
+      serverUrl: getLiveKitUrl(),
+      token,
+    });
+  } catch (error: any) {
+    logger.error('LiveKit agent token generation error', { error: error.message });
+    res.status(500).json({ error: 'livekit_token_generation_failed' });
   }
 });
 
@@ -451,6 +532,21 @@ function normalizePhoneNumber(value: string | null | undefined): string {
   return String(value || '').replace(/\D/g, '');
 }
 
+function formatPhoneNumberForSip(value: string | null | undefined): string {
+  const rawValue = String(value || '').trim();
+
+  if (!rawValue) {
+    return '';
+  }
+
+  if (rawValue.startsWith('+')) {
+    return rawValue;
+  }
+
+  const digits = normalizePhoneNumber(rawValue);
+  return digits ? `+${digits}` : rawValue;
+}
+
 function getBaseUrl(req: Request): string {
   return (process.env.PUBLIC_WEBHOOK_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
 }
@@ -481,6 +577,28 @@ function buildOfferBStreamingUrl(baseUrl: string, callId: string, companyId: str
 function buildOfferBStreamingTwiml(streamUrl: string, callId: string, companyId: string): string {
   return buildTwiml(
     `<Connect><Stream url="${escapeXml(streamUrl)}"><Parameter name="callId" value="${escapeXml(callId)}" /><Parameter name="companyId" value="${escapeXml(companyId)}" /></Stream></Connect>`
+  );
+}
+
+function buildOfferBLiveKitStatusCallbackUrl(baseUrl: string, callId: string, companyId: string): string {
+  return joinUrl(
+    baseUrl,
+    `/api/webhooks/twilio/livekit-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`
+  );
+}
+
+function buildOfferBLiveKitTwiml(params: {
+  sipPassword?: string;
+  sipUri: string;
+  sipUsername?: string;
+  statusCallbackUrl: string;
+}): string {
+  const credentialsAttributes = params.sipUsername && params.sipPassword
+    ? ` username="${escapeXml(params.sipUsername)}" password="${escapeXml(params.sipPassword)}"`
+    : '';
+
+  return buildTwiml(
+    `<Dial answerOnBridge="true"><Sip${credentialsAttributes} statusCallback="${escapeXml(params.statusCallbackUrl)}" statusCallbackEvent="initiated ringing answered completed" statusCallbackMethod="POST">${escapeXml(params.sipUri)}</Sip></Dial>`
   );
 }
 
@@ -693,6 +811,117 @@ async function registerOfferBAction(callId: string, eventType: string, data: Rec
     'UPDATE call_summaries SET actions = $1 WHERE id = $2',
     [JSON.stringify(existingActions), summaryResult.rows[0].id]
   );
+}
+
+async function handleTwilioLiveKitStatus(callId: string, payload: Record<string, unknown>) {
+  if (!callId) {
+    return;
+  }
+
+  await query(
+    `INSERT INTO call_events (call_id, event_type, data)
+     VALUES ($1, $2, $3)`,
+    [callId, 'twilio.livekit.sip_status', payload]
+  );
+
+  const dialStatus = String(payload.DialCallStatus || payload.CallStatus || '').toLowerCase();
+
+  if (dialStatus === 'answered') {
+    await query(
+      `UPDATE calls
+       SET status = $1
+       WHERE id = $2 AND status <> $1`,
+      ['answered', callId]
+    );
+  }
+
+  if (['completed', 'busy', 'failed', 'no-answer', 'canceled'].includes(dialStatus)) {
+    await query(
+      `UPDATE calls
+       SET status = $1,
+           ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP)
+       WHERE id = $2`,
+      ['completed', callId]
+    );
+  }
+}
+
+async function handleLiveKitWebhookEvent(event: Record<string, any>) {
+  const eventType = String(event.event || '');
+  const participantAttributes = event.participant?.attributes || {};
+  const explicitCallId = String(
+    participantAttributes.callId
+    || participantAttributes['call_id']
+    || participantAttributes['x-call-id']
+    || ''
+  );
+  const explicitCompanyId = String(
+    participantAttributes.companyId
+    || participantAttributes['company_id']
+    || participantAttributes['x-company-id']
+    || ''
+  );
+  const twilioCallSid = String(participantAttributes['sip.twilio.callSid'] || '');
+
+  let resolvedCallId = explicitCallId;
+  let resolvedCompanyId = explicitCompanyId;
+
+  if (!resolvedCallId && twilioCallSid) {
+    const callResult = await query(
+      'SELECT id, company_id FROM calls WHERE call_sid = $1 ORDER BY created_at DESC LIMIT 1',
+      [twilioCallSid]
+    );
+
+    if (callResult.rows.length > 0) {
+      resolvedCallId = callResult.rows[0].id;
+      resolvedCompanyId = resolvedCompanyId || callResult.rows[0].company_id;
+    }
+  }
+
+  if (!resolvedCallId) {
+    logger.warn('LiveKit webhook ignored because call mapping was missing', {
+      eventType,
+      roomName: event.room?.name,
+      participantIdentity: event.participant?.identity,
+      twilioCallSid,
+    });
+    return;
+  }
+
+  await query(
+    `INSERT INTO call_events (call_id, event_type, data)
+     VALUES ($1, $2, $3)`,
+    [
+      resolvedCallId,
+      `livekit.${eventType || 'event'}`,
+      {
+        companyId: resolvedCompanyId,
+        participantAttributes,
+        participantIdentity: event.participant?.identity || null,
+        participantName: event.participant?.name || null,
+        roomName: event.room?.name || null,
+      },
+    ]
+  );
+
+  if (eventType === 'participant_joined') {
+    await query(
+      `UPDATE calls
+       SET status = $1
+       WHERE id = $2 AND status <> $1`,
+      ['answered', resolvedCallId]
+    );
+  }
+
+  if (eventType === 'room_finished') {
+    await query(
+      `UPDATE calls
+       SET status = $1,
+           ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP)
+       WHERE id = $2`,
+      ['completed', resolvedCallId]
+    );
+  }
 }
 
 async function generateOfferBReply(params: {
