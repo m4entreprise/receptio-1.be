@@ -7,10 +7,21 @@ import { z } from 'zod';
 
 const router = Router();
 
+const offerBSettingsSchema = z.object({
+  offerMode: z.enum(['A', 'B']).optional(),
+  agentEnabled: z.boolean().optional(),
+  humanTransferNumber: z.string().optional(),
+  fallbackToVoicemail: z.boolean().optional(),
+  maxAgentFailures: z.number().int().min(1).max(10).optional(),
+  greetingText: z.string().optional(),
+  knowledgeBaseEnabled: z.boolean().optional(),
+  appointmentIntegrationEnabled: z.boolean().optional(),
+});
+
 const updateCompanySchema = z.object({
   name: z.string().min(2).optional(),
   phoneNumber: z.string().optional(),
-  settings: z.record(z.any()).optional(),
+  settings: offerBSettingsSchema.partial().passthrough().optional(),
 });
 
 router.get('/me', authenticateToken, async (req: AuthRequest, res: Response, next) => {
@@ -36,6 +47,14 @@ router.patch('/me', authenticateToken, async (req: AuthRequest, res: Response, n
   try {
     const { companyId } = req.user!;
     const data = updateCompanySchema.parse(req.body);
+    const currentCompanyResult = await query(
+      'SELECT settings FROM companies WHERE id = $1',
+      [companyId]
+    );
+
+    if (currentCompanyResult.rows.length === 0) {
+      throw new AppError('Company not found', 404);
+    }
 
     const updates: string[] = [];
     const values: any[] = [];
@@ -52,8 +71,12 @@ router.patch('/me', authenticateToken, async (req: AuthRequest, res: Response, n
     }
 
     if (data.settings) {
+      const mergedSettings = {
+        ...(currentCompanyResult.rows[0].settings || {}),
+        ...data.settings,
+      };
       updates.push(`settings = $${paramCount++}`);
-      values.push(data.settings);
+      values.push(mergedSettings);
     }
 
     if (updates.length === 0) {

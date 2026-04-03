@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
-import { detectIntent, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
+import { detectIntent, generateResponse, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
+import { buildKnowledgeBaseContext, defaultEscalationPolicy, getCompanyOfferBSettings, shouldUseOfferBAgent } from '../services/offerB';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -49,25 +50,22 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
 
     const callId = await createOrUpdateTwilioCall(payload, company.id);
     const baseUrl = getBaseUrl(req);
+    const offerBSettings = await getCompanyOfferBSettings(company.id);
+
+    if (shouldUseOfferBAgent(offerBSettings)) {
+      await query(
+        `INSERT INTO call_events (call_id, event_type, data)
+         VALUES ($1, $2, $3)`,
+        [callId, 'twilio.offer_b.started', { settings: offerBSettings, callSid: payload.CallSid }]
+      );
+
+      res.type('text/xml').send(buildOfferBWelcomeTwiml(baseUrl, company, callId, offerBSettings));
+      return;
+    }
+
     const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
     const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
-
-    await query(
-      `INSERT INTO call_events (call_id, event_type, data)
-       VALUES ($1, $2, $3)`,
-      [callId, 'twilio.voice.inbound', payload]
-    );
-
-    await query(
-      `UPDATE calls SET status = $1 WHERE id = $2`,
-      ['answered', callId]
-    );
-
-    res.type('text/xml').send(
-      buildTwiml(
-        `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
-      )
-    );
+    res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
   } catch (error: any) {
     logger.error('Twilio voice webhook error', { error: error.message });
     res.type('text/xml').send(buildTwiml('<Hangup />'));
@@ -96,6 +94,141 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
   } catch (error: any) {
     logger.error('Twilio greeting generation error', { error: error.message });
     res.status(500).send('Greeting unavailable');
+  }
+});
+
+router.post('/twilio/agent-turn', async (req: Request, res: Response) => {
+  try {
+    const { callId } = req.query;
+    const speechResult = String(req.body.SpeechResult || '').trim();
+    const callResult = await query(
+      `SELECT c.id, c.call_sid, c.company_id, c.caller_number, co.name AS company_name, co.settings
+       FROM calls c
+       INNER JOIN companies co ON co.id = c.company_id
+       WHERE c.id = $1`,
+      [String(callId || '')]
+    );
+
+    if (callResult.rows.length === 0) {
+      res.type('text/xml').send(buildTwiml('<Hangup />'));
+      return;
+    }
+
+    const call = callResult.rows[0];
+    const company = {
+      id: call.company_id,
+      name: call.company_name,
+      settings: call.settings || {},
+    };
+    const baseUrl = getBaseUrl(req);
+    const offerBSettings = await getCompanyOfferBSettings(company.id);
+
+    if (!shouldUseOfferBAgent(offerBSettings)) {
+      const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
+      const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+      res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+      return;
+    }
+
+    const conversation = await getOrCreateConversation(call.id);
+    const consecutiveFailures = Number(conversation.context?.consecutiveFailures || 0);
+    const requestedByCaller = /humain|personne|conseiller|rappel|rappeler|transf[ée]r|coll[èe]gue/i.test(speechResult);
+    const knowledgeContext = offerBSettings.knowledgeBaseEnabled
+      ? await buildKnowledgeBaseContext(company.id, speechResult)
+      : '';
+
+    if (!speechResult) {
+      const escalation = defaultEscalationPolicy.evaluate({
+        requestedByCaller: false,
+        consecutiveFailures: consecutiveFailures + 1,
+        maxAgentFailures: offerBSettings.maxAgentFailures,
+      });
+
+      await persistConversationTurn(call.id, conversation, '', '', {
+        consecutiveFailures: consecutiveFailures + 1,
+        lastAction: escalation.shouldTransfer ? 'transfer_requested_after_silence' : 'reprompt_after_silence',
+      });
+
+      if (escalation.shouldTransfer && offerBSettings.humanTransferNumber) {
+        await registerOfferBAction(call.id, 'transfer_to_human', {
+          reason: escalation.reason,
+          transferNumber: offerBSettings.humanTransferNumber,
+        });
+        res.type('text/xml').send(buildTransferTwiml(offerBSettings.humanTransferNumber));
+        return;
+      }
+
+      if (escalation.shouldTransfer && offerBSettings.fallbackToVoicemail) {
+        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
+        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+        await registerOfferBAction(call.id, 'fallback_to_voicemail', { reason: escalation.reason });
+        res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+        return;
+      }
+
+      res.type('text/xml').send(
+        buildOfferBFollowupTwiml(baseUrl, call.id, 'Je n’ai rien entendu. Pouvez-vous répéter votre demande en une phrase ?')
+      );
+      return;
+    }
+
+    const intentData = await detectIntent(speechResult);
+    const agentReply = await generateOfferBReply({
+      companyName: company.name,
+      callerInput: speechResult,
+      knowledgeContext,
+      humanTransferNumber: offerBSettings.humanTransferNumber,
+    });
+
+    if (agentReply === '__TRANSFER__') {
+      const escalation = defaultEscalationPolicy.evaluate({
+        requestedByCaller,
+        consecutiveFailures: consecutiveFailures + 1,
+        maxAgentFailures: offerBSettings.maxAgentFailures,
+      });
+
+      await persistConversationTurn(call.id, conversation, speechResult, '', {
+        consecutiveFailures: consecutiveFailures + 1,
+        lastIntent: intentData.intent,
+        lastAction: escalation.shouldTransfer ? 'transfer_requested_by_agent' : 'agent_blocked',
+      });
+
+      if (escalation.shouldTransfer && offerBSettings.humanTransferNumber) {
+        await registerOfferBAction(call.id, 'transfer_to_human', {
+          reason: escalation.reason,
+          transferNumber: offerBSettings.humanTransferNumber,
+          intent: intentData.intent,
+        });
+        res.type('text/xml').send(buildTransferTwiml(offerBSettings.humanTransferNumber));
+        return;
+      }
+
+      if (offerBSettings.fallbackToVoicemail) {
+        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
+        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+        await registerOfferBAction(call.id, 'fallback_to_voicemail', { intent: intentData.intent });
+        res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+        return;
+      }
+
+      res.type('text/xml').send(
+        buildOfferBFollowupTwiml(baseUrl, call.id, 'Je préfère vous orienter vers un humain. Pouvez-vous reformuler une dernière fois votre besoin ?')
+      );
+      return;
+    }
+
+    await persistConversationTurn(call.id, conversation, speechResult, agentReply, {
+      consecutiveFailures: 0,
+      lastIntent: intentData.intent,
+      lastAction: 'agent_replied',
+    });
+    await upsertOfferBSummary(call.id, speechResult, intentData.intent);
+    await registerOfferBAction(call.id, 'agent_replied', { intent: intentData.intent, input: speechResult });
+
+    res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, agentReply));
+  } catch (error: any) {
+    logger.error('Twilio Offer B agent turn error', { error: error.message });
+    res.type('text/xml').send(buildTwiml('<Hangup />'));
   }
 });
 
@@ -205,6 +338,33 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
 
+function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string): string {
+  return buildTwiml(
+    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+  );
+}
+
+function buildOfferBWelcomeTwiml(baseUrl: string, company: any, callId: string, settings: any): string {
+  const actionUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-turn?callId=${encodeURIComponent(callId)}`);
+  const greeting = settings.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Comment puis-je vous aider aujourd’hui ?`;
+  return buildGatherTwiml(actionUrl, greeting);
+}
+
+function buildOfferBFollowupTwiml(baseUrl: string, callId: string, prompt: string): string {
+  const actionUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-turn?callId=${encodeURIComponent(callId)}`);
+  return buildGatherTwiml(actionUrl, prompt);
+}
+
+function buildGatherTwiml(actionUrl: string, prompt: string): string {
+  return buildTwiml(
+    `<Gather input="speech" action="${escapeXml(actionUrl)}" method="POST" language="fr-FR" speechTimeout="auto" timeout="3"><Say language="fr-FR" voice="alice">${escapeXml(prompt)}</Say></Gather><Redirect method="POST">${escapeXml(actionUrl)}</Redirect>`
+  );
+}
+
+function buildTransferTwiml(targetNumber: string): string {
+  return buildTwiml(`<Say language="fr-FR" voice="alice">Je vous transfère vers un collaborateur.</Say><Dial>${escapeXml(targetNumber)}</Dial>`);
+}
+
 async function findCompanyByPhoneNumber(phoneNumber: string) {
   const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
   const result = await query(
@@ -239,6 +399,168 @@ async function createOrUpdateTwilioCall(payload: any, companyId: string): Promis
   );
 
   return result.rows[0].id;
+}
+
+async function getOrCreateConversation(callId: string) {
+  const existingConversation = await query(
+    'SELECT id, state, context, messages FROM conversations WHERE call_id = $1',
+    [callId]
+  );
+
+  if (existingConversation.rows.length > 0) {
+    return existingConversation.rows[0];
+  }
+
+  const result = await query(
+    `INSERT INTO conversations (call_id, state, context, messages)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, state, context, messages`,
+    [callId, 'active', { consecutiveFailures: 0 }, []]
+  );
+
+  return result.rows[0];
+}
+
+async function persistConversationTurn(
+  callId: string,
+  conversation: any,
+  userText: string,
+  assistantText: string,
+  contextPatch: Record<string, unknown>
+) {
+  const messages = Array.isArray(conversation.messages) ? [...conversation.messages] : [];
+
+  if (userText) {
+    messages.push({ role: 'caller', content: userText, timestamp: new Date().toISOString() });
+  }
+
+  if (assistantText) {
+    messages.push({ role: 'assistant', content: assistantText, timestamp: new Date().toISOString() });
+  }
+
+  const nextContext = {
+    ...(conversation.context || {}),
+    ...contextPatch,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await query(
+    `UPDATE conversations
+     SET context = $1, messages = $2, updated_at = CURRENT_TIMESTAMP
+     WHERE call_id = $3`,
+    [nextContext, messages, callId]
+  );
+
+  const transcriptParts = [userText ? `Client: ${userText}` : '', assistantText ? `IA: ${assistantText}` : '']
+    .filter(Boolean)
+    .join('\n');
+
+  if (transcriptParts) {
+    const transcriptionResult = await query(
+      'SELECT id, text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
+      [callId]
+    );
+
+    if (transcriptionResult.rows.length === 0) {
+      await query(
+        `INSERT INTO transcriptions (call_id, text, language, confidence)
+         VALUES ($1, $2, $3, $4)`,
+        [callId, transcriptParts, 'fr', 1]
+      );
+    } else {
+      const existingText = transcriptionResult.rows[0].text || '';
+      const nextText = existingText ? `${existingText}\n${transcriptParts}` : transcriptParts;
+      await query(
+        'UPDATE transcriptions SET text = $1 WHERE id = $2',
+        [nextText, transcriptionResult.rows[0].id]
+      );
+    }
+  }
+}
+
+async function upsertOfferBSummary(callId: string, callerInput: string, intent: string) {
+  const summaryText = `Dernière demande détectée : ${callerInput}`;
+  const summaryResult = await query(
+    'SELECT id, actions FROM call_summaries WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
+    [callId]
+  );
+
+  if (summaryResult.rows.length === 0) {
+    await query(
+      `INSERT INTO call_summaries (call_id, summary, intent, actions)
+       VALUES ($1, $2, $3, $4)`,
+      [callId, summaryText, intent, JSON.stringify([{ type: 'agent_replied', description: 'Réponse temps réel générée par l’agent.' }])]
+    );
+    return;
+  }
+
+  await query(
+    `UPDATE call_summaries
+     SET summary = $1, intent = $2
+     WHERE id = $3`,
+    [summaryText, intent, summaryResult.rows[0].id]
+  );
+}
+
+async function registerOfferBAction(callId: string, eventType: string, data: Record<string, unknown>) {
+  await query(
+    `INSERT INTO call_events (call_id, event_type, data)
+     VALUES ($1, $2, $3)`,
+    [callId, eventType, data]
+  );
+
+  const actionDescriptions: Record<string, string> = {
+    transfer_to_human: 'Transfert vers un humain demandé ou décidé par l’agent.',
+    fallback_to_voicemail: 'Retour automatique vers la messagerie de l’offre A.',
+    agent_replied: 'Réponse temps réel fournie par le réceptionniste IA.',
+  };
+
+  const summaryResult = await query(
+    'SELECT id, actions FROM call_summaries WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
+    [callId]
+  );
+
+  if (summaryResult.rows.length === 0) {
+    return;
+  }
+
+  const existingActions = Array.isArray(summaryResult.rows[0].actions)
+    ? [...summaryResult.rows[0].actions]
+    : [];
+
+  existingActions.push({
+    type: eventType,
+    description: actionDescriptions[eventType] || 'Action Offer B enregistrée.',
+    data,
+  });
+
+  await query(
+    'UPDATE call_summaries SET actions = $1 WHERE id = $2',
+    [JSON.stringify(existingActions), summaryResult.rows[0].id]
+  );
+}
+
+async function generateOfferBReply(params: {
+  companyName: string;
+  callerInput: string;
+  knowledgeContext: string;
+  humanTransferNumber?: string;
+}) {
+  const systemPrompt = [
+    `Tu es le réceptionniste téléphonique de ${params.companyName}.`,
+    'Réponds en français, avec deux phrases maximum, ton professionnel et utile.',
+    'Si le client demande un humain, un rappel, un transfert ou si l’information manque, réponds exactement __TRANSFER__.',
+    'N’invente pas : utilise uniquement les informations métier fournies si elles existent.',
+    params.knowledgeContext ? `Informations métier disponibles:\n${params.knowledgeContext}` : 'Aucune information métier fiable n’est disponible.',
+    params.humanTransferNumber ? `Un numéro humain est configuré : ${params.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.',
+  ].join('\n\n');
+
+  const response = await generateResponse(
+    [{ role: 'user', content: params.callerInput }],
+    systemPrompt
+  );
+
+  return response.trim();
 }
 
 async function handleCallInitiated(payload: any) {

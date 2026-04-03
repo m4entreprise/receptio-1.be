@@ -1,70 +1,85 @@
 # Receptio.eu - Réceptionniste IA
 
-Plateforme de gestion d'appels téléphoniques par IA pour PME belges.
+Plateforme de gestion d'appels téléphoniques assistée par IA, pensée pour aider les PME à ne plus manquer d'appels importants et à offrir une expérience client plus fluide.
 
-## Stack technique
+## Vision du projet
 
-- **Backend**: Node.js + TypeScript + Express + PostgreSQL
-- **Frontend**: React + TypeScript + Vite + TailwindCSS + shadcn/ui
-- **Services**: Telnyx (téléphonie) + Deepgram (STT/TTS) + Mistral AI (LLM)
+Receptio.eu a pour objectif de proposer un accueil téléphonique intelligent capable de répondre, qualifier, orienter et restituer l'information utile à l'entreprise.
 
-## Démarrage rapide
+L'idée n'est pas seulement d'automatiser une conversation, mais de créer un véritable point d'entrée téléphonique numérique, disponible en continu, capable de s'adapter aux besoins de petites et moyennes structures.
 
-### Prérequis
-- Node.js 18+
-- Docker & Docker Compose
-- pnpm (recommandé) ou npm
+## À quoi sert Receptio.eu
 
-### Installation
+La solution vise à couvrir plusieurs usages concrets :
 
-```bash
-# Cloner le repo
-git clone https://github.com/votre-org/receptio-1.be.git
-cd receptio-1.be
+- **Ne plus perdre d'appels** lorsque l'équipe est occupée, absente ou en dehors des heures d'ouverture.
+- **Accueillir les appelants de manière professionnelle** avec un discours cohérent et personnalisable.
+- **Qualifier les demandes** avant transmission à la bonne personne ou au bon service.
+- **Restituer l'information** sous une forme exploitable pour l'entreprise.
+- **Améliorer le suivi client** grâce à une meilleure traçabilité des échanges.
 
-# Copier les variables d'environnement
-cp .env.example .env
+## Public cible
 
-# Démarrer l'infrastructure (PostgreSQL, Redis)
-docker-compose up -d
+Le projet s'adresse en priorité aux PME, indépendants structurés et entreprises de services qui reçoivent des appels entrants récurrents et souhaitent :
 
-# Installer les dépendances backend
-cd backend
-pnpm install
+- mieux gérer leur disponibilité,
+- filtrer les demandes,
+- gagner du temps administratif,
+- professionnaliser leur accueil téléphonique,
+- préparer une montée en charge sans recruter immédiatement.
 
-# Installer les dépendances frontend
-cd ../frontend
-pnpm install
-```
+## Architecture globale
 
-### Développement
+Le projet est organisé autour de plusieurs briques complémentaires :
 
-```bash
-# Terminal 1 - Backend
-cd backend
-pnpm dev
+- **Une interface d'administration** permettant de piloter la solution, consulter les informations utiles et gérer les comptes.
+- **Un backend applicatif** qui centralise les règles métier, la sécurité, les échanges de données et l'orchestration des fonctionnalités.
+- **Une couche de données** pour stocker les utilisateurs, les paramètres, l'historique et les éléments nécessaires au fonctionnement de la plateforme.
+- **Des services externes spécialisés** pour la téléphonie, la génération de réponses, la voix et certaines notifications.
 
-# Terminal 2 - Frontend
-cd frontend
-pnpm dev
-```
+En pratique, l'appel téléphonique est traité par des services externes, puis enrichi et orchestré par la plateforme afin de produire une réponse adaptée et un retour d'information utile côté entreprise.
 
-## Structure du projet
+## Logique de fonctionnement
 
-```
-receptio-1.be/
-├── backend/          # API Node.js + TypeScript
-├── frontend/         # Dashboard React
-├── database/         # Schémas SQL
-└── docker-compose.yml
-```
+À haut niveau, le parcours peut être résumé ainsi :
 
-## Offres
+1. un appelant contacte l'entreprise,
+2. la plateforme prend en charge l'interaction,
+3. la demande est comprise et structurée,
+4. une réponse, une orientation ou une prise d'information est effectuée,
+5. les éléments importants sont restitués dans l'espace de gestion.
 
-- **Offre A**: Répondeur intelligent (transcription)
-- **Offre B**: Agent vocal IA complet
-- **Offre C**: Analytics avancés
+Cette approche permet d'assurer une continuité de service tout en gardant l'entreprise au centre du dispositif.
 
-## Documentation
+## Ce que contient ce dépôt
 
-Voir `Document de cadrage Receptio.eu.md` pour la vision complète du projet.
+Le dépôt regroupe les principaux composants du produit :
+
+- **`frontend/`** : l'interface visible par les utilisateurs de la plateforme.
+- **`backend/`** : le coeur applicatif et les points d'entrée de l'application.
+- **`database/`** : les éléments liés à l'initialisation de la base de données.
+- **`scripts/`** : des scripts utilitaires liés au projet et au déploiement.
+- **`docker-compose.yml`** : un environnement local pour les services d'infrastructure nécessaires.
+
+## Positionnement produit
+
+Receptio.eu se situe à l'intersection de trois besoins :
+
+- **accueil téléphonique**,
+- **automatisation intelligente**,
+- **outil de pilotage opérationnel**.
+
+Le projet ne se limite donc pas à un simple standard automatisé. Il s'agit d'une plateforme conçue pour transformer l'appel entrant en information utile, exploitable et actionnable.
+
+## Évolution visée
+
+À terme, la plateforme peut servir de base pour :
+
+- des scénarios métiers plus avancés,
+- une personnalisation par secteur d'activité,
+- des analyses de performance des appels,
+- une meilleure intégration avec les outils internes des entreprises.
+
+## Référence complémentaire
+
+Pour une vision plus détaillée du cadrage initial, voir `Document de cadrage Receptio.eu.md`.
