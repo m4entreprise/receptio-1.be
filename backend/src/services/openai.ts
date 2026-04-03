@@ -6,9 +6,18 @@ const OPENAI_API_URL = 'https://api.openai.com/v1';
 const OPENAI_STT_MODEL = process.env.OPENAI_STT_MODEL || 'gpt-4o-mini-transcribe';
 const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'ash';
+const OPENAI_TTS_SPEED = clampTtsSpeed(Number(process.env.OPENAI_TTS_SPEED || 1));
 const OPENAI_LLM_MODEL = process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano';
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+
+function clampTtsSpeed(speed: number): number {
+  if (!Number.isFinite(speed)) {
+    return 1;
+  }
+
+  return Math.min(4, Math.max(0.25, speed));
+}
 
 function ensureOpenAiConfigured() {
   if (!OPENAI_API_KEY) {
@@ -187,9 +196,10 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
   }
 }
 
-export async function textToSpeech(text: string, format: string = 'mp3'): Promise<Buffer> {
+export async function textToSpeech(text: string, format: string = 'mp3', speed: number = OPENAI_TTS_SPEED): Promise<Buffer> {
   try {
     ensureOpenAiConfigured();
+    const resolvedSpeed = clampTtsSpeed(speed);
 
     const response = await axios.post(
       `${OPENAI_API_URL}/audio/speech`,
@@ -198,6 +208,7 @@ export async function textToSpeech(text: string, format: string = 'mp3'): Promis
         voice: OPENAI_TTS_VOICE,
         input: text,
         response_format: format,
+        speed: resolvedSpeed,
       },
       {
         headers: {
@@ -210,6 +221,7 @@ export async function textToSpeech(text: string, format: string = 'mp3'): Promis
 
     logger.info('Text converted to speech with OpenAI', {
       model: OPENAI_TTS_MODEL,
+      speed: resolvedSpeed,
       voice: OPENAI_TTS_VOICE,
       textLength: text.length,
     });

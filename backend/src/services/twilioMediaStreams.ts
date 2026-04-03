@@ -10,8 +10,9 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const STREAMING_ENABLED = process.env.OFFER_B_STREAMING_ENABLED !== 'false';
-const SILENCE_THRESHOLD_MS = Number(process.env.OFFER_B_STREAMING_SILENCE_MS || 700);
-const MIN_SPEECH_MS = Number(process.env.OFFER_B_STREAMING_MIN_SPEECH_MS || 260);
+const SILENCE_THRESHOLD_MS = Number(process.env.OFFER_B_STREAMING_SILENCE_MS || 420);
+const MIN_SPEECH_MS = Number(process.env.OFFER_B_STREAMING_MIN_SPEECH_MS || 180);
+const BARGE_IN_MIN_SPEECH_MS = Number(process.env.OFFER_B_STREAMING_BARGE_IN_MS || 120);
 const ENERGY_THRESHOLD = Number(process.env.OFFER_B_STREAMING_ENERGY_THRESHOLD || 500);
 const ULaw_SAMPLE_RATE = 8000;
 const ULaw_FRAME_BYTES = 160;
@@ -19,6 +20,7 @@ const ULaw_FRAME_DURATION_MS = 20;
 const MAX_HISTORY_MESSAGES = 12;
 
 interface StreamSessionState {
+  assistantPlaybackUntil: number;
   callId: string;
   callSid: string;
   companyId: string;
@@ -105,6 +107,7 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
   }
 
   const state: StreamSessionState = {
+    assistantPlaybackUntil: 0,
     callId,
     callSid: '',
     companyId,
@@ -243,15 +246,22 @@ async function handleTwilioMessage(
       const frameEnergy = computeULawFrameEnergy(audioBuffer);
       const hasSpeech = frameEnergy >= ENERGY_THRESHOLD;
 
-      if (hasSpeech && state.streamSid && twilioSocket.readyState === WebSocket.OPEN) {
-        state.playbackGeneration += 1;
-        twilioSocket.send(JSON.stringify({ event: 'clear', streamSid: state.streamSid }));
-      }
-
       if (hasSpeech) {
         state.speechDetected = true;
         state.speechDurationMs += ULaw_FRAME_DURATION_MS;
         state.silenceDurationMs = 0;
+
+        if (
+          state.assistantPlaybackUntil > Date.now()
+          && state.speechDurationMs >= BARGE_IN_MIN_SPEECH_MS
+          && state.streamSid
+          && twilioSocket.readyState === WebSocket.OPEN
+        ) {
+          state.playbackGeneration += 1;
+          state.assistantPlaybackUntil = 0;
+          twilioSocket.send(JSON.stringify({ event: 'clear', streamSid: state.streamSid }));
+        }
+
         state.pendingAudioChunks.push(audioBuffer);
         return;
       }
@@ -503,11 +513,17 @@ async function speakAssistantText(
 
     const wavAudio = await textToSpeech(cleanText, 'wav');
     const ulawAudio = convertWavToULaw(wavAudio);
+    const audioDurationMs = calculateAudioDurationMs(ulawAudio);
     const playbackGeneration = ++state.playbackGeneration;
+    state.assistantPlaybackUntil = Date.now() + audioDurationMs + 120;
     await sendULawAudioToTwilio(twilioSocket, state.streamSid, ulawAudio, () => playbackGeneration === state.playbackGeneration);
 
+    if (playbackGeneration === state.playbackGeneration && state.assistantPlaybackUntil < Date.now()) {
+      state.assistantPlaybackUntil = 0;
+    }
+
     if (options.closeAfterPlayback) {
-      await wait(calculateAudioDurationMs(ulawAudio) + 250);
+      await wait(audioDurationMs + 250);
       await finalizeStreamingCall(state, 'goodbye_completed');
 
       if (twilioSocket.readyState === WebSocket.OPEN) {
@@ -923,6 +939,25 @@ function resamplePcm16(samples: Int16Array, inputRate: number, outputRate: numbe
 
   const outputLength = Math.max(1, Math.round(samples.length * outputRate / inputRate));
   const output = new Int16Array(outputLength);
+
+  if (inputRate > outputRate) {
+    for (let index = 0; index < outputLength; index += 1) {
+      const sourceStart = Math.floor(index * inputRate / outputRate);
+      const sourceEnd = Math.min(
+        samples.length,
+        Math.max(sourceStart + 1, Math.floor((index + 1) * inputRate / outputRate))
+      );
+      let sum = 0;
+
+      for (let sampleIndex = sourceStart; sampleIndex < sourceEnd; sampleIndex += 1) {
+        sum += samples[sampleIndex] || 0;
+      }
+
+      output[index] = Math.round(sum / Math.max(1, sourceEnd - sourceStart));
+    }
+
+    return output;
+  }
 
   for (let index = 0; index < outputLength; index += 1) {
     const sourcePosition = index * (inputRate / outputRate);
