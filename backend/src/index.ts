@@ -7,7 +7,6 @@ import path from 'path';
 import rateLimit from 'express-rate-limit';
 import { connectRedis } from './config/redis';
 import { errorHandler } from './middleware/errorHandler';
-import { logLiveKitConfigurationWarning } from './services/livekit';
 import { attachTwilioMediaStreamsServer } from './services/twilioMediaStreams';
 import logger from './utils/logger';
 
@@ -30,7 +29,6 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use('/api/webhooks/livekit/events', express.raw({ type: 'application/webhook+json' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -61,7 +59,6 @@ const startServer = async () => {
   try {
     await connectRedis();
     logger.info('Redis connected');
-    logLiveKitConfigurationWarning();
 
     server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
