@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
 import {
   ArrowRight,
   AudioLines,
@@ -77,10 +78,41 @@ const audiences = [
 ];
 
 export default function LandingPage() {
+  useEffect(() => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'));
+
+    if (elements.length === 0) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      {
+        threshold: 0.14,
+        rootMargin: '0px 0px -8% 0px',
+      },
+    );
+
+    elements.forEach((element) => {
+      observer.observe(element);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
   return (
     <div className="relative isolate min-h-screen overflow-hidden bg-[#07070b] text-stone-100">
       <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_15%_20%,rgba(255,196,94,0.16),transparent_18%),radial-gradient(circle_at_78%_18%,rgba(56,189,248,0.18),transparent_18%),radial-gradient(circle_at_82%_62%,rgba(168,85,247,0.16),transparent_22%),linear-gradient(180deg,#0a0a0f_0%,#09090d_52%,#050507_100%)]" />
-      <div className="absolute inset-x-0 top-0 -z-10 h-[100vh] bg-[linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[length:120px_100%] opacity-30" />
+      <div className="animate-drift absolute inset-x-0 top-0 -z-10 h-[100vh] bg-[linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[length:120px_100%] opacity-30" />
       <div className="absolute inset-y-0 left-[8%] -z-10 w-px bg-white/[0.08]" />
       <div className="absolute inset-y-0 right-[12%] -z-10 w-px bg-white/[0.05]" />
 
@@ -129,13 +161,13 @@ export default function LandingPage() {
 
           <div className="mx-auto grid w-full max-w-7xl gap-14 px-6 py-16 lg:grid-cols-[1.05fr_0.95fr] lg:px-8 lg:py-24">
             <div className="relative z-10 max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-amber-200/[0.18] bg-amber-200/[0.07] px-4 py-2 text-sm text-amber-100">
+              <div className="animate-reveal-up inline-flex items-center gap-2 rounded-full border border-amber-200/[0.18] bg-amber-200/[0.07] px-4 py-2 text-sm text-amber-100" style={{ animationDelay: '120ms' }}>
                 <Sparkles className="h-4 w-4" />
                 Pas un standard. Une présence.
               </div>
 
               <div className="mt-8 grid gap-6 lg:grid-cols-[140px_1fr] lg:gap-8">
-                <div className="hidden lg:block">
+                <div className="animate-reveal-up hidden lg:block" style={{ animationDelay: '220ms' }}>
                   <p className="text-xs uppercase tracking-[0.35em] text-stone-500">Rôle</p>
                   <p className="mt-3 text-sm leading-7 text-stone-400">
                     capter
@@ -146,7 +178,7 @@ export default function LandingPage() {
                   </p>
                 </div>
 
-                <div>
+                <div className="animate-reveal-up" style={{ animationDelay: '260ms' }}>
                   <h1 className="max-w-4xl text-5xl font-semibold leading-[0.96] tracking-[-0.05em] text-[#f6f3ee] md:text-7xl">
                     Receptio donne à votre numéro la même tenue que votre entreprise.
                   </h1>
@@ -157,26 +189,26 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              <div className="mt-10 flex flex-col gap-4 sm:flex-row">
+              <div className="animate-reveal-up mt-10 flex flex-col gap-4 sm:flex-row" style={{ animationDelay: '360ms' }}>
                 <Link
                   to="/register"
-                  className="inline-flex items-center justify-center gap-2 rounded-full bg-[#f3efe6] px-6 py-3.5 text-sm font-semibold text-[#121218] transition hover:bg-white"
+                  className="group inline-flex items-center justify-center gap-2 rounded-full bg-[#f3efe6] px-6 py-3.5 text-sm font-semibold text-[#121218] transition duration-300 hover:-translate-y-0.5 hover:bg-white"
                 >
                   Créer mon espace
-                  <ArrowRight className="h-4 w-4" />
+                  <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </Link>
                 <a
                   href="#signal"
-                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/[0.14] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-white/[0.05]"
+                  className="group inline-flex items-center justify-center gap-2 rounded-full border border-white/[0.14] px-6 py-3.5 text-sm font-semibold text-white transition duration-300 hover:-translate-y-0.5 hover:bg-white/[0.05]"
                 >
                   Lire le système
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </a>
               </div>
 
               <div className="mt-12 grid gap-3 sm:grid-cols-3">
                 {signalNotes.map((note) => (
-                  <div key={note} className="border-t border-white/[0.14] pt-4 text-sm uppercase tracking-[0.18em] text-stone-300">
+                  <div key={note} className="animate-reveal-up border-t border-white/[0.14] pt-4 text-sm uppercase tracking-[0.18em] text-stone-300" style={{ animationDelay: '460ms' }}>
                     {note}
                   </div>
                 ))}
@@ -184,11 +216,11 @@ export default function LandingPage() {
             </div>
 
             <div className="relative z-10 lg:pl-8">
-              <div className="absolute -left-6 top-12 h-24 w-24 rounded-full bg-cyan-300/[0.16] blur-3xl" />
-              <div className="absolute right-0 top-1/3 h-28 w-28 rounded-full bg-violet-300/[0.15] blur-3xl" />
+              <div className="animate-float-soft animate-pulse-glow absolute -left-6 top-12 h-24 w-24 rounded-full bg-cyan-300/[0.16] blur-3xl" />
+              <div className="animate-float-soft animate-pulse-glow absolute right-0 top-1/3 h-28 w-28 rounded-full bg-violet-300/[0.15] blur-3xl" style={{ animationDelay: '1200ms' }} />
 
-              <div className="grid gap-4">
-                <div className="rotate-[-2deg] border border-white/[0.12] bg-white/[0.06] p-5 backdrop-blur-xl">
+              <div className="animate-reveal-up grid gap-4" style={{ animationDelay: '300ms' }}>
+                <div className="interactive-panel rotate-[-2deg] border border-white/[0.12] bg-white/[0.06] p-5 backdrop-blur-xl">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Canal entrant</p>
@@ -200,7 +232,7 @@ export default function LandingPage() {
                   </div>
                 </div>
 
-                <div className="ml-0 border border-white/[0.1] bg-[#0f1016] p-5 sm:ml-12">
+                <div className="interactive-panel ml-0 border border-white/[0.1] bg-[#0f1016] p-5 sm:ml-12">
                   <div className="flex items-center justify-between text-sm text-stone-400">
                     <span>appel qualifié / 09:42</span>
                     <CalendarClock className="h-4 w-4 text-amber-200" />
@@ -211,14 +243,14 @@ export default function LandingPage() {
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="border border-white/[0.1] bg-white/[0.04] p-5">
+                  <div className="interactive-panel border border-white/[0.1] bg-white/[0.04] p-5">
                     <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Sortie système</p>
                     <p className="mt-4 text-3xl font-semibold tracking-[-0.05em] text-white">&lt; 1 min</p>
                     <p className="mt-3 text-sm leading-7 text-stone-400">
                       pour transmettre une synthèse courte, utile et déjà hiérarchisée.
                     </p>
                   </div>
-                  <div className="border border-white/[0.1] bg-[#15121a] p-5">
+                  <div className="interactive-panel border border-white/[0.1] bg-[#15121a] p-5">
                     <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Effet marque</p>
                     <p className="mt-4 text-3xl font-semibold tracking-[-0.05em] text-white">stable</p>
                     <p className="mt-3 text-sm leading-7 text-stone-400">
@@ -232,7 +264,7 @@ export default function LandingPage() {
         </section>
 
         <section id="signal" className="border-b border-white/[0.08]">
-          <div className="mx-auto grid max-w-7xl gap-10 px-6 py-24 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
+          <div data-reveal className="reveal-on-scroll mx-auto grid max-w-7xl gap-10 px-6 py-24 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
             <div>
               <p className="text-xs uppercase tracking-[0.35em] text-stone-500">Le problème</p>
               <h2 className="mt-4 max-w-md text-4xl font-semibold leading-tight tracking-[-0.04em] text-[#f6f3ee] md:text-5xl">
@@ -253,7 +285,7 @@ export default function LandingPage() {
 
         <section id="relais" className="border-b border-white/[0.08] bg-white/[0.02]">
           <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div data-reveal className="reveal-on-scroll flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-2xl">
                 <p className="text-xs uppercase tracking-[0.35em] text-stone-500">Le relais</p>
                 <h2 className="mt-4 text-4xl font-semibold leading-tight tracking-[-0.04em] text-[#f6f3ee] md:text-5xl">
@@ -267,7 +299,7 @@ export default function LandingPage() {
 
             <div className="mt-14 grid gap-5 lg:grid-cols-3">
               {relayCards.map((card) => (
-                <div key={card.title} className="relative overflow-hidden border border-white/[0.1] bg-[#0b0c11] p-6">
+                <div data-reveal key={card.title} className="reveal-on-scroll interactive-panel relative overflow-hidden border border-white/[0.1] bg-[#0b0c11] p-6">
                   <div className="absolute inset-x-0 top-0 h-px" style={{ backgroundImage: card.accent }} />
                   <h3 className="text-2xl font-semibold tracking-[-0.03em] text-white">{card.title}</h3>
                   <p className="mt-4 text-sm leading-7 text-stone-400">{card.text}</p>
@@ -276,7 +308,7 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-16 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="border border-white/[0.1] bg-[#090a0e] p-6 md:p-8">
+              <div data-reveal className="reveal-on-scroll interactive-panel border border-white/[0.1] bg-[#090a0e] p-6 md:p-8">
                 <div className="flex items-center justify-between">
                   <p className="text-xs uppercase tracking-[0.35em] text-stone-500">Table de lecture</p>
                   <ShieldCheck className="h-5 w-5 text-cyan-200" />
@@ -286,7 +318,7 @@ export default function LandingPage() {
                     const Icon = moment.icon;
 
                     return (
-                      <div key={moment.label} className="border border-white/[0.08] bg-white/[0.03] p-5">
+                      <div key={moment.label} className="interactive-panel border border-white/[0.08] bg-white/[0.03] p-5">
                         <div className="flex items-center justify-between">
                           <span className="text-xs uppercase tracking-[0.24em] text-stone-500">{moment.label}</span>
                           <Icon className="h-4 w-4 text-amber-200" />
@@ -299,7 +331,7 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              <div className="flex flex-col justify-between border border-white/[0.1] bg-[#131019] p-6 md:p-8">
+              <div data-reveal className="reveal-on-scroll interactive-panel flex flex-col justify-between border border-white/[0.1] bg-[#131019] p-6 md:p-8">
                 <div>
                   <p className="text-xs uppercase tracking-[0.35em] text-stone-500">Pourquoi ça change tout</p>
                   <p className="mt-6 text-3xl font-semibold leading-tight tracking-[-0.04em] text-white">
@@ -320,7 +352,7 @@ export default function LandingPage() {
         </section>
 
         <section id="pour-qui" className="border-b border-white/[0.08]">
-          <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8">
+          <div data-reveal className="reveal-on-scroll mx-auto max-w-7xl px-6 py-24 lg:px-8">
             <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
               <div>
                 <p className="text-xs uppercase tracking-[0.35em] text-stone-500">Pour qui</p>
@@ -335,7 +367,7 @@ export default function LandingPage() {
 
               <div className="space-y-6">
                 {audiences.map((audience) => (
-                  <div key={audience.number} className="grid gap-5 border-t border-white/[0.1] pt-6 md:grid-cols-[84px_1fr]">
+                  <div key={audience.number} className="interactive-panel grid gap-5 border-t border-white/[0.1] pt-6 md:grid-cols-[84px_1fr]">
                     <p className="text-4xl font-semibold tracking-[-0.05em] text-stone-600">{audience.number}</p>
                     <div>
                       <h3 className="text-2xl font-semibold tracking-[-0.03em] text-white">{audience.title}</h3>
@@ -349,9 +381,9 @@ export default function LandingPage() {
         </section>
 
         <section id="cta" className="relative">
-          <div className="absolute inset-x-0 bottom-0 top-1/3 -z-10 bg-[linear-gradient(180deg,transparent_0%,rgba(255,245,230,0.08)_100%)]" />
+          <div className="animate-pulse-glow absolute inset-x-0 bottom-0 top-1/3 -z-10 bg-[linear-gradient(180deg,transparent_0%,rgba(255,245,230,0.08)_100%)]" />
           <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8">
-            <div className="grid gap-10 border border-white/[0.1] bg-[#f1ece1] p-8 text-[#14141a] md:p-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+            <div data-reveal className="reveal-on-scroll interactive-panel grid gap-10 border border-white/[0.1] bg-[#f1ece1] p-8 text-[#14141a] md:p-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
               <div>
                 <p className="inline-flex items-center gap-2 text-sm uppercase tracking-[0.22em] text-[#6f6658]">
                   <Globe className="h-4 w-4" />
@@ -368,17 +400,17 @@ export default function LandingPage() {
               <div className="flex flex-col gap-4 lg:items-start">
                 <Link
                   to="/register"
-                  className="inline-flex items-center justify-center gap-2 rounded-full bg-[#111118] px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-black"
+                  className="group inline-flex items-center justify-center gap-2 rounded-full bg-[#111118] px-6 py-3.5 text-sm font-semibold text-white transition duration-300 hover:-translate-y-0.5 hover:bg-black"
                 >
                   Ouvrir mon espace
-                  <ArrowRight className="h-4 w-4" />
+                  <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </Link>
                 <Link
                   to="/login"
-                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[#1f2028]/20 px-6 py-3.5 text-sm font-semibold text-[#171821] transition hover:bg-black/[0.04]"
+                  className="group inline-flex items-center justify-center gap-2 rounded-full border border-[#1f2028]/20 px-6 py-3.5 text-sm font-semibold text-[#171821] transition duration-300 hover:-translate-y-0.5 hover:bg-black/[0.04]"
                 >
                   Accéder au dashboard
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </Link>
               </div>
             </div>
