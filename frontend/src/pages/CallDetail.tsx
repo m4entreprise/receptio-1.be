@@ -40,6 +40,7 @@ export default function CallDetail() {
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [volume, setVolume] = useState(1);
+  const [isVolumeOpen, setIsVolumeOpen] = useState(false);
 
   useEffect(() => {
     fetchCallDetail();
@@ -53,6 +54,7 @@ export default function CallDetail() {
         setRecordingBlobUrl(null);
         setRecordingLoading(false);
         setIsPlaying(false);
+        setIsVolumeOpen(false);
         setCurrentTime(0);
         setAudioDuration(0);
         return;
@@ -79,6 +81,7 @@ export default function CallDetail() {
 
     return () => {
       setIsPlaying(false);
+      setIsVolumeOpen(false);
       setCurrentTime(0);
       setAudioDuration(0);
       if (objectUrl) {
@@ -395,41 +398,55 @@ export default function CallDetail() {
                               </span>
                             </div>
 
-                            <input
-                              type="range"
-                              min={0}
-                              max={audioDuration || 0}
-                              step={0.1}
-                              value={Math.min(currentTime, audioDuration || 0)}
-                              onChange={(event) => handleSeek(Number(event.target.value))}
-                              className="mt-3 h-2 w-full cursor-pointer appearance-none rounded-full bg-black/10 accent-[#171821]"
-                            />
-                          </div>
-                        </div>
+                            <div className="mt-3 flex items-center gap-2">
+                              <input
+                                type="range"
+                                min={0}
+                                max={audioDuration || 0}
+                                step={0.1}
+                                value={Math.min(currentTime, audioDuration || 0)}
+                                onChange={(event) => handleSeek(Number(event.target.value))}
+                                className="h-2 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-black/10 accent-[#171821]"
+                              />
 
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex min-w-0 items-center gap-3 rounded-full border border-black/10 bg-white px-3 py-2">
-                            <Volume2 className="h-4 w-4 shrink-0 text-[#171821]" />
-                            <input
-                              type="range"
-                              min={0}
-                              max={1}
-                              step={0.01}
-                              value={volume}
-                              onChange={(event) => handleVolumeChange(Number(event.target.value))}
-                              className="h-2 w-24 cursor-pointer appearance-none rounded-full bg-black/10 accent-[#171821] sm:w-28"
-                            />
-                          </div>
+                              <div className="relative shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setIsVolumeOpen((current) => !current)}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-white text-[#171821] transition hover:bg-[#fcfbf8]"
+                                  title="Volume"
+                                  aria-label="Contrôle du volume"
+                                >
+                                  <Volume2 className="h-4 w-4" />
+                                </button>
 
-                          <a
-                            href={recordingBlobUrl}
-                            download={`appel-${call.id}.mp3`}
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-black/10 bg-white text-[#171821] transition hover:bg-[#fcfbf8]"
-                            title="Télécharger l'enregistrement"
-                            aria-label="Télécharger l'enregistrement"
-                          >
-                            <Download className="h-4 w-4" />
-                          </a>
+                                {isVolumeOpen && (
+                                  <div className="absolute bottom-12 right-0 z-10 rounded-2xl border border-black/10 bg-white px-3 py-4 shadow-lg">
+                                    <input
+                                      type="range"
+                                      min={0}
+                                      max={1}
+                                      step={0.01}
+                                      value={volume}
+                                      onChange={(event) => handleVolumeChange(Number(event.target.value))}
+                                      className="h-24 w-2 cursor-pointer appearance-none rounded-full bg-black/10 accent-[#171821]"
+                                      style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              <a
+                                href={recordingBlobUrl}
+                                download={`appel-${call.id}.mp3`}
+                                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white text-[#171821] transition hover:bg-[#fcfbf8]"
+                                title="Télécharger l'enregistrement"
+                                aria-label="Télécharger l'enregistrement"
+                              >
+                                <Download className="h-4 w-4" />
+                              </a>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </>
