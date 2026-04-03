@@ -110,6 +110,26 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
+  try {
+    const promptText = String(req.query.text || '').trim();
+
+    if (!promptText) {
+      res.status(400).send('Prompt text required');
+      return;
+    }
+
+    const audio = await textToSpeech(promptText.slice(0, 500));
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.send(audio);
+  } catch (error: any) {
+    logger.error('Twilio Offer B prompt generation error', { error: error.message });
+    res.status(500).send('Prompt unavailable');
+  }
+});
+
 router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
   try {
     const { callId } = req.query;
@@ -205,6 +225,21 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
         lastIntent: intentData.intent,
         lastAction: escalation.shouldTransfer ? 'transfer_requested_by_agent' : 'agent_blocked',
       });
+
+      if (!requestedByCaller && !escalation.shouldTransfer) {
+        await registerOfferBAction(call.id, 'agent_needs_clarification', {
+          intent: intentData.intent,
+          input: speechResult,
+        });
+        res.type('text/xml').send(
+          buildOfferBFollowupTwiml(
+            baseUrl,
+            call.id,
+            'Je n’ai pas encore assez d’informations pour répondre précisément. Pouvez-vous reformuler ou préciser votre demande ?'
+          )
+        );
+        return;
+      }
 
       if (escalation.shouldTransfer && offerBSettings.humanTransferNumber) {
         await registerOfferBAction(call.id, 'transfer_to_human', {
@@ -384,17 +419,19 @@ function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: st
 function buildOfferBWelcomeTwiml(baseUrl: string, company: any, callId: string, settings: any): string {
   const actionUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-turn?callId=${encodeURIComponent(callId)}`);
   const greeting = settings.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Comment puis-je vous aider aujourd’hui ?`;
-  return buildGatherTwiml(actionUrl, greeting);
+  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?text=${encodeURIComponent(greeting)}`);
+  return buildGatherTwiml(actionUrl, promptUrl);
 }
 
 function buildOfferBFollowupTwiml(baseUrl: string, callId: string, prompt: string): string {
   const actionUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-turn?callId=${encodeURIComponent(callId)}`);
-  return buildGatherTwiml(actionUrl, prompt);
+  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?text=${encodeURIComponent(prompt)}`);
+  return buildGatherTwiml(actionUrl, promptUrl);
 }
 
-function buildGatherTwiml(actionUrl: string, prompt: string): string {
+function buildGatherTwiml(actionUrl: string, promptUrl: string): string {
   return buildTwiml(
-    `<Gather input="speech" action="${escapeXml(actionUrl)}" actionOnEmptyResult="true" method="POST" language="fr-FR" speechTimeout="auto" timeout="5"><Say language="fr-FR" voice="alice">${escapeXml(prompt)}</Say></Gather>`
+    `<Gather input="speech" action="${escapeXml(actionUrl)}" actionOnEmptyResult="true" method="POST" language="fr-FR" speechTimeout="auto" timeout="5"><Play>${escapeXml(promptUrl)}</Play></Gather>`
   );
 }
 
@@ -550,6 +587,7 @@ async function registerOfferBAction(callId: string, eventType: string, data: Rec
     transfer_to_human: 'Transfert vers un humain demandé ou décidé par l’agent.',
     fallback_to_voicemail: 'Retour automatique vers la messagerie de l’offre A.',
     agent_replied: 'Réponse temps réel fournie par le réceptionniste IA.',
+    agent_needs_clarification: 'L’agent a demandé une reformulation au lieu d’escalader immédiatement.',
   };
 
   const summaryResult = await query(
@@ -586,7 +624,8 @@ async function generateOfferBReply(params: {
   const systemPrompt = [
     `Tu es le réceptionniste téléphonique de ${params.companyName}.`,
     'Réponds en français, avec deux phrases maximum, ton professionnel et utile.',
-    'Si le client demande un humain, un rappel, un transfert ou si l’information manque, réponds exactement __TRANSFER__.',
+    'Si le client demande explicitement un humain, un rappel ou un transfert, réponds exactement __TRANSFER__.',
+    'Si l’information manque, n’invente pas et ne transfère pas automatiquement : demande une précision en une phrase courte.',
     'N’invente pas : utilise uniquement les informations métier fournies si elles existent.',
     params.knowledgeContext ? `Informations métier disponibles:\n${params.knowledgeContext}` : 'Aucune information métier fiable n’est disponible.',
     params.humanTransferNumber ? `Un numéro humain est configuré : ${params.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.',
