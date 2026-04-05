@@ -6,9 +6,18 @@ const OPENAI_API_URL = 'https://api.openai.com/v1';
 const OPENAI_STT_MODEL = process.env.OPENAI_STT_MODEL || 'gpt-4o-mini-transcribe';
 const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'ash';
+const OPENAI_TTS_SPEED = clampTtsSpeed(Number(process.env.OPENAI_TTS_SPEED || 1));
 const OPENAI_LLM_MODEL = process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano';
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+
+function clampTtsSpeed(speed: number): number {
+  if (!Number.isFinite(speed)) {
+    return 1;
+  }
+
+  return Math.min(4, Math.max(0.25, speed));
+}
 
 function ensureOpenAiConfigured() {
   if (!OPENAI_API_KEY) {
@@ -81,6 +90,63 @@ function hasMeaningfulTranscription(transcription: string): boolean {
   return normalizeTranscription(transcription).length > 3;
 }
 
+export async function transcribeAudioBuffer(
+  audioBuffer: Buffer,
+  options: {
+    fileName?: string;
+    language?: string;
+    mimeType?: string;
+  } = {}
+): Promise<{
+  text: string;
+  confidence: number;
+  language: string;
+}> {
+  try {
+    ensureOpenAiConfigured();
+
+    const formData = new FormData();
+    const language = options.language || 'fr';
+    const mimeType = options.mimeType || 'audio/wav';
+    const fileName = options.fileName || 'audio.wav';
+
+    formData.append('file', new Blob([audioBuffer], { type: mimeType }), fileName);
+    formData.append('model', OPENAI_STT_MODEL);
+    formData.append('language', language);
+
+    const response = await fetch(`${OPENAI_API_URL}/audio/transcriptions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: formData,
+    });
+
+    const data = await response.json() as { text?: string; error?: { message?: string } };
+
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'OpenAI transcription failed');
+    }
+
+    logger.info('Audio buffer transcribed with OpenAI', {
+      model: OPENAI_STT_MODEL,
+      textLength: data.text?.length || 0,
+      mimeType,
+    });
+
+    return {
+      text: data.text || '',
+      confidence: 1,
+      language,
+    };
+  } catch (error: any) {
+    logger.error('OpenAI audio buffer transcription error', {
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
 export async function transcribeAudio(audioUrl: string, language: string = 'fr'): Promise<{
   text: string;
   confidence: number;
@@ -130,9 +196,10 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
   }
 }
 
-export async function textToSpeech(text: string): Promise<Buffer> {
+export async function textToSpeech(text: string, format: string = 'mp3', speed: number = OPENAI_TTS_SPEED): Promise<Buffer> {
   try {
     ensureOpenAiConfigured();
+    const resolvedSpeed = clampTtsSpeed(speed);
 
     const response = await axios.post(
       `${OPENAI_API_URL}/audio/speech`,
@@ -140,7 +207,8 @@ export async function textToSpeech(text: string): Promise<Buffer> {
         model: OPENAI_TTS_MODEL,
         voice: OPENAI_TTS_VOICE,
         input: text,
-        format: 'mp3',
+        response_format: format,
+        speed: resolvedSpeed,
       },
       {
         headers: {
@@ -153,6 +221,7 @@ export async function textToSpeech(text: string): Promise<Buffer> {
 
     logger.info('Text converted to speech with OpenAI', {
       model: OPENAI_TTS_MODEL,
+      speed: resolvedSpeed,
       voice: OPENAI_TTS_VOICE,
       textLength: text.length,
     });
@@ -166,7 +235,12 @@ export async function textToSpeech(text: string): Promise<Buffer> {
 
 export async function generateResponse(
   messages: Array<{ role: string; content: string }>,
-  systemPrompt?: string
+  systemPrompt?: string,
+  options: {
+    model?: string;
+    maxCompletionTokens?: number;
+    temperature?: number;
+  } = {}
 ): Promise<string> {
   try {
     ensureOpenAiConfigured();
@@ -178,10 +252,10 @@ export async function generateResponse(
     const response = await axios.post(
       `${OPENAI_API_URL}/chat/completions`,
       {
-        model: OPENAI_LLM_MODEL,
+        model: options.model || OPENAI_LLM_MODEL,
         messages: allMessages,
-        temperature: 0.4,
-        max_completion_tokens: 500,
+        temperature: options.temperature ?? 0.4,
+        max_completion_tokens: options.maxCompletionTokens ?? 500,
       },
       {
         headers: {
@@ -198,7 +272,7 @@ export async function generateResponse(
     }
 
     logger.info('OpenAI response generated', {
-      model: OPENAI_LLM_MODEL,
+      model: options.model || OPENAI_LLM_MODEL,
       messageCount: messages.length,
       responseLength: content.length,
     });

@@ -6,7 +6,8 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Calls from './pages/Calls';
 import CallDetail from './pages/CallDetail';
-import Settings from './pages/Settings';
+import SettingsAgentIA from './pages/SettingsAgentIA';
+import SettingsOfferB from './pages/SettingsOfferB';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -26,7 +27,8 @@ function App() {
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
           <Route path="/calls" element={<PrivateRoute><Calls /></PrivateRoute>} />
           <Route path="/calls/:id" element={<PrivateRoute><CallDetail /></PrivateRoute>} />
-          <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
+          <Route path="/settings/agent-ia" element={<PrivateRoute><SettingsAgentIA /></PrivateRoute>} />
+          <Route path="/settings" element={<PrivateRoute><SettingsOfferB /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>

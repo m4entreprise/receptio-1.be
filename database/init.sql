@@ -100,6 +100,18 @@ CREATE TABLE IF NOT EXISTS business_rules (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS knowledge_base_entries (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    category VARCHAR(100),
+    content TEXT NOT NULL,
+    priority INTEGER DEFAULT 0,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_calls_company_id ON calls(company_id);
 CREATE INDEX IF NOT EXISTS idx_calls_created_at ON calls(created_at DESC);
@@ -111,6 +123,8 @@ CREATE INDEX IF NOT EXISTS idx_call_events_call_id ON call_events(call_id);
 CREATE INDEX IF NOT EXISTS idx_call_events_timestamp ON call_events(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_users_company_id ON users(company_id);
 CREATE INDEX IF NOT EXISTS idx_business_rules_company_id ON business_rules(company_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_entries_company_id ON knowledge_base_entries(company_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_entries_enabled ON knowledge_base_entries(enabled);
 
 -- Update timestamp trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -122,17 +136,70 @@ END;
 $$ language 'plpgsql';
 
 -- Apply update triggers
-CREATE TRIGGER update_companies_updated_at BEFORE UPDATE ON companies
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'update_companies_updated_at'
+          AND tgrelid = 'companies'::regclass
+    ) THEN
+        CREATE TRIGGER update_companies_updated_at BEFORE UPDATE ON companies
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'update_users_updated_at'
+          AND tgrelid = 'users'::regclass
+    ) THEN
+        CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
-CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'update_conversations_updated_at'
+          AND tgrelid = 'conversations'::regclass
+    ) THEN
+        CREATE TRIGGER update_conversations_updated_at BEFORE UPDATE ON conversations
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
-CREATE TRIGGER update_business_rules_updated_at BEFORE UPDATE ON business_rules
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'update_business_rules_updated_at'
+          AND tgrelid = 'business_rules'::regclass
+    ) THEN
+        CREATE TRIGGER update_business_rules_updated_at BEFORE UPDATE ON business_rules
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'update_knowledge_base_entries_updated_at'
+          AND tgrelid = 'knowledge_base_entries'::regclass
+    ) THEN
+        CREATE TRIGGER update_knowledge_base_entries_updated_at BEFORE UPDATE ON knowledge_base_entries
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES

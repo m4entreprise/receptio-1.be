@@ -19,6 +19,31 @@ export interface Company {
   updatedAt: Date;
 }
 
+export interface BbisAgentSettings {
+  systemPrompt?: string;
+  temperature?: number;
+  llmModel?: string;
+  maxCompletionTokens?: number;
+  silenceThresholdMs?: number;
+  minSpeechMs?: number;
+  bargeInMinSpeechMs?: number;
+  sttModel?: string;
+  ttsModel?: string;
+  ttsVoice?: string;
+}
+
+export interface OfferBSettings {
+  offerMode?: 'A' | 'B' | 'Bbis';
+  agentEnabled?: boolean;
+  humanTransferNumber?: string;
+  fallbackToVoicemail?: boolean;
+  maxAgentFailures?: number;
+  greetingText?: string;
+  knowledgeBaseEnabled?: boolean;
+  appointmentIntegrationEnabled?: boolean;
+  bbisAgent?: BbisAgentSettings;
+}
+
 export interface User {
   id: string;
   companyId: string;
@@ -72,6 +97,18 @@ export interface Conversation {
   state: string;
   context: Record<string, any>;
   messages: any[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface KnowledgeBaseEntry {
+  id: string;
+  companyId: string;
+  title: string;
+  category?: string;
+  content: string;
+  priority: number;
+  enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
