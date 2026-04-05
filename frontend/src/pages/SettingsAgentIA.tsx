@@ -8,6 +8,10 @@ interface BbisAgentSettings {
   systemPrompt: string;
   temperature: number;
   llmModel: string;
+  maxCompletionTokens: number;
+  silenceThresholdMs: number;
+  minSpeechMs: number;
+  bargeInMinSpeechMs: number;
   sttModel: string;
   ttsModel: string;
   ttsVoice: string;
@@ -25,6 +29,10 @@ const defaultBbisAgentSettings: BbisAgentSettings = {
   systemPrompt: '',
   temperature: 0.4,
   llmModel: '',
+  maxCompletionTokens: 120,
+  silenceThresholdMs: 260,
+  minSpeechMs: 120,
+  bargeInMinSpeechMs: 80,
   sttModel: '',
   ttsModel: '',
   ttsVoice: '',
@@ -104,7 +112,7 @@ export default function SettingsAgentIA() {
                 Paramètres de l’agent IA
               </h1>
               <p className="max-w-2xl text-sm leading-7 text-stone-300 sm:text-base">
-                Ajuste le prompt système, la température et les modèles utilisés par l’Offre Bbis pour tester rapidement plusieurs comportements sans modifier le code.
+                Ajuste le prompt système, la température, les modèles et les réglages de fluidité utilisés par l’Offre Bbis pour tester rapidement plusieurs comportements sans modifier le code.
               </p>
             </div>
           </div>
@@ -223,6 +231,84 @@ export default function SettingsAgentIA() {
                   onChange={(e) => setFormData({ ...formData, sttModel: e.target.value })}
                   placeholder="nova-2"
                   className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition placeholder:text-[#9b9387] focus:border-black/20 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div>
+                <label htmlFor="maxCompletionTokens" className="block text-sm font-medium text-[#171821]">
+                  Tokens max de réponse
+                </label>
+                <input
+                  type="number"
+                  id="maxCompletionTokens"
+                  min={20}
+                  max={500}
+                  step={1}
+                  value={formData.maxCompletionTokens}
+                  onChange={(e) => setFormData({ ...formData, maxCompletionTokens: Number(e.target.value || 0) })}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
+                />
+              </div>
+
+              <div className="rounded-[24px] border border-black/5 bg-[#f7f4ee] p-4 sm:p-5">
+                <div className="flex items-start gap-3">
+                  <SlidersHorizontal className="mt-0.5 h-5 w-5 text-[#171821]" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-[#171821]">Fluidité de conversation</p>
+                    <p className="mt-2 text-sm leading-6 text-[#6f685d]">Baisse les seuils pour une réponse plus rapide. Monte-les si l’agent te coupe trop tôt ou déclenche sur des bruits courts.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-3">
+              <div>
+                <label htmlFor="silenceThresholdMs" className="block text-sm font-medium text-[#171821]">
+                  Fin de phrase (ms)
+                </label>
+                <input
+                  type="number"
+                  id="silenceThresholdMs"
+                  min={60}
+                  max={1500}
+                  step={10}
+                  value={formData.silenceThresholdMs}
+                  onChange={(e) => setFormData({ ...formData, silenceThresholdMs: Number(e.target.value || 0) })}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="minSpeechMs" className="block text-sm font-medium text-[#171821]">
+                  Parole minimale (ms)
+                </label>
+                <input
+                  type="number"
+                  id="minSpeechMs"
+                  min={40}
+                  max={1500}
+                  step={10}
+                  value={formData.minSpeechMs}
+                  onChange={(e) => setFormData({ ...formData, minSpeechMs: Number(e.target.value || 0) })}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="bargeInMinSpeechMs" className="block text-sm font-medium text-[#171821]">
+                  Interruption IA (ms)
+                </label>
+                <input
+                  type="number"
+                  id="bargeInMinSpeechMs"
+                  min={40}
+                  max={1000}
+                  step={10}
+                  value={formData.bargeInMinSpeechMs}
+                  onChange={(e) => setFormData({ ...formData, bargeInMinSpeechMs: Number(e.target.value || 0) })}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
                 />
               </div>
             </div>

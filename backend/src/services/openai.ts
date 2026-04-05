@@ -238,6 +238,7 @@ export async function generateResponse(
   systemPrompt?: string,
   options: {
     model?: string;
+    maxCompletionTokens?: number;
     temperature?: number;
   } = {}
 ): Promise<string> {
@@ -254,7 +255,7 @@ export async function generateResponse(
         model: options.model || OPENAI_LLM_MODEL,
         messages: allMessages,
         temperature: options.temperature ?? 0.4,
-        max_completion_tokens: 500,
+        max_completion_tokens: options.maxCompletionTokens ?? 500,
       },
       {
         headers: {

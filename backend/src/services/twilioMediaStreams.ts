@@ -17,6 +17,10 @@ const SILENCE_THRESHOLD_MS = Number(process.env.OFFER_B_STREAMING_SILENCE_MS || 
 const MIN_SPEECH_MS = Number(process.env.OFFER_B_STREAMING_MIN_SPEECH_MS || 180);
 const BARGE_IN_MIN_SPEECH_MS = Number(process.env.OFFER_B_STREAMING_BARGE_IN_MS || 120);
 const ENERGY_THRESHOLD = Number(process.env.OFFER_B_STREAMING_ENERGY_THRESHOLD || 500);
+const BBIS_SILENCE_THRESHOLD_MS = Number(process.env.OFFER_BBIS_STREAMING_SILENCE_MS || 260);
+const BBIS_MIN_SPEECH_MS = Number(process.env.OFFER_BBIS_STREAMING_MIN_SPEECH_MS || 120);
+const BBIS_BARGE_IN_MIN_SPEECH_MS = Number(process.env.OFFER_BBIS_STREAMING_BARGE_IN_MS || 80);
+const STREAMING_RESPONSE_MAX_TOKENS = Number(process.env.OFFER_STREAMING_MAX_COMPLETION_TOKENS || 120);
 const ULaw_SAMPLE_RATE = 8000;
 const ULaw_FRAME_BYTES = 160;
 const ULaw_FRAME_DURATION_MS = 20;
@@ -25,7 +29,11 @@ const MAX_HISTORY_MESSAGES = 12;
 interface StreamSessionState {
   activeOfferMode: 'B' | 'Bbis';
   assistantPlaybackUntil: number;
+  bbisBargeInMinSpeechMs: number;
   bbisLlmModel: string;
+  bbisMaxCompletionTokens: number;
+  bbisMinSpeechMs: number;
+  bbisSilenceThresholdMs: number;
   bbisSttModel: string;
   bbisSystemPrompt: string;
   bbisTemperature: number;
@@ -123,7 +131,11 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
   const state: StreamSessionState = {
     activeOfferMode: 'B',
     assistantPlaybackUntil: 0,
+    bbisBargeInMinSpeechMs: BBIS_BARGE_IN_MIN_SPEECH_MS,
     bbisLlmModel: '',
+    bbisMaxCompletionTokens: STREAMING_RESPONSE_MAX_TOKENS,
+    bbisMinSpeechMs: BBIS_MIN_SPEECH_MS,
+    bbisSilenceThresholdMs: BBIS_SILENCE_THRESHOLD_MS,
     bbisSttModel: '',
     bbisSystemPrompt: '',
     bbisTemperature: 0.4,
@@ -273,9 +285,13 @@ async function handleTwilioMessage(
         state.speechDurationMs += ULaw_FRAME_DURATION_MS;
         state.silenceDurationMs = 0;
 
+        const bargeInMinSpeechMs = state.activeOfferMode === 'Bbis'
+          ? state.bbisBargeInMinSpeechMs
+          : BARGE_IN_MIN_SPEECH_MS;
+
         if (
           state.assistantPlaybackUntil > Date.now()
-          && state.speechDurationMs >= BARGE_IN_MIN_SPEECH_MS
+          && state.speechDurationMs >= bargeInMinSpeechMs
           && state.streamSid
           && twilioSocket.readyState === WebSocket.OPEN
         ) {
@@ -295,9 +311,16 @@ async function handleTwilioMessage(
       state.pendingAudioChunks.push(audioBuffer);
       state.silenceDurationMs += ULaw_FRAME_DURATION_MS;
 
+      const silenceThresholdMs = state.activeOfferMode === 'Bbis'
+        ? state.bbisSilenceThresholdMs
+        : SILENCE_THRESHOLD_MS;
+      const minSpeechMs = state.activeOfferMode === 'Bbis'
+        ? state.bbisMinSpeechMs
+        : MIN_SPEECH_MS;
+
       if (
-        state.silenceDurationMs >= SILENCE_THRESHOLD_MS
-        && state.speechDurationMs >= MIN_SPEECH_MS
+        state.silenceDurationMs >= silenceThresholdMs
+        && state.speechDurationMs >= minSpeechMs
         && !state.pendingProcessScheduled
       ) {
         state.pendingProcessScheduled = true;
@@ -367,7 +390,11 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
   });
 
   state.activeOfferMode = activeOfferMode;
+  state.bbisBargeInMinSpeechMs = bbisAgentSettings.bargeInMinSpeechMs;
   state.bbisLlmModel = bbisAgentSettings.llmModel.trim();
+  state.bbisMaxCompletionTokens = bbisAgentSettings.maxCompletionTokens;
+  state.bbisMinSpeechMs = bbisAgentSettings.minSpeechMs;
+  state.bbisSilenceThresholdMs = bbisAgentSettings.silenceThresholdMs;
   state.bbisSttModel = bbisAgentSettings.sttModel.trim();
   state.bbisSystemPrompt = bbisAgentSettings.systemPrompt.trim();
   state.bbisTemperature = bbisAgentSettings.temperature;
@@ -399,8 +426,10 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
   state.speechDetected = false;
 
   try {
+    const utteranceStartedAt = Date.now();
     const pcmBuffer = decodeULawToPcm16(utteranceBuffer);
     const wavBuffer = wrapPcm16AsWav(pcmBuffer, ULaw_SAMPLE_RATE, 1);
+    const sttStartedAt = Date.now();
     const transcription = state.activeOfferMode === 'Bbis'
       ? await deepgramTranscribeAudioBuffer(wavBuffer, {
         language: 'fr',
@@ -412,13 +441,18 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         language: 'fr',
         mimeType: 'audio/wav',
       });
+    const sttDurationMs = Date.now() - sttStartedAt;
     const callerText = normalizeCallerText(transcription.text);
 
     if (!callerText) {
       return;
     }
 
-    await appendTranscriptLine(state.callId, 'Client', callerText);
+    void runNonBlockingPersistence(
+      appendTranscriptLine(state.callId, 'Client', callerText),
+      'streaming.user_transcript_persist_failed',
+      state
+    );
     state.transcriptMessages.push({ role: 'user', content: callerText });
     trimConversationHistory(state);
 
@@ -459,7 +493,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       return;
     }
 
+    const llmStartedAt = Date.now();
     const agentReply = await generateStreamingReply(state, callerText);
+    const llmDurationMs = Date.now() - llmStartedAt;
 
     if (agentReply === '__TRANSFER__' && state.humanTransferNumber) {
       await appendOfferBAction(state.callId, 'transfer_to_human', {
@@ -485,6 +521,16 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       persistTranscript: true,
       source: 'streaming_llm',
     });
+
+    logger.info('Realtime utterance processed', {
+      callId: state.callId,
+      activeOfferMode: state.activeOfferMode,
+      sttDurationMs,
+      llmDurationMs,
+      totalDurationMs: Date.now() - utteranceStartedAt,
+      callerTextLength: callerText.length,
+      replyLength: responseText.length,
+    });
   } catch (error: any) {
     logger.error('Offer realtime STT-LLM-TTS pipeline error', {
       error: error.message,
@@ -503,10 +549,14 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
   } finally {
     state.processingUtterance = false;
 
+    const silenceThresholdMs = state.activeOfferMode === 'Bbis'
+      ? state.bbisSilenceThresholdMs
+      : SILENCE_THRESHOLD_MS;
+
     if (
       state.pendingAudioChunks.length > 0
       && state.speechDetected
-      && state.silenceDurationMs >= SILENCE_THRESHOLD_MS
+      && state.silenceDurationMs >= silenceThresholdMs
       && !state.pendingProcessScheduled
     ) {
       state.pendingProcessScheduled = true;
@@ -537,6 +587,7 @@ async function generateStreamingReply(state: StreamSessionState, callerText: str
 
   const response = await generateResponse(messages, systemPrompt, {
     model: state.activeOfferMode === 'Bbis' ? state.bbisLlmModel || undefined : undefined,
+    maxCompletionTokens: state.activeOfferMode === 'Bbis' ? state.bbisMaxCompletionTokens : STREAMING_RESPONSE_MAX_TOKENS,
     temperature: state.activeOfferMode === 'Bbis' ? state.bbisTemperature : undefined,
   });
   return response.trim();
@@ -561,29 +612,48 @@ async function speakAssistantText(
 
   try {
     if (options.persistTranscript) {
-      await appendTranscriptLine(state.callId, 'IA', cleanText);
+      void runNonBlockingPersistence(
+        appendTranscriptLine(state.callId, 'IA', cleanText),
+        'streaming.assistant_transcript_persist_failed',
+        state
+      );
     }
 
     state.transcriptMessages.push({ role: 'assistant', content: cleanText });
     trimConversationHistory(state);
 
-    await appendOfferBAction(state.callId, options.actionType, {
-      source: options.source,
-      transcript: cleanText,
-      activeOfferMode: state.activeOfferMode,
-    });
+    void runNonBlockingPersistence(
+      appendOfferBAction(state.callId, options.actionType, {
+        source: options.source,
+        transcript: cleanText,
+        activeOfferMode: state.activeOfferMode,
+      }),
+      'streaming.assistant_action_persist_failed',
+      state
+    );
 
+    const ttsStartedAt = Date.now();
     const wavAudio = state.activeOfferMode === 'Bbis'
       ? await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
         model: state.bbisTtsModel || undefined,
         voice: state.bbisTtsVoice || undefined,
       })
       : await textToSpeech(cleanText, 'wav');
+    const ttsDurationMs = Date.now() - ttsStartedAt;
     const ulawAudio = convertWavToULaw(wavAudio);
     const audioDurationMs = calculateAudioDurationMs(ulawAudio);
     const playbackGeneration = ++state.playbackGeneration;
     state.assistantPlaybackUntil = Date.now() + audioDurationMs + 120;
     await sendULawAudioToTwilio(twilioSocket, state.streamSid, ulawAudio, () => playbackGeneration === state.playbackGeneration);
+
+    logger.info('Realtime assistant audio generated', {
+      callId: state.callId,
+      activeOfferMode: state.activeOfferMode,
+      source: options.source,
+      ttsDurationMs,
+      audioDurationMs,
+      textLength: cleanText.length,
+    });
 
     if (playbackGeneration === state.playbackGeneration && state.assistantPlaybackUntil < Date.now()) {
       state.assistantPlaybackUntil = 0;
@@ -736,6 +806,17 @@ async function appendCallEvent(callId: string, eventType: string, data: Record<s
      VALUES ($1, $2, $3)`,
     [callId, eventType, data]
   );
+}
+
+function runNonBlockingPersistence(task: Promise<unknown>, eventType: string, state: StreamSessionState) {
+  task.catch((error: any) => {
+    logger.warn(eventType, {
+      callId: state.callId,
+      companyId: state.companyId,
+      activeOfferMode: state.activeOfferMode,
+      error: error.message,
+    });
+  });
 }
 
 async function finalizeStreamingCall(state: StreamSessionState, reason: string) {

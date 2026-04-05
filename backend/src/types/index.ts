@@ -23,6 +23,10 @@ export interface BbisAgentSettings {
   systemPrompt?: string;
   temperature?: number;
   llmModel?: string;
+  maxCompletionTokens?: number;
+  silenceThresholdMs?: number;
+  minSpeechMs?: number;
+  bargeInMinSpeechMs?: number;
   sttModel?: string;
   ttsModel?: string;
   ttsVoice?: string;
