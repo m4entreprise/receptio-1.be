@@ -19,8 +19,17 @@ export interface Company {
   updatedAt: Date;
 }
 
+export interface BbisAgentSettings {
+  systemPrompt?: string;
+  temperature?: number;
+  llmModel?: string;
+  sttModel?: string;
+  ttsModel?: string;
+  ttsVoice?: string;
+}
+
 export interface OfferBSettings {
-  offerMode?: 'A' | 'B';
+  offerMode?: 'A' | 'B' | 'Bbis';
   agentEnabled?: boolean;
   humanTransferNumber?: string;
   fallbackToVoicemail?: boolean;
@@ -28,6 +37,7 @@ export interface OfferBSettings {
   greetingText?: string;
   knowledgeBaseEnabled?: boolean;
   appointmentIntegrationEnabled?: boolean;
+  bbisAgent?: BbisAgentSettings;
 }
 
 export interface User {

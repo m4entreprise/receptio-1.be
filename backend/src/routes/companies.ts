@@ -7,8 +7,17 @@ import { z } from 'zod';
 
 const router = Router();
 
+const bbisAgentSettingsSchema = z.object({
+  systemPrompt: z.string().max(10000).optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  llmModel: z.string().max(200).optional(),
+  sttModel: z.string().max(200).optional(),
+  ttsModel: z.string().max(200).optional(),
+  ttsVoice: z.string().max(200).optional(),
+});
+
 const offerBSettingsSchema = z.object({
-  offerMode: z.enum(['A', 'B']).optional(),
+  offerMode: z.enum(['A', 'B', 'Bbis']).optional(),
   agentEnabled: z.boolean().optional(),
   humanTransferNumber: z.string().optional(),
   fallbackToVoicemail: z.boolean().optional(),
@@ -16,6 +25,7 @@ const offerBSettingsSchema = z.object({
   greetingText: z.string().optional(),
   knowledgeBaseEnabled: z.boolean().optional(),
   appointmentIntegrationEnabled: z.boolean().optional(),
+  bbisAgent: bbisAgentSettingsSchema.optional(),
 });
 
 const updateCompanySchema = z.object({
@@ -71,9 +81,16 @@ router.patch('/me', authenticateToken, async (req: AuthRequest, res: Response, n
     }
 
     if (data.settings) {
+      const currentSettings = currentCompanyResult.rows[0].settings || {};
       const mergedSettings = {
-        ...(currentCompanyResult.rows[0].settings || {}),
+        ...currentSettings,
         ...data.settings,
+        bbisAgent: data.settings.bbisAgent
+          ? {
+            ...(currentSettings.bbisAgent || {}),
+            ...data.settings.bbisAgent,
+          }
+          : currentSettings.bbisAgent,
       };
       updates.push(`settings = $${paramCount++}`);
       values.push(mergedSettings);

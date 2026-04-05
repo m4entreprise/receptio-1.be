@@ -58,7 +58,9 @@ export default function Layout({ children }: LayoutProps) {
               <div className="hidden flex-wrap gap-2 sm:flex">
                 {navItems.map((item) => {
                   const Icon = item.icon;
-                  const isActive = location.pathname === item.path;
+                  const isActive = item.path === '/settings'
+                    ? location.pathname.startsWith('/settings')
+                    : location.pathname === item.path;
 
                   return (
                     <Link
@@ -89,7 +91,9 @@ export default function Layout({ children }: LayoutProps) {
         <div className="mx-auto grid max-w-md grid-cols-3 gap-2 rounded-2xl border border-black/5 bg-white/80 p-2 shadow-[0_-12px_30px_rgba(17,17,24,0.08)]">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const isActive = item.path === '/settings'
+              ? location.pathname.startsWith('/settings')
+              : location.pathname === item.path;
 
             return (
               <Link

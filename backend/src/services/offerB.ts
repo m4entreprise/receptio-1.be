@@ -1,6 +1,8 @@
 import { query } from '../config/database';
-import { KnowledgeBaseEntry, OfferBSettings } from '../types';
+import { BbisAgentSettings, KnowledgeBaseEntry, OfferBSettings } from '../types';
 import logger from '../utils/logger';
+
+export type ActiveOfferMode = 'A' | 'B' | 'Bbis';
 
 export interface TelephonyProvider {
   provider: string;
@@ -38,6 +40,23 @@ const defaultOfferBSettings: Required<OfferBSettings> = {
   greetingText: '',
   knowledgeBaseEnabled: false,
   appointmentIntegrationEnabled: false,
+  bbisAgent: {
+    systemPrompt: '',
+    temperature: 0.4,
+    llmModel: '',
+    sttModel: '',
+    ttsModel: '',
+    ttsVoice: '',
+  },
+};
+
+const defaultBbisAgentSettings: Required<BbisAgentSettings> = {
+  systemPrompt: '',
+  temperature: 0.4,
+  llmModel: '',
+  sttModel: '',
+  ttsModel: '',
+  ttsVoice: '',
 };
 
 export async function getCompanyOfferBSettings(companyId: string): Promise<Required<OfferBSettings>> {
@@ -47,6 +66,17 @@ export async function getCompanyOfferBSettings(companyId: string): Promise<Requi
   return {
     ...defaultOfferBSettings,
     ...settings,
+    bbisAgent: {
+      ...defaultBbisAgentSettings,
+      ...(settings.bbisAgent || {}),
+    },
+  };
+}
+
+export function getBbisAgentSettings(settings: OfferBSettings): Required<BbisAgentSettings> {
+  return {
+    ...defaultBbisAgentSettings,
+    ...(settings.bbisAgent || {}),
   };
 }
 
@@ -105,8 +135,28 @@ export async function buildKnowledgeBaseContext(companyId: string, search?: stri
     .join('\n');
 }
 
+export function getActiveOfferMode(settings: OfferBSettings): ActiveOfferMode {
+  if (settings.offerMode === 'Bbis') {
+    return 'Bbis';
+  }
+
+  if (settings.offerMode === 'B') {
+    return 'B';
+  }
+
+  return 'A';
+}
+
 export function shouldUseOfferBAgent(settings: OfferBSettings): boolean {
-  return settings.offerMode === 'B' && Boolean(settings.agentEnabled);
+  return getActiveOfferMode(settings) === 'B' && Boolean(settings.agentEnabled);
+}
+
+export function shouldUseOfferBBisAgent(settings: OfferBSettings): boolean {
+  return getActiveOfferMode(settings) === 'Bbis' && Boolean(settings.agentEnabled);
+}
+
+export function shouldUseRealtimeOfferAgent(settings: OfferBSettings): boolean {
+  return Boolean(settings.agentEnabled) && getActiveOfferMode(settings) !== 'A';
 }
 
 export const defaultEscalationPolicy: EscalationPolicy = {

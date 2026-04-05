@@ -235,7 +235,11 @@ export async function textToSpeech(text: string, format: string = 'mp3', speed: 
 
 export async function generateResponse(
   messages: Array<{ role: string; content: string }>,
-  systemPrompt?: string
+  systemPrompt?: string,
+  options: {
+    model?: string;
+    temperature?: number;
+  } = {}
 ): Promise<string> {
   try {
     ensureOpenAiConfigured();
@@ -247,9 +251,9 @@ export async function generateResponse(
     const response = await axios.post(
       `${OPENAI_API_URL}/chat/completions`,
       {
-        model: OPENAI_LLM_MODEL,
+        model: options.model || OPENAI_LLM_MODEL,
         messages: allMessages,
-        temperature: 0.4,
+        temperature: options.temperature ?? 0.4,
         max_completion_tokens: 500,
       },
       {
@@ -267,7 +271,7 @@ export async function generateResponse(
     }
 
     logger.info('OpenAI response generated', {
-      model: OPENAI_LLM_MODEL,
+      model: options.model || OPENAI_LLM_MODEL,
       messageCount: messages.length,
       responseLength: content.length,
     });

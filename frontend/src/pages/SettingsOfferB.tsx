@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Bot, Building2, Database, Pencil, PhoneForwarded, Plus, Save, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import axios from 'axios';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 
 interface OfferBSettings {
-  offerMode: 'A' | 'B';
+  offerMode: 'A' | 'B' | 'Bbis';
   agentEnabled: boolean;
   humanTransferNumber: string;
   fallbackToVoicemail: boolean;
@@ -234,6 +235,19 @@ export default function SettingsOfferB() {
             <p className="text-[11px] uppercase tracking-[0.24em] text-[#8b8478]">Compte</p>
             <div className="mt-5 space-y-4">
               <div className="rounded-2xl bg-[#f4f1ea] px-4 py-4">
+                <p className="text-sm text-[#8b8478]">Réglages avancés Bbis</p>
+                <div className="mt-3 flex flex-col gap-3">
+                  <p className="text-sm text-[#171821]">Modifie le prompt, la température et les modèles de l’agent IA dédié à l’Offre Bbis.</p>
+                  <Link
+                    to="/settings/agent-ia"
+                    className="inline-flex items-center justify-center rounded-full bg-[#111118] px-4 py-2 text-sm font-semibold text-white transition hover:bg-black"
+                  >
+                    Ouvrir Paramètres de l’agent IA
+                  </Link>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-[#f4f1ea] px-4 py-4">
                 <p className="text-sm text-[#8b8478]">Email de référence</p>
                 <p className="mt-1 break-all text-base font-semibold text-[#171821]">{company?.email || 'Non renseigné'}</p>
               </div>
@@ -316,13 +330,14 @@ export default function SettingsOfferB() {
                     ...formData,
                     settings: {
                       ...formData.settings,
-                      offerMode: e.target.value as 'A' | 'B',
+                      offerMode: e.target.value as 'A' | 'B' | 'Bbis',
                     },
                   })}
                   className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
                 >
                   <option value="A">Offre A - Répondeur intelligent</option>
                   <option value="B">Offre B - Agent vocal IA</option>
+                  <option value="Bbis">Offre Bbis - Agent vocal Deepgram</option>
                 </select>
               </div>
 
