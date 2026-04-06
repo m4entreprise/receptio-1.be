@@ -37,6 +37,7 @@ interface BbisTurnMetrics {
   replyLength: number;
   sttDurationMs: number | null;
   llmDurationMs: number | null;
+  processingDurationMs: number | null;
   ttsDurationMs: number | null;
   totalDurationMs: number | null;
   audioDurationMs: number | null;
@@ -98,8 +99,9 @@ function parseTurnEvent(event: CallEventRow): BbisTurnMetrics {
     replyLength: toNumber(data.replyLength) || 0,
     sttDurationMs: toNumber(data.sttDurationMs),
     llmDurationMs: toNumber(data.llmDurationMs),
+    processingDurationMs: toNumber(data.processingDurationMs) ?? toNumber(data.totalDurationMs),
     ttsDurationMs: toNumber(data.ttsDurationMs),
-    totalDurationMs: toNumber(data.totalDurationMs),
+    totalDurationMs: toNumber(data.processingDurationMs) ?? toNumber(data.totalDurationMs),
     audioDurationMs: toNumber(data.audioDurationMs),
     inputAudioMs: toNumber(data.inputAudioMs),
     speechDurationMs: toNumber(data.speechDurationMs),
@@ -166,13 +168,18 @@ function buildAggregateFromTurns(turns: BbisTurnMetrics[]) {
     avgSttMs: average(turns.map((turn) => turn.sttDurationMs)),
     avgLlmMs: average(turns.map((turn) => turn.llmDurationMs)),
     avgTtsMs: average(turns.map((turn) => turn.ttsDurationMs)),
-    avgTotalMs: average(turns.map((turn) => turn.totalDurationMs)),
+    avgPlaybackMs: average(turns.map((turn) => turn.audioDurationMs)),
+    avgProcessingMs: average(turns.map((turn) => turn.processingDurationMs)),
+    avgTotalMs: average(turns.map((turn) => turn.processingDurationMs ?? turn.totalDurationMs)),
     avgInputAudioMs: average(turns.map((turn) => turn.inputAudioMs)),
     avgSpeechMs: average(turns.map((turn) => turn.speechDurationMs)),
     avgSilenceMs: average(turns.map((turn) => turn.silenceDurationMs)),
     avgConfidence: average(turns.map((turn) => turn.sttConfidence !== null ? Math.round(turn.sttConfidence * 100) : null)),
-    maxTotalMs: maxValue(turns.map((turn) => turn.totalDurationMs)),
-    p95TotalMs: percentile(turns.map((turn) => turn.totalDurationMs), 0.95),
+    maxPlaybackMs: maxValue(turns.map((turn) => turn.audioDurationMs)),
+    maxProcessingMs: maxValue(turns.map((turn) => turn.processingDurationMs)),
+    maxTotalMs: maxValue(turns.map((turn) => turn.processingDurationMs ?? turn.totalDurationMs)),
+    p95ProcessingMs: percentile(turns.map((turn) => turn.processingDurationMs), 0.95),
+    p95TotalMs: percentile(turns.map((turn) => turn.processingDurationMs ?? turn.totalDurationMs), 0.95),
     errorRate: totalTurns === 0 ? 0 : Number(((failedTurns.length / totalTurns) * 100).toFixed(1)),
     noTranscriptRate: totalTurns === 0 ? 0 : Number(((noTranscriptTurns.length / totalTurns) * 100).toFixed(1)),
     bargeInRate: totalTurns === 0 ? 0 : Number(((bargeInCount / totalTurns) * 100).toFixed(1)),
@@ -227,7 +234,10 @@ router.get('/bbis', authenticateToken, async (req: AuthRequest, res: Response, n
           avgSttMs: null,
           avgLlmMs: null,
           avgTtsMs: null,
+          avgPlaybackMs: null,
+          avgProcessingMs: null,
           avgTotalMs: null,
+          p95ProcessingMs: null,
           p95TotalMs: null,
           errorRate: 0,
           noTranscriptRate: 0,
@@ -288,7 +298,7 @@ router.get('/bbis', authenticateToken, async (req: AuthRequest, res: Response, n
     };
 
     const volumeByDayMap = new Map<string, { date: string; calls: number; turns: number; errors: number }>();
-    const latencyByDayMap = new Map<string, { date: string; totalValues: number[]; sttValues: number[]; llmValues: number[]; ttsValues: number[] }>();
+    const latencyByDayMap = new Map<string, { date: string; totalValues: number[]; playbackValues: number[]; sttValues: number[]; llmValues: number[]; ttsValues: number[] }>();
 
     for (const call of callMetrics) {
       const date = normalizeDateKey(call.createdAt);
@@ -301,9 +311,12 @@ router.get('/bbis', authenticateToken, async (req: AuthRequest, res: Response, n
 
     for (const turn of allTurns) {
       const date = normalizeDateKey(turn.timestamp);
-      const latencyEntry = latencyByDayMap.get(date) || { date, totalValues: [], sttValues: [], llmValues: [], ttsValues: [] };
+      const latencyEntry = latencyByDayMap.get(date) || { date, totalValues: [], playbackValues: [], sttValues: [], llmValues: [], ttsValues: [] };
       if (turn.totalDurationMs !== null) {
         latencyEntry.totalValues.push(turn.totalDurationMs);
+      }
+      if (turn.audioDurationMs !== null) {
+        latencyEntry.playbackValues.push(turn.audioDurationMs);
       }
       if (turn.sttDurationMs !== null) {
         latencyEntry.sttValues.push(turn.sttDurationMs);
@@ -323,6 +336,7 @@ router.get('/bbis', authenticateToken, async (req: AuthRequest, res: Response, n
       .map((entry) => ({
         date: entry.date,
         avgTotalMs: average(entry.totalValues),
+        avgPlaybackMs: average(entry.playbackValues),
         avgSttMs: average(entry.sttValues),
         avgLlmMs: average(entry.llmValues),
         avgTtsMs: average(entry.ttsValues),
@@ -332,7 +346,8 @@ router.get('/bbis', authenticateToken, async (req: AuthRequest, res: Response, n
       { stage: 'STT', value: overview.avgSttMs },
       { stage: 'LLM', value: overview.avgLlmMs },
       { stage: 'TTS', value: overview.avgTtsMs },
-      { stage: 'TOTAL', value: overview.avgTotalMs },
+      { stage: 'LATENCE', value: overview.avgProcessingMs },
+      { stage: 'PLAYBACK', value: overview.avgPlaybackMs },
     ];
 
     res.json({

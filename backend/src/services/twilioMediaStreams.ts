@@ -92,6 +92,7 @@ interface TwilioStreamStopEvent {
 
 interface AssistantPlaybackMetrics {
   audioDurationMs: number;
+  playbackStartedAt: number;
   ttsDurationMs: number;
 }
 
@@ -536,6 +537,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         persistTranscript: true,
         source: 'streaming_goodbye',
       });
+      const processingDurationMs = playbackMetrics?.playbackStartedAt
+        ? playbackMetrics.playbackStartedAt - utteranceStartedAt
+        : Date.now() - utteranceStartedAt;
       await appendBbisTurnEvent(state, 'bbis.turn.completed', {
         actionType: 'agent_closed_call',
         audioDurationMs: playbackMetrics?.audioDurationMs ?? null,
@@ -550,7 +554,8 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         sttConfidence: transcription.confidence,
         sttDurationMs,
         sttModel: state.bbisSttModel || 'nova-2',
-        totalDurationMs: Date.now() - utteranceStartedAt,
+        processingDurationMs,
+        totalDurationMs: processingDurationMs,
         transcriptLength: callerText.length,
         transcriptText: callerText,
         transferRequested: false,
@@ -570,6 +575,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         persistTranscript: true,
         source: 'streaming_greeting_followup',
       });
+      const processingDurationMs = playbackMetrics?.playbackStartedAt
+        ? playbackMetrics.playbackStartedAt - utteranceStartedAt
+        : Date.now() - utteranceStartedAt;
       await appendBbisTurnEvent(state, 'bbis.turn.completed', {
         actionType: 'agent_replied',
         audioDurationMs: playbackMetrics?.audioDurationMs ?? null,
@@ -584,7 +592,8 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         sttConfidence: transcription.confidence,
         sttDurationMs,
         sttModel: state.bbisSttModel || 'nova-2',
-        totalDurationMs: Date.now() - utteranceStartedAt,
+        processingDurationMs,
+        totalDurationMs: processingDurationMs,
         transcriptLength: callerText.length,
         transcriptText: callerText,
         transferRequested: false,
@@ -645,6 +654,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       persistTranscript: true,
       source: 'streaming_llm',
     });
+    const processingDurationMs = playbackMetrics?.playbackStartedAt
+      ? playbackMetrics.playbackStartedAt - utteranceStartedAt
+      : Date.now() - utteranceStartedAt;
 
     await appendBbisTurnEvent(state, 'bbis.turn.completed', {
       actionType: 'agent_replied',
@@ -661,7 +673,8 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       sttConfidence: transcription.confidence,
       sttDurationMs,
       sttModel: state.bbisSttModel || 'nova-2',
-      totalDurationMs: Date.now() - utteranceStartedAt,
+      processingDurationMs,
+      totalDurationMs: processingDurationMs,
       transcriptLength: callerText.length,
       transcriptText: callerText,
       transferRequested: false,
@@ -676,7 +689,8 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       sttDurationMs,
       llmDurationMs,
       ttsDurationMs: playbackMetrics?.ttsDurationMs,
-      totalDurationMs: Date.now() - utteranceStartedAt,
+      totalDurationMs: processingDurationMs,
+      playbackDurationMs: playbackMetrics?.audioDurationMs,
       callerTextLength: callerText.length,
       replyLength: responseText.length,
     });
@@ -802,7 +816,8 @@ async function speakAssistantText(
     const ulawAudio = convertWavToULaw(wavAudio);
     const audioDurationMs = calculateAudioDurationMs(ulawAudio);
     const playbackGeneration = ++state.playbackGeneration;
-    state.assistantPlaybackUntil = Date.now() + audioDurationMs + 120;
+    const playbackStartedAt = Date.now();
+    state.assistantPlaybackUntil = playbackStartedAt + audioDurationMs + 120;
     await sendULawAudioToTwilio(twilioSocket, state.streamSid, ulawAudio, () => playbackGeneration === state.playbackGeneration);
 
     logger.info('Realtime assistant audio generated', {
@@ -829,6 +844,7 @@ async function speakAssistantText(
 
     return {
       audioDurationMs,
+      playbackStartedAt,
       ttsDurationMs,
     };
   } catch (error: any) {

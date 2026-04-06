@@ -34,7 +34,10 @@ interface MonitoringOverview {
   avgSttMs: number | null;
   avgLlmMs: number | null;
   avgTtsMs: number | null;
+  avgPlaybackMs: number | null;
+  avgProcessingMs: number | null;
   avgTotalMs: number | null;
+  p95ProcessingMs: number | null;
   p95TotalMs: number | null;
   errorRate: number;
   noTranscriptRate: number;
@@ -60,12 +63,17 @@ interface MonitoringCallItem {
   avgSttMs: number | null;
   avgLlmMs: number | null;
   avgTtsMs: number | null;
+  avgPlaybackMs: number | null;
+  avgProcessingMs: number | null;
   avgTotalMs: number | null;
   avgInputAudioMs: number | null;
   avgSpeechMs: number | null;
   avgSilenceMs: number | null;
   avgConfidence: number | null;
+  maxPlaybackMs: number | null;
+  maxProcessingMs: number | null;
   maxTotalMs: number | null;
+  p95ProcessingMs: number | null;
   p95TotalMs: number | null;
   errorRate: number;
   noTranscriptRate: number;
@@ -79,6 +87,7 @@ interface MonitoringChartPoint {
   turns?: number;
   errors?: number;
   avgTotalMs?: number | null;
+  avgPlaybackMs?: number | null;
   avgSttMs?: number | null;
   avgLlmMs?: number | null;
   avgTtsMs?: number | null;
@@ -101,6 +110,7 @@ interface MonitoringTurn {
   replyLength: number;
   sttDurationMs: number | null;
   llmDurationMs: number | null;
+  processingDurationMs: number | null;
   ttsDurationMs: number | null;
   totalDurationMs: number | null;
   audioDurationMs: number | null;
@@ -249,9 +259,9 @@ export default function MonitoringBbis() {
 
   const kpis = [
     {
-      label: 'Latence totale moyenne',
-      value: formatMs(data?.overview.avgTotalMs),
-      detail: `p95 ${formatMs(data?.overview.p95TotalMs)}`,
+      label: 'Latence moyenne',
+      value: formatMs(data?.overview.avgProcessingMs ?? data?.overview.avgTotalMs),
+      detail: `p95 ${formatMs(data?.overview.p95ProcessingMs ?? data?.overview.p95TotalMs)}`,
       icon: Gauge,
       tone: 'bg-[#111118] text-white',
     },
@@ -272,9 +282,16 @@ export default function MonitoringBbis() {
     {
       label: 'TTS moyen',
       value: formatMs(data?.overview.avgTtsMs),
-      detail: `barge-in ${formatPercent(data?.overview.bargeInRate)}`,
+      detail: 'Synthèse seule',
       icon: Activity,
       tone: 'bg-emerald-100 text-emerald-700',
+    },
+    {
+      label: 'Playback moyen',
+      value: formatMs(data?.overview.avgPlaybackMs),
+      detail: `barge-in ${formatPercent(data?.overview.bargeInRate)}`,
+      icon: Phone,
+      tone: 'bg-amber-100 text-amber-700',
     },
   ];
 
@@ -380,7 +397,7 @@ export default function MonitoringBbis() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {kpis.map((kpi) => {
             const Icon = kpi.icon;
             return (
@@ -405,7 +422,7 @@ export default function MonitoringBbis() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#171821]">Latence par jour</h2>
-                <p className="mt-1 text-sm text-[#6f685d]">Moyennes journalières pour repérer les dérives de pipeline.</p>
+                <p className="mt-1 text-sm text-[#6f685d]">Latence de traitement hors temps de lecture audio.</p>
               </div>
             </div>
             <div className="mt-6 h-[280px]">
@@ -415,10 +432,11 @@ export default function MonitoringBbis() {
                   <XAxis dataKey="date" tickFormatter={formatShortDate} stroke="#8b8478" fontSize={12} />
                   <YAxis stroke="#8b8478" fontSize={12} width={64} />
                   <Tooltip formatter={(value: number) => formatMs(value)} labelFormatter={(value) => formatShortDate(String(value))} />
-                  <Line type="monotone" dataKey="avgTotalMs" name="Total" stroke="#111118" strokeWidth={3} dot={false} />
+                  <Line type="monotone" dataKey="avgTotalMs" name="Latence" stroke="#111118" strokeWidth={3} dot={false} />
                   <Line type="monotone" dataKey="avgSttMs" name="STT" stroke="#2563eb" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="avgLlmMs" name="LLM" stroke="#7c3aed" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="avgTtsMs" name="TTS" stroke="#059669" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="avgPlaybackMs" name="Playback" stroke="#d97706" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -426,7 +444,7 @@ export default function MonitoringBbis() {
 
           <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
             <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#171821]">Mix des étapes</h2>
-            <p className="mt-1 text-sm text-[#6f685d]">Comparaison instantanée des durées moyennes par composant.</p>
+            <p className="mt-1 text-sm text-[#6f685d]">Latence pipeline séparée du playback Twilio.</p>
             <div className="mt-6 h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stageAverages}>
@@ -438,7 +456,7 @@ export default function MonitoringBbis() {
                     {stageAverages.map((entry) => (
                       <Cell
                         key={entry.stage}
-                        fill={entry.stage === 'TOTAL' ? '#111118' : entry.stage === 'STT' ? '#2563eb' : entry.stage === 'LLM' ? '#7c3aed' : '#059669'}
+                        fill={entry.stage === 'LATENCE' ? '#111118' : entry.stage === 'STT' ? '#2563eb' : entry.stage === 'LLM' ? '#7c3aed' : entry.stage === 'TTS' ? '#059669' : '#d97706'}
                       />
                     ))}
                   </Bar>
@@ -472,6 +490,7 @@ export default function MonitoringBbis() {
             <div className="mt-5 space-y-3">
               <QuickStat label="Taux de transfert" value={formatPercent(data?.overview.transferRate)} tone="bg-amber-100 text-amber-700" />
               <QuickStat label="Barge-in" value={formatPercent(data?.overview.bargeInRate)} tone="bg-violet-100 text-violet-700" />
+              <QuickStat label="Playback moyen" value={formatMs(data?.overview.avgPlaybackMs)} tone="bg-stone-200 text-stone-700" />
               <QuickStat label="Total appels" value={String(data?.overview.totalCalls || 0)} tone="bg-blue-100 text-blue-700" />
               <QuickStat label="Total tours" value={String(data?.overview.totalTurns || 0)} tone="bg-emerald-100 text-emerald-700" />
             </div>
@@ -523,17 +542,17 @@ export default function MonitoringBbis() {
 
                         <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                           <MiniMetric label="Tours" value={String(call.totalTurns)} active={isActive} />
-                          <MiniMetric label="Total" value={formatMs(call.avgTotalMs)} active={isActive} />
+                          <MiniMetric label="Latence" value={formatMs(call.avgProcessingMs ?? call.avgTotalMs)} active={isActive} />
                           <MiniMetric label="STT" value={formatMs(call.avgSttMs)} active={isActive} />
                           <MiniMetric label="LLM" value={formatMs(call.avgLlmMs)} active={isActive} />
                         </div>
 
                         <div className="flex flex-wrap gap-2 text-xs">
                           <span className={`rounded-full px-3 py-1 ${isActive ? 'bg-white/10 text-stone-200' : 'bg-violet-100 text-violet-700'}`}>
-                            p95 {formatMs(call.p95TotalMs)}
+                            p95 {formatMs(call.p95ProcessingMs ?? call.p95TotalMs)}
                           </span>
                           <span className={`rounded-full px-3 py-1 ${isActive ? 'bg-white/10 text-stone-200' : 'bg-amber-100 text-amber-700'}`}>
-                            barge-in {formatPercent(call.bargeInRate)}
+                            playback {formatMs(call.avgPlaybackMs)}
                           </span>
                           <span className={`rounded-full px-3 py-1 ${isActive ? 'bg-white/10 text-stone-200' : 'bg-blue-100 text-blue-700'}`}>
                             confidence {call.avgConfidence !== null ? `${call.avgConfidence}%` : '—'}
@@ -562,8 +581,9 @@ export default function MonitoringBbis() {
               {selectedCall && (
                 <div className="mt-5 grid grid-cols-2 gap-3 text-sm xl:grid-cols-4">
                   <MiniCard label="Tours" value={String(selectedCall.totalTurns)} />
-                  <MiniCard label="Avg total" value={formatMs(selectedCall.avgTotalMs)} />
-                  <MiniCard label="Max total" value={formatMs(selectedCall.maxTotalMs)} />
+                  <MiniCard label="Avg latence" value={formatMs(selectedCall.avgProcessingMs ?? selectedCall.avgTotalMs)} />
+                  <MiniCard label="Max latence" value={formatMs(selectedCall.maxProcessingMs ?? selectedCall.maxTotalMs)} />
+                  <MiniCard label="Playback moyen" value={formatMs(selectedCall.avgPlaybackMs)} />
                   <MiniCard label="Transferts" value={String(selectedCall.transferCount)} />
                 </div>
               )}
@@ -579,7 +599,8 @@ export default function MonitoringBbis() {
                       <Line type="monotone" dataKey="sttDurationMs" name="STT" stroke="#2563eb" strokeWidth={2} />
                       <Line type="monotone" dataKey="llmDurationMs" name="LLM" stroke="#7c3aed" strokeWidth={2} />
                       <Line type="monotone" dataKey="ttsDurationMs" name="TTS" stroke="#059669" strokeWidth={2} />
-                      <Line type="monotone" dataKey="totalDurationMs" name="TOTAL" stroke="#111118" strokeWidth={3} />
+                      <Line type="monotone" dataKey="processingDurationMs" name="LATENCE" stroke="#111118" strokeWidth={3} />
+                      <Line type="monotone" dataKey="audioDurationMs" name="PLAYBACK" stroke="#d97706" strokeWidth={2} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -623,7 +644,7 @@ export default function MonitoringBbis() {
                         <StatChip label="STT" value={formatMs(turn.sttDurationMs)} />
                         <StatChip label="LLM" value={formatMs(turn.llmDurationMs)} />
                         <StatChip label="TTS" value={formatMs(turn.ttsDurationMs)} />
-                        <StatChip label="Total" value={formatMs(turn.totalDurationMs)} strong />
+                        <StatChip label="Latence" value={formatMs(turn.processingDurationMs ?? turn.totalDurationMs)} strong />
                       </div>
                     </div>
 
@@ -647,6 +668,7 @@ export default function MonitoringBbis() {
                       <MetadataChip label="STT model" value={turn.sttModel || '—'} />
                       <MetadataChip label="LLM model" value={turn.llmModel || '—'} />
                       <MetadataChip label="TTS voice" value={turn.ttsVoice || turn.ttsModel || '—'} />
+                      <MetadataChip label="Playback" value={formatMs(turn.audioDurationMs)} />
                       <MetadataChip label="Input audio" value={formatMs(turn.inputAudioMs)} />
                       <MetadataChip label="Speech" value={formatMs(turn.speechDurationMs)} />
                       <MetadataChip label="Silence" value={formatMs(turn.silenceDurationMs)} />
