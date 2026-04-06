@@ -90,6 +90,36 @@ function hasMeaningfulTranscription(transcription: string): boolean {
   return normalizeTranscription(transcription).length > 3;
 }
 
+function normalizeSummaryTranscript(transcription: string): string {
+  return transcription
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => {
+      const normalizedLine = line.toLowerCase();
+      if (normalizedLine === 'client: lui.' || normalizedLine === 'client: oui.' || normalizedLine === 'client: non.') {
+        return false;
+      }
+
+      return true;
+    })
+    .join('\n');
+}
+
+function buildSummaryPrompt(transcription: string): string {
+  return [
+    'Tu rédiges un résumé d’appel téléphonique en français.',
+    'Utilise uniquement les informations explicitement présentes dans la transcription.',
+    'N’invente jamais de rendez-vous confirmé, de nom, d’horaire, d’intention ou d’action si ce n’est pas clairement dit.',
+    'Si une information semble ambiguë, contradictoire, bruitée ou peu fiable, mentionne qu’elle reste à confirmer au lieu de l’affirmer.',
+    'Ignore les fragments manifestement parasites, absurdes, isolés ou sans contexte.',
+    'Retourne 2 ou 3 phrases maximum, professionnelles et factuelles, sans puces ni markdown.',
+    '',
+    'Transcription :',
+    transcription,
+  ].join('\n');
+}
+
 export async function transcribeAudioBuffer(
   audioBuffer: Buffer,
   options: {
@@ -324,13 +354,15 @@ export async function detectIntent(transcription: string): Promise<{
 
 export async function summarizeCall(transcription: string): Promise<string> {
   try {
-    if (!hasMeaningfulTranscription(transcription)) {
+    const normalizedTranscription = normalizeSummaryTranscript(transcription);
+
+    if (!hasMeaningfulTranscription(normalizedTranscription)) {
       return 'Aucun message vocal exploitable n’a été détecté après le bip.';
     }
 
     return await generateResponse(
-      [{ role: 'user', content: `Résume cet appel en 2 ou 3 phrases maximum : ${transcription}` }],
-      'Tu es un assistant qui résume les appels téléphoniques de manière concise, professionnelle et actionnable.'
+      [{ role: 'user', content: buildSummaryPrompt(normalizedTranscription) }],
+      'Tu résumes des appels téléphoniques avec prudence et sans halluciner.'
     );
   } catch (error: any) {
     logger.error('OpenAI call summary error', { error: error.message });

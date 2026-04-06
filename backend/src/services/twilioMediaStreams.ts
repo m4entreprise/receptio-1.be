@@ -5,7 +5,7 @@ import { query } from '../config/database';
 import { OfferBSettings } from '../types';
 import { buildKnowledgeBaseContext, getActiveOfferMode, getBbisAgentSettings, getCompanyOfferBSettings } from './offerB';
 import { textToSpeech as deepgramTextToSpeech, transcribeAudioBuffer as deepgramTranscribeAudioBuffer } from './deepgram';
-import { generateResponse as mistralGenerateResponse, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
+import { generateResponse as mistralGenerateResponse, summarizeCall as mistralSummarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
 import { generateResponse, summarizeCall, textToSpeech, transcribeAudioBuffer } from './openai';
 import logger from '../utils/logger';
 
@@ -1149,25 +1149,27 @@ async function finalizeStreamingCall(state: StreamSessionState, reason: string) 
      SET status = $1,
          duration = GREATEST(COALESCE(duration, 0), $2),
          ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP)
-     WHERE id = $3`,
+    WHERE id = $3`,
     ['completed', durationSeconds, state.callId]
   );
 
-  await persistFinalSummary(state.callId, state.lastIntent);
+  await persistFinalSummary(state.callId, state.lastIntent, state.activeOfferMode === 'Bbis' ? state.bbisLlmProvider : 'openai');
   await appendCallEvent(state.callId, 'twilio.media_stream.finalized', {
     durationSeconds,
     reason,
   });
 }
 
-async function persistFinalSummary(callId: string, intent: string) {
+async function persistFinalSummary(callId: string, intent: string, llmProvider: 'openai' | 'mistral') {
   const [summaryResult, transcriptionResult] = await Promise.all([
     query('SELECT id, actions FROM call_summaries WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1', [callId]),
     query('SELECT text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1', [callId]),
   ]);
 
   const transcriptionText = String(transcriptionResult.rows[0]?.text || '').trim();
-  const summary = await summarizeCall(transcriptionText);
+  const summary = llmProvider === 'mistral'
+    ? await mistralSummarizeCall(transcriptionText)
+    : await summarizeCall(transcriptionText);
 
   if (summaryResult.rows.length === 0) {
     await query(
