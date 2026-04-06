@@ -672,7 +672,7 @@ export default function MonitoringBbis() {
                       <div className="rounded-2xl bg-white px-4 py-3">
                         <p className="text-[11px] uppercase tracking-[0.24em] text-[#8b8478]">Client</p>
                         <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-[#171821]">
-                          {turn.transcriptText || 'Aucun texte exploitable'}
+                          {turn.transcriptText || (turn.errorStage ? 'Transcription indisponible pour ce tour en erreur' : 'Aucun texte exploitable')}
                         </p>
                       </div>
                       <div className="rounded-2xl bg-white px-4 py-3">

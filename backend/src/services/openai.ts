@@ -112,6 +112,7 @@ function buildSummaryPrompt(transcription: string): string {
     'Utilise uniquement les informations explicitement présentes dans la transcription.',
     'N’invente jamais de rendez-vous confirmé, de nom, d’horaire, d’intention ou d’action si ce n’est pas clairement dit.',
     'Si une information semble ambiguë, contradictoire, bruitée ou peu fiable, mentionne qu’elle reste à confirmer au lieu de l’affirmer.',
+    'Si un prénom, un nom, une date, une heure ou un détail personnel apparaît sous plusieurs variantes, ne choisis pas arbitrairement une version : indique simplement que l’information est à confirmer.',
     'Ignore les fragments manifestement parasites, absurdes, isolés ou sans contexte.',
     'Retourne 2 ou 3 phrases maximum, professionnelles et factuelles, sans puces ni markdown.',
     '',
