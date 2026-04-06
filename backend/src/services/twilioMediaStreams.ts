@@ -319,6 +319,10 @@ async function handleTwilioMessage(
         return;
       }
 
+      if (state.pendingProcessScheduled) {
+        return;
+      }
+
       state.pendingAudioChunks.push(audioBuffer);
       state.silenceDurationMs += ULaw_FRAME_DURATION_MS;
 
@@ -335,7 +339,10 @@ async function handleTwilioMessage(
         && !state.pendingProcessScheduled
       ) {
         state.pendingProcessScheduled = true;
-        void processBufferedUtterance(twilioSocket, state);
+
+        if (!state.processingUtterance) {
+          void processBufferedUtterance(twilioSocket, state);
+        }
       }
       break;
     }
@@ -423,7 +430,11 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
 }
 
 async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSessionState) {
-  if (state.processingUtterance || state.pendingAudioChunks.length === 0) {
+  if (state.processingUtterance) {
+    return;
+  }
+
+  if (state.pendingAudioChunks.length === 0) {
     state.pendingProcessScheduled = false;
     return;
   }
