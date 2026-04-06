@@ -751,12 +751,11 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       ? state.bbisSilenceThresholdMs
       : SILENCE_THRESHOLD_MS;
 
-    if (
-      state.pendingAudioChunks.length > 0
+    const shouldProcessQueuedUtterance = state.pendingAudioChunks.length > 0
       && state.speechDetected
-      && state.silenceDurationMs >= silenceThresholdMs
-      && !state.pendingProcessScheduled
-    ) {
+      && (state.pendingProcessScheduled || state.silenceDurationMs >= silenceThresholdMs);
+
+    if (shouldProcessQueuedUtterance) {
       state.pendingProcessScheduled = true;
       void processBufferedUtterance(twilioSocket, state);
     }
