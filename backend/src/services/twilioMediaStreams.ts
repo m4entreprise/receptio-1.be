@@ -52,6 +52,7 @@ interface StreamSessionState {
   knowledgeContext: string;
   lastIntent: string;
   pendingAudioChunks: Buffer[];
+  pendingBargeInTriggered: boolean;
   pendingProcessScheduled: boolean;
   playbackGeneration: number;
   processingUtterance: boolean;
@@ -60,6 +61,7 @@ interface StreamSessionState {
   speechDurationMs: number;
   streamSid: string;
   transcriptMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  turnCounter: number;
   twilioStartedAt: number | null;
 }
 
@@ -86,6 +88,11 @@ interface TwilioStreamStopEvent {
     callSid?: string;
   };
   streamSid?: string;
+}
+
+interface AssistantPlaybackMetrics {
+  audioDurationMs: number;
+  ttsDurationMs: number;
 }
 
 export function attachTwilioMediaStreamsServer(server: HttpServer) {
@@ -154,6 +161,7 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     knowledgeContext: '',
     lastIntent: 'autre',
     pendingAudioChunks: [],
+    pendingBargeInTriggered: false,
     pendingProcessScheduled: false,
     playbackGeneration: 0,
     processingUtterance: false,
@@ -162,6 +170,7 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     speechDurationMs: 0,
     streamSid: '',
     transcriptMessages: [],
+    turnCounter: 0,
     twilioStartedAt: null,
   };
 
@@ -297,6 +306,7 @@ async function handleTwilioMessage(
         ) {
           state.playbackGeneration += 1;
           state.assistantPlaybackUntil = 0;
+          state.pendingBargeInTriggered = true;
           twilioSocket.send(JSON.stringify({ event: 'clear', streamSid: state.streamSid }));
         }
 
@@ -418,7 +428,14 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
   }
 
   const utteranceBuffer = Buffer.concat(state.pendingAudioChunks);
+  const inputAudioMs = calculateAudioDurationMs(utteranceBuffer);
+  const capturedSilenceDurationMs = state.silenceDurationMs;
+  const capturedSpeechDurationMs = state.speechDurationMs;
+  const bargeInTriggered = state.pendingBargeInTriggered;
+  const turnIndex = ++state.turnCounter;
+  let currentStage: 'stt' | 'llm' | 'tts' = 'stt';
   state.pendingAudioChunks = [];
+  state.pendingBargeInTriggered = false;
   state.pendingProcessScheduled = false;
   state.processingUtterance = true;
   state.silenceDurationMs = 0;
@@ -427,6 +444,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
 
   try {
     const utteranceStartedAt = Date.now();
+    let sttDurationMs: number | null = null;
+    let llmDurationMs: number | null = null;
+    let playbackMetrics: AssistantPlaybackMetrics | null = null;
     const pcmBuffer = decodeULawToPcm16(utteranceBuffer);
     const wavBuffer = wrapPcm16AsWav(pcmBuffer, ULaw_SAMPLE_RATE, 1);
     const sttStartedAt = Date.now();
@@ -441,10 +461,24 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         language: 'fr',
         mimeType: 'audio/wav',
       });
-    const sttDurationMs = Date.now() - sttStartedAt;
+    sttDurationMs = Date.now() - sttStartedAt;
     const callerText = normalizeCallerText(transcription.text);
 
     if (!callerText) {
+      await appendBbisTurnEvent(state, 'bbis.turn.no_transcript', {
+        bargeInTriggered,
+        inputAudioMs,
+        llmDurationMs,
+        silenceDurationMs: capturedSilenceDurationMs,
+        speechDurationMs: capturedSpeechDurationMs,
+        sttConfidence: transcription.confidence,
+        sttDurationMs,
+        sttModel: state.bbisSttModel || 'nova-2',
+        totalDurationMs: Date.now() - utteranceStartedAt,
+        transcriptLength: 0,
+        transcriptText: '',
+        turnIndex,
+      });
       return;
     }
 
@@ -460,6 +494,26 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
     state.lastIntent = detectedIntent.summaryIntent;
 
     if (detectedIntent.kind === 'human_transfer' && state.humanTransferNumber) {
+      await appendBbisTurnEvent(state, 'bbis.turn.completed', {
+        actionType: 'transfer_to_human',
+        bargeInTriggered,
+        inputAudioMs,
+        llmDurationMs,
+        replyLength: 0,
+        replyText: '',
+        silenceDurationMs: capturedSilenceDurationMs,
+        source: 'streaming_user_request',
+        speechDurationMs: capturedSpeechDurationMs,
+        sttConfidence: transcription.confidence,
+        sttDurationMs,
+        sttModel: state.bbisSttModel || 'nova-2',
+        totalDurationMs: Date.now() - utteranceStartedAt,
+        transcriptLength: callerText.length,
+        transcriptText: callerText,
+        transferRequested: true,
+        turnIndex,
+        turnIntent: detectedIntent.summaryIntent,
+      });
       await appendOfferBAction(state.callId, 'transfer_to_human', {
         input: callerText,
         transferNumber: state.humanTransferNumber,
@@ -474,30 +528,99 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
     }
 
     if (detectedIntent.kind === 'goodbye') {
-      await speakAssistantText(twilioSocket, state, 'Merci, au revoir et bonne journée.', {
+      currentStage = 'tts';
+      const replyText = 'Merci, au revoir et bonne journée.';
+      playbackMetrics = await speakAssistantText(twilioSocket, state, replyText, {
         actionType: 'agent_closed_call',
         closeAfterPlayback: true,
         persistTranscript: true,
         source: 'streaming_goodbye',
       });
+      await appendBbisTurnEvent(state, 'bbis.turn.completed', {
+        actionType: 'agent_closed_call',
+        audioDurationMs: playbackMetrics?.audioDurationMs ?? null,
+        bargeInTriggered,
+        inputAudioMs,
+        llmDurationMs,
+        replyLength: replyText.length,
+        replyText,
+        silenceDurationMs: capturedSilenceDurationMs,
+        source: 'streaming_goodbye',
+        speechDurationMs: capturedSpeechDurationMs,
+        sttConfidence: transcription.confidence,
+        sttDurationMs,
+        sttModel: state.bbisSttModel || 'nova-2',
+        totalDurationMs: Date.now() - utteranceStartedAt,
+        transcriptLength: callerText.length,
+        transcriptText: callerText,
+        transferRequested: false,
+        ttsDurationMs: playbackMetrics?.ttsDurationMs ?? null,
+        turnIndex,
+        turnIntent: detectedIntent.summaryIntent,
+      });
       return;
     }
 
     if (detectedIntent.kind === 'greeting') {
-      await speakAssistantText(twilioSocket, state, `Bonjour, je suis le réceptionniste de ${state.companyName}. Comment puis-je vous aider ?`, {
+      currentStage = 'tts';
+      const replyText = `Bonjour, je suis le réceptionniste de ${state.companyName}. Comment puis-je vous aider ?`;
+      playbackMetrics = await speakAssistantText(twilioSocket, state, replyText, {
         actionType: 'agent_replied',
         closeAfterPlayback: false,
         persistTranscript: true,
         source: 'streaming_greeting_followup',
       });
+      await appendBbisTurnEvent(state, 'bbis.turn.completed', {
+        actionType: 'agent_replied',
+        audioDurationMs: playbackMetrics?.audioDurationMs ?? null,
+        bargeInTriggered,
+        inputAudioMs,
+        llmDurationMs,
+        replyLength: replyText.length,
+        replyText,
+        silenceDurationMs: capturedSilenceDurationMs,
+        source: 'streaming_greeting_followup',
+        speechDurationMs: capturedSpeechDurationMs,
+        sttConfidence: transcription.confidence,
+        sttDurationMs,
+        sttModel: state.bbisSttModel || 'nova-2',
+        totalDurationMs: Date.now() - utteranceStartedAt,
+        transcriptLength: callerText.length,
+        transcriptText: callerText,
+        transferRequested: false,
+        ttsDurationMs: playbackMetrics?.ttsDurationMs ?? null,
+        turnIndex,
+        turnIntent: detectedIntent.summaryIntent,
+      });
       return;
     }
 
+    currentStage = 'llm';
     const llmStartedAt = Date.now();
     const agentReply = await generateStreamingReply(state, callerText);
-    const llmDurationMs = Date.now() - llmStartedAt;
+    llmDurationMs = Date.now() - llmStartedAt;
 
     if (agentReply === '__TRANSFER__' && state.humanTransferNumber) {
+      await appendBbisTurnEvent(state, 'bbis.turn.completed', {
+        actionType: 'transfer_to_human',
+        bargeInTriggered,
+        inputAudioMs,
+        llmDurationMs,
+        replyLength: 0,
+        replyText: '',
+        silenceDurationMs: capturedSilenceDurationMs,
+        source: 'streaming_agent_decision',
+        speechDurationMs: capturedSpeechDurationMs,
+        sttConfidence: transcription.confidence,
+        sttDurationMs,
+        sttModel: state.bbisSttModel || 'nova-2',
+        totalDurationMs: Date.now() - utteranceStartedAt,
+        transcriptLength: callerText.length,
+        transcriptText: callerText,
+        transferRequested: true,
+        turnIndex,
+        turnIntent: detectedIntent.summaryIntent,
+      });
       await appendOfferBAction(state.callId, 'transfer_to_human', {
         input: callerText,
         transferNumber: state.humanTransferNumber,
@@ -515,11 +638,36 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       ? 'Je n’ai pas assez d’informations pour répondre précisément. Pouvez-vous reformuler votre demande ?'
       : agentReply;
 
-    await speakAssistantText(twilioSocket, state, responseText, {
+    currentStage = 'tts';
+    playbackMetrics = await speakAssistantText(twilioSocket, state, responseText, {
       actionType: 'agent_replied',
       closeAfterPlayback: false,
       persistTranscript: true,
       source: 'streaming_llm',
+    });
+
+    await appendBbisTurnEvent(state, 'bbis.turn.completed', {
+      actionType: 'agent_replied',
+      audioDurationMs: playbackMetrics?.audioDurationMs ?? null,
+      bargeInTriggered,
+      inputAudioMs,
+      llmDurationMs,
+      llmModel: state.bbisLlmModel || process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano',
+      replyLength: responseText.length,
+      replyText: responseText,
+      silenceDurationMs: capturedSilenceDurationMs,
+      source: 'streaming_llm',
+      speechDurationMs: capturedSpeechDurationMs,
+      sttConfidence: transcription.confidence,
+      sttDurationMs,
+      sttModel: state.bbisSttModel || 'nova-2',
+      totalDurationMs: Date.now() - utteranceStartedAt,
+      transcriptLength: callerText.length,
+      transcriptText: callerText,
+      transferRequested: false,
+      ttsDurationMs: playbackMetrics?.ttsDurationMs ?? null,
+      turnIndex,
+      turnIntent: detectedIntent.summaryIntent,
     });
 
     logger.info('Realtime utterance processed', {
@@ -527,11 +675,22 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       activeOfferMode: state.activeOfferMode,
       sttDurationMs,
       llmDurationMs,
+      ttsDurationMs: playbackMetrics?.ttsDurationMs,
       totalDurationMs: Date.now() - utteranceStartedAt,
       callerTextLength: callerText.length,
       replyLength: responseText.length,
     });
   } catch (error: any) {
+    await appendBbisTurnEvent(state, 'bbis.turn.failed', {
+      bargeInTriggered,
+      errorMessage: error.message,
+      errorStage: currentStage,
+      inputAudioMs,
+      silenceDurationMs: capturedSilenceDurationMs,
+      speechDurationMs: capturedSpeechDurationMs,
+      totalDurationMs: 0,
+      turnIndex,
+    });
     logger.error('Offer realtime STT-LLM-TTS pipeline error', {
       error: error.message,
       callId: state.callId,
@@ -603,11 +762,11 @@ async function speakAssistantText(
     persistTranscript: boolean;
     source: string;
   }
-) {
+): Promise<AssistantPlaybackMetrics | null> {
   const cleanText = text.trim();
 
   if (!cleanText || !state.streamSid || twilioSocket.readyState !== WebSocket.OPEN) {
-    return;
+    return null;
   }
 
   try {
@@ -667,6 +826,11 @@ async function speakAssistantText(
         twilioSocket.close();
       }
     }
+
+    return {
+      audioDurationMs,
+      ttsDurationMs,
+    };
   } catch (error: any) {
     logger.error('Twilio assistant playback error', {
       error: error.message,
@@ -806,6 +970,27 @@ async function appendCallEvent(callId: string, eventType: string, data: Record<s
      VALUES ($1, $2, $3)`,
     [callId, eventType, data]
   );
+}
+
+async function appendBbisTurnEvent(
+  state: StreamSessionState,
+  eventType: 'bbis.turn.completed' | 'bbis.turn.failed' | 'bbis.turn.no_transcript',
+  data: Record<string, unknown>
+) {
+  if (state.activeOfferMode !== 'Bbis' || !state.callId) {
+    return;
+  }
+
+  await appendCallEvent(state.callId, eventType, {
+    activeOfferMode: state.activeOfferMode,
+    llmModel: state.bbisLlmModel || process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano',
+    providerLlm: 'openai',
+    providerStt: 'deepgram',
+    providerTts: 'deepgram',
+    ttsModel: state.bbisTtsModel || state.bbisTtsVoice || 'aura-asteria-fr',
+    ttsVoice: state.bbisTtsVoice || state.bbisTtsModel || 'aura-asteria-fr',
+    ...data,
+  });
 }
 
 function runNonBlockingPersistence(task: Promise<unknown>, eventType: string, state: StreamSessionState) {

@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Phone, LayoutDashboard, Settings, LogOut } from 'lucide-react';
+import { Phone, LayoutDashboard, Settings, LogOut, Gauge } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LayoutProps {
@@ -21,6 +21,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/calls', icon: Phone, label: 'Appels' },
+    { path: '/monitoring/bbis', icon: Gauge, label: 'Monitoring' },
     { path: '/settings', icon: Settings, label: 'Paramètres' },
   ];
 
@@ -88,7 +89,7 @@ export default function Layout({ children }: LayoutProps) {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-black/10 bg-[#fbf8f3]/95 px-3 py-3 backdrop-blur-xl sm:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-3 gap-2 rounded-2xl border border-black/5 bg-white/80 p-2 shadow-[0_-12px_30px_rgba(17,17,24,0.08)]">
+        <div className="mx-auto grid max-w-md grid-cols-4 gap-2 rounded-2xl border border-black/5 bg-white/80 p-2 shadow-[0_-12px_30px_rgba(17,17,24,0.08)]">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = item.path === '/settings'
