@@ -444,6 +444,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
   const capturedSilenceDurationMs = state.silenceDurationMs;
   const capturedSpeechDurationMs = state.speechDurationMs;
   const bargeInTriggered = state.pendingBargeInTriggered;
+  const utteranceCapturedAt = Date.now();
   const turnIndex = ++state.turnCounter;
   let currentStage: 'stt' | 'llm' | 'tts' = 'stt';
   state.pendingAudioChunks = [];
@@ -548,6 +549,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         persistTranscript: true,
         source: 'streaming_goodbye',
       });
+      const timeToFirstAudioAfterUserEndMs = playbackMetrics?.playbackStartedAt
+        ? playbackMetrics.playbackStartedAt - (utteranceCapturedAt - capturedSilenceDurationMs)
+        : null;
       const processingDurationMs = playbackMetrics?.playbackStartedAt
         ? playbackMetrics.playbackStartedAt - utteranceStartedAt
         : Date.now() - utteranceStartedAt;
@@ -565,6 +569,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         sttConfidence: transcription.confidence,
         sttDurationMs,
         sttModel: state.bbisSttModel || 'nova-2',
+        timeToFirstAudioAfterUserEndMs,
         processingDurationMs,
         totalDurationMs: processingDurationMs,
         transcriptLength: callerText.length,
@@ -586,6 +591,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         persistTranscript: true,
         source: 'streaming_greeting_followup',
       });
+      const timeToFirstAudioAfterUserEndMs = playbackMetrics?.playbackStartedAt
+        ? playbackMetrics.playbackStartedAt - (utteranceCapturedAt - capturedSilenceDurationMs)
+        : null;
       const processingDurationMs = playbackMetrics?.playbackStartedAt
         ? playbackMetrics.playbackStartedAt - utteranceStartedAt
         : Date.now() - utteranceStartedAt;
@@ -603,6 +611,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         sttConfidence: transcription.confidence,
         sttDurationMs,
         sttModel: state.bbisSttModel || 'nova-2',
+        timeToFirstAudioAfterUserEndMs,
         processingDurationMs,
         totalDurationMs: processingDurationMs,
         transcriptLength: callerText.length,
@@ -665,6 +674,9 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       persistTranscript: true,
       source: 'streaming_llm',
     });
+    const timeToFirstAudioAfterUserEndMs = playbackMetrics?.playbackStartedAt
+      ? playbackMetrics.playbackStartedAt - (utteranceCapturedAt - capturedSilenceDurationMs)
+      : null;
     const processingDurationMs = playbackMetrics?.playbackStartedAt
       ? playbackMetrics.playbackStartedAt - utteranceStartedAt
       : Date.now() - utteranceStartedAt;
@@ -684,6 +696,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       sttConfidence: transcription.confidence,
       sttDurationMs,
       sttModel: state.bbisSttModel || 'nova-2',
+      timeToFirstAudioAfterUserEndMs,
       processingDurationMs,
       totalDurationMs: processingDurationMs,
       transcriptLength: callerText.length,
@@ -701,6 +714,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       llmDurationMs,
       ttsDurationMs: playbackMetrics?.ttsDurationMs,
       totalDurationMs: processingDurationMs,
+      timeToFirstAudioAfterUserEndMs,
       playbackDurationMs: playbackMetrics?.audioDurationMs,
       callerTextLength: callerText.length,
       replyLength: responseText.length,
