@@ -5,11 +5,13 @@ import { query } from '../config/database';
 import { OfferBSettings } from '../types';
 import { buildKnowledgeBaseContext, getActiveOfferMode, getBbisAgentSettings, getCompanyOfferBSettings } from './offerB';
 import { textToSpeech as deepgramTextToSpeech, transcribeAudioBuffer as deepgramTranscribeAudioBuffer } from './deepgram';
+import { generateResponse as mistralGenerateResponse, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
 import { generateResponse, summarizeCall, textToSpeech, transcribeAudioBuffer } from './openai';
 import logger from '../utils/logger';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const STREAMING_ENABLED = process.env.OFFER_B_STREAMING_ENABLED !== 'false';
@@ -31,13 +33,16 @@ interface StreamSessionState {
   assistantPlaybackUntil: number;
   bbisBargeInMinSpeechMs: number;
   bbisLlmModel: string;
+  bbisLlmProvider: 'openai' | 'mistral';
   bbisMaxCompletionTokens: number;
   bbisMinSpeechMs: number;
   bbisSilenceThresholdMs: number;
   bbisSttModel: string;
+  bbisSttProvider: 'deepgram' | 'mistral';
   bbisSystemPrompt: string;
   bbisTemperature: number;
   bbisTtsModel: string;
+  bbisTtsProvider: 'deepgram' | 'mistral';
   bbisTtsVoice: string;
   callId: string;
   callSid: string;
@@ -125,7 +130,11 @@ export function shouldUseOfferBStreamingPipeline(settings: OfferBSettings): bool
   }
 
   if (activeOfferMode === 'Bbis') {
-    return Boolean(DEEPGRAM_API_KEY);
+    const bbisAgentSettings = getBbisAgentSettings(settings);
+    const hasSttProvider = bbisAgentSettings.sttProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
+    const hasTtsProvider = bbisAgentSettings.ttsProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
+    const hasLlmProvider = bbisAgentSettings.llmProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(OPENAI_API_KEY);
+    return hasSttProvider && hasTtsProvider && hasLlmProvider;
   }
 
   return Boolean(OPENAI_API_KEY);
@@ -141,13 +150,16 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     assistantPlaybackUntil: 0,
     bbisBargeInMinSpeechMs: BBIS_BARGE_IN_MIN_SPEECH_MS,
     bbisLlmModel: '',
+    bbisLlmProvider: 'openai',
     bbisMaxCompletionTokens: STREAMING_RESPONSE_MAX_TOKENS,
     bbisMinSpeechMs: BBIS_MIN_SPEECH_MS,
     bbisSilenceThresholdMs: BBIS_SILENCE_THRESHOLD_MS,
     bbisSttModel: '',
+    bbisSttProvider: 'deepgram',
     bbisSystemPrompt: '',
     bbisTemperature: 0.4,
     bbisTtsModel: '',
+    bbisTtsProvider: 'deepgram',
     bbisTtsVoice: '',
     callId,
     callSid: '',
@@ -391,8 +403,30 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
     throw new Error('OPENAI_API_KEY not configured');
   }
 
-  if (activeOfferMode === 'Bbis' && !DEEPGRAM_API_KEY) {
-    throw new Error('DEEPGRAM_API_KEY not configured');
+  if (activeOfferMode === 'Bbis') {
+    if (bbisAgentSettings.llmProvider === 'mistral' && !MISTRAL_API_KEY) {
+      throw new Error('MISTRAL_API_KEY not configured for Bbis LLM');
+    }
+
+    if (bbisAgentSettings.llmProvider === 'openai' && !OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY not configured for Bbis LLM');
+    }
+
+    if (bbisAgentSettings.sttProvider === 'mistral' && !MISTRAL_API_KEY) {
+      throw new Error('MISTRAL_API_KEY not configured for Bbis STT');
+    }
+
+    if (bbisAgentSettings.sttProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
+      throw new Error('DEEPGRAM_API_KEY not configured for Bbis STT');
+    }
+
+    if (bbisAgentSettings.ttsProvider === 'mistral' && !MISTRAL_API_KEY) {
+      throw new Error('MISTRAL_API_KEY not configured for Bbis TTS');
+    }
+
+    if (bbisAgentSettings.ttsProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
+      throw new Error('DEEPGRAM_API_KEY not configured for Bbis TTS');
+    }
   }
 
   const knowledgeContext = offerBSettings.knowledgeBaseEnabled
@@ -404,19 +438,24 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
   await appendCallEvent(callId, 'twilio.media_stream.connection_opened', {
     companyId,
     provider: 'twilio',
-    mode: activeOfferMode === 'Bbis' ? 'deepgram_stt_llm_tts' : 'stt_llm_tts',
+    mode: activeOfferMode === 'Bbis'
+      ? `${bbisAgentSettings.sttProvider}_${bbisAgentSettings.llmProvider}_${bbisAgentSettings.ttsProvider}`
+      : 'stt_llm_tts',
   });
 
   state.activeOfferMode = activeOfferMode;
   state.bbisBargeInMinSpeechMs = bbisAgentSettings.bargeInMinSpeechMs;
   state.bbisLlmModel = bbisAgentSettings.llmModel.trim();
+  state.bbisLlmProvider = bbisAgentSettings.llmProvider;
   state.bbisMaxCompletionTokens = bbisAgentSettings.maxCompletionTokens;
   state.bbisMinSpeechMs = bbisAgentSettings.minSpeechMs;
   state.bbisSilenceThresholdMs = bbisAgentSettings.silenceThresholdMs;
   state.bbisSttModel = bbisAgentSettings.sttModel.trim();
+  state.bbisSttProvider = bbisAgentSettings.sttProvider;
   state.bbisSystemPrompt = bbisAgentSettings.systemPrompt.trim();
   state.bbisTemperature = bbisAgentSettings.temperature;
   state.bbisTtsModel = bbisAgentSettings.ttsModel.trim();
+  state.bbisTtsProvider = bbisAgentSettings.ttsProvider;
   state.bbisTtsVoice = bbisAgentSettings.ttsVoice.trim();
   state.callId = callId;
   state.callSid = callContext.callSid;
@@ -464,11 +503,18 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
     const wavBuffer = wrapPcm16AsWav(pcmBuffer, ULaw_SAMPLE_RATE, 1);
     const sttStartedAt = Date.now();
     const transcription = state.activeOfferMode === 'Bbis'
-      ? await deepgramTranscribeAudioBuffer(wavBuffer, {
-        language: 'fr',
-        mimeType: 'audio/wav',
-        model: state.bbisSttModel || undefined,
-      })
+      ? state.bbisSttProvider === 'mistral'
+        ? await mistralTranscribeAudioBuffer(wavBuffer, {
+          fileName: 'twilio-stream.wav',
+          language: 'fr',
+          mimeType: 'audio/wav',
+          model: state.bbisSttModel || undefined,
+        })
+        : await deepgramTranscribeAudioBuffer(wavBuffer, {
+          language: 'fr',
+          mimeType: 'audio/wav',
+          model: state.bbisSttModel || undefined,
+        })
       : await transcribeAudioBuffer(wavBuffer, {
         fileName: 'twilio-stream.wav',
         language: 'fr',
@@ -782,11 +828,17 @@ async function generateStreamingReply(state: StreamSessionState, callerText: str
     { role: 'user', content: callerText },
   ].map((message) => ({ role: message.role, content: message.content }));
 
-  const response = await generateResponse(messages, systemPrompt, {
-    model: state.activeOfferMode === 'Bbis' ? state.bbisLlmModel || undefined : undefined,
-    maxCompletionTokens: state.activeOfferMode === 'Bbis' ? state.bbisMaxCompletionTokens : STREAMING_RESPONSE_MAX_TOKENS,
-    temperature: state.activeOfferMode === 'Bbis' ? state.bbisTemperature : undefined,
-  });
+  const response = state.activeOfferMode === 'Bbis' && state.bbisLlmProvider === 'mistral'
+    ? await mistralGenerateResponse(messages, systemPrompt, {
+      model: state.bbisLlmModel || undefined,
+      maxCompletionTokens: state.bbisMaxCompletionTokens,
+      temperature: state.bbisTemperature,
+    })
+    : await generateResponse(messages, systemPrompt, {
+      model: state.activeOfferMode === 'Bbis' ? state.bbisLlmModel || undefined : undefined,
+      maxCompletionTokens: state.activeOfferMode === 'Bbis' ? state.bbisMaxCompletionTokens : STREAMING_RESPONSE_MAX_TOKENS,
+      temperature: state.activeOfferMode === 'Bbis' ? state.bbisTemperature : undefined,
+    });
   return response.trim();
 }
 
@@ -831,10 +883,15 @@ async function speakAssistantText(
 
     const ttsStartedAt = Date.now();
     const wavAudio = state.activeOfferMode === 'Bbis'
-      ? await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
-        model: state.bbisTtsModel || undefined,
-        voice: state.bbisTtsVoice || undefined,
-      })
+      ? state.bbisTtsProvider === 'mistral'
+        ? await mistralTextToSpeech(cleanText, 'wav', 'fr', {
+          model: state.bbisTtsModel || undefined,
+          voice: state.bbisTtsVoice || undefined,
+        })
+        : await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
+          model: state.bbisTtsModel || undefined,
+          voice: state.bbisTtsVoice || undefined,
+        })
       : await textToSpeech(cleanText, 'wav');
     const ttsDurationMs = Date.now() - ttsStartedAt;
     const ulawAudio = convertWavToULaw(wavAudio);
@@ -1023,12 +1080,13 @@ async function appendBbisTurnEvent(
 
   await appendCallEvent(state.callId, eventType, {
     activeOfferMode: state.activeOfferMode,
-    llmModel: state.bbisLlmModel || process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano',
-    providerLlm: 'openai',
-    providerStt: 'deepgram',
-    providerTts: 'deepgram',
-    ttsModel: state.bbisTtsModel || state.bbisTtsVoice || 'aura-asteria-fr',
-    ttsVoice: state.bbisTtsVoice || state.bbisTtsModel || 'aura-asteria-fr',
+    llmModel: state.bbisLlmModel || (state.bbisLlmProvider === 'mistral' ? 'mistral-small-latest' : process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano'),
+    providerLlm: state.bbisLlmProvider,
+    providerStt: state.bbisSttProvider,
+    providerTts: state.bbisTtsProvider,
+    sttModel: state.bbisSttModel || (state.bbisSttProvider === 'mistral' ? 'voxtral-mini-latest' : 'nova-2'),
+    ttsModel: state.bbisTtsModel || (state.bbisTtsProvider === 'mistral' ? 'voxtral-mini-tts-2603' : state.bbisTtsVoice || 'aura-asteria-fr'),
+    ttsVoice: state.bbisTtsVoice || state.bbisTtsModel || (state.bbisTtsProvider === 'mistral' ? '' : 'aura-asteria-fr'),
     ...data,
   });
 }

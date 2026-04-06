@@ -7,12 +7,15 @@ import Layout from '../components/Layout';
 interface BbisAgentSettings {
   systemPrompt: string;
   temperature: number;
+  llmProvider: 'openai' | 'mistral';
   llmModel: string;
   maxCompletionTokens: number;
   silenceThresholdMs: number;
   minSpeechMs: number;
   bargeInMinSpeechMs: number;
+  sttProvider: 'deepgram' | 'mistral';
   sttModel: string;
+  ttsProvider: 'deepgram' | 'mistral';
   ttsModel: string;
   ttsVoice: string;
 }
@@ -28,12 +31,15 @@ interface Company {
 const defaultBbisAgentSettings: BbisAgentSettings = {
   systemPrompt: '',
   temperature: 0.4,
+  llmProvider: 'openai',
   llmModel: '',
   maxCompletionTokens: 120,
   silenceThresholdMs: 260,
   minSpeechMs: 120,
   bargeInMinSpeechMs: 80,
+  sttProvider: 'deepgram',
   sttModel: '',
+  ttsProvider: 'deepgram',
   ttsModel: '',
   ttsVoice: '',
 };
@@ -207,6 +213,21 @@ export default function SettingsAgentIA() {
 
             <div className="grid gap-5 lg:grid-cols-2">
               <div>
+                <label htmlFor="llmProvider" className="block text-sm font-medium text-[#171821]">
+                  Provider LLM
+                </label>
+                <select
+                  id="llmProvider"
+                  value={formData.llmProvider}
+                  onChange={(e) => setFormData({ ...formData, llmProvider: e.target.value as 'openai' | 'mistral' })}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="mistral">Mistral AI</option>
+                </select>
+              </div>
+
+              <div>
                 <label htmlFor="llmModel" className="block text-sm font-medium text-[#171821]">
                   Modèle LLM
                 </label>
@@ -215,21 +236,7 @@ export default function SettingsAgentIA() {
                   id="llmModel"
                   value={formData.llmModel}
                   onChange={(e) => setFormData({ ...formData, llmModel: e.target.value })}
-                  placeholder="gpt-5.4-nano"
-                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition placeholder:text-[#9b9387] focus:border-black/20 focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="sttModel" className="block text-sm font-medium text-[#171821]">
-                  Modèle STT Deepgram
-                </label>
-                <input
-                  type="text"
-                  id="sttModel"
-                  value={formData.sttModel}
-                  onChange={(e) => setFormData({ ...formData, sttModel: e.target.value })}
-                  placeholder="nova-2"
+                  placeholder={formData.llmProvider === 'mistral' ? 'mistral-small-latest' : 'gpt-5.4-nano'}
                   className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition placeholder:text-[#9b9387] focus:border-black/20 focus:bg-white"
                 />
               </div>
@@ -315,29 +322,75 @@ export default function SettingsAgentIA() {
 
             <div className="grid gap-5 lg:grid-cols-2">
               <div>
+                <label htmlFor="sttProvider" className="block text-sm font-medium text-[#171821]">
+                  Provider STT
+                </label>
+                <select
+                  id="sttProvider"
+                  value={formData.sttProvider}
+                  onChange={(e) => setFormData({ ...formData, sttProvider: e.target.value as 'deepgram' | 'mistral' })}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
+                >
+                  <option value="deepgram">Deepgram</option>
+                  <option value="mistral">Mistral AI</option>
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="sttModel" className="block text-sm font-medium text-[#171821]">
+                  Modèle STT
+                </label>
+                <input
+                  type="text"
+                  id="sttModel"
+                  value={formData.sttModel}
+                  onChange={(e) => setFormData({ ...formData, sttModel: e.target.value })}
+                  placeholder={formData.sttProvider === 'mistral' ? 'voxtral-mini-latest' : 'nova-2'}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition placeholder:text-[#9b9387] focus:border-black/20 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-3">
+              <div>
+                <label htmlFor="ttsProvider" className="block text-sm font-medium text-[#171821]">
+                  Provider TTS
+                </label>
+                <select
+                  id="ttsProvider"
+                  value={formData.ttsProvider}
+                  onChange={(e) => setFormData({ ...formData, ttsProvider: e.target.value as 'deepgram' | 'mistral' })}
+                  className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition focus:border-black/20 focus:bg-white"
+                >
+                  <option value="deepgram">Deepgram</option>
+                  <option value="mistral">Mistral AI</option>
+                </select>
+              </div>
+
+              <div>
                 <label htmlFor="ttsModel" className="block text-sm font-medium text-[#171821]">
-                  Modèle TTS Deepgram
+                  Modèle TTS
                 </label>
                 <input
                   type="text"
                   id="ttsModel"
                   value={formData.ttsModel}
                   onChange={(e) => setFormData({ ...formData, ttsModel: e.target.value })}
-                  placeholder="aura-asteria-fr"
+                  placeholder={formData.ttsProvider === 'mistral' ? 'voxtral-mini-tts-2603' : 'aura-asteria-fr'}
                   className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition placeholder:text-[#9b9387] focus:border-black/20 focus:bg-white"
                 />
               </div>
 
               <div>
                 <label htmlFor="ttsVoice" className="block text-sm font-medium text-[#171821]">
-                  Voix TTS
+                  {formData.ttsProvider === 'mistral' ? 'Voice ID Mistral' : 'Voix TTS'}
                 </label>
                 <input
                   type="text"
                   id="ttsVoice"
                   value={formData.ttsVoice}
                   onChange={(e) => setFormData({ ...formData, ttsVoice: e.target.value })}
-                  placeholder="aura-asteria-fr"
+                  placeholder={formData.ttsProvider === 'mistral' ? 'voice_id optionnel' : 'aura-asteria-fr'}
                   className="mt-2 block w-full rounded-2xl border border-black/10 bg-[#fcfbf8] px-4 py-3 text-sm text-[#171821] outline-none transition placeholder:text-[#9b9387] focus:border-black/20 focus:bg-white"
                 />
               </div>

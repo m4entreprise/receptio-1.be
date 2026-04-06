@@ -22,12 +22,15 @@ export interface Company {
 export interface BbisAgentSettings {
   systemPrompt?: string;
   temperature?: number;
+  llmProvider?: 'openai' | 'mistral';
   llmModel?: string;
   maxCompletionTokens?: number;
   silenceThresholdMs?: number;
   minSpeechMs?: number;
   bargeInMinSpeechMs?: number;
+  sttProvider?: 'deepgram' | 'mistral';
   sttModel?: string;
+  ttsProvider?: 'deepgram' | 'mistral';
   ttsModel?: string;
   ttsVoice?: string;
 }
