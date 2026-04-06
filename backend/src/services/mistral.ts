@@ -6,11 +6,39 @@ const MISTRAL_API_URL = 'https://api.mistral.ai/v1';
 const DEFAULT_MISTRAL_LLM_MODEL = 'mistral-small-latest';
 const DEFAULT_MISTRAL_STT_MODEL = 'voxtral-mini-latest';
 const DEFAULT_MISTRAL_TTS_MODEL = 'voxtral-mini-tts-2603';
+const MISTRAL_TTS_TIMEOUT_MS = Number(process.env.MISTRAL_TTS_TIMEOUT_MS || 30000);
+const MISTRAL_TTS_MAX_RETRIES = Math.max(1, Number(process.env.MISTRAL_TTS_MAX_RETRIES || 3));
 
 function ensureMistralConfigured() {
   if (!MISTRAL_API_KEY) {
     throw new Error('MISTRAL_API_KEY not configured');
   }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractApiErrorMessage(error: any): string {
+  const responseData = error?.response?.data;
+
+  if (typeof responseData === 'string' && responseData.trim()) {
+    return responseData;
+  }
+
+  if (responseData && typeof responseData === 'object') {
+    const nestedMessage = responseData.error?.message || responseData.message || responseData.detail;
+    if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
+      return nestedMessage;
+    }
+  }
+
+  return error?.message || 'Unknown Mistral API error';
+}
+
+function isRetryableMistralTtsError(error: any): boolean {
+  const status = error?.response?.status;
+  return status === 408 || status === 409 || status === 425 || status === 429 || (typeof status === 'number' && status >= 500);
 }
 
 function extractTextContent(content: unknown): string {
@@ -164,37 +192,75 @@ export async function textToSpeech(
 ): Promise<Buffer> {
   try {
     ensureMistralConfigured();
+    const model = options.model || DEFAULT_MISTRAL_TTS_MODEL;
 
-    const response = await axios.post(
-      `${MISTRAL_API_URL}/audio/speech`,
-      {
-        model: options.model || DEFAULT_MISTRAL_TTS_MODEL,
-        input: text,
-        voice_id: options.voice || undefined,
-        response_format: format,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${MISTRAL_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
+    for (let attempt = 1; attempt <= MISTRAL_TTS_MAX_RETRIES; attempt += 1) {
+      try {
+        const response = await axios.post(
+          `${MISTRAL_API_URL}/audio/speech`,
+          {
+            model,
+            input: text,
+            voice_id: options.voice || undefined,
+            response_format: format,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${MISTRAL_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: MISTRAL_TTS_TIMEOUT_MS,
+          }
+        );
+
+        const audioData = response.data?.audio_data;
+
+        if (typeof audioData !== 'string' || !audioData) {
+          logger.error('Mistral TTS response missing audio_data', {
+            model,
+            voice: options.voice || null,
+            format,
+            attempt,
+            responseKeys: response.data && typeof response.data === 'object' ? Object.keys(response.data) : null,
+          });
+          throw new Error('Mistral TTS returned no audio_data');
+        }
+
+        logger.info('Text converted to speech with Mistral', {
+          model,
+          voice: options.voice || null,
+          format,
+          attempt,
+          textLength: text.length,
+        });
+
+        return Buffer.from(audioData, 'base64');
+      } catch (error: any) {
+        const status = error?.response?.status || null;
+        const apiErrorMessage = extractApiErrorMessage(error);
+        const retryable = isRetryableMistralTtsError(error);
+
+        logger.warn('Mistral TTS request failed', {
+          attempt,
+          maxRetries: MISTRAL_TTS_MAX_RETRIES,
+          model,
+          voice: options.voice || null,
+          format,
+          textLength: text.length,
+          status,
+          retryable,
+          error: apiErrorMessage,
+        });
+
+        if (!retryable || attempt >= MISTRAL_TTS_MAX_RETRIES) {
+          throw new Error(apiErrorMessage);
+        }
+
+        await sleep(300 * attempt);
       }
-    );
-
-    const audioData = response.data?.audio_data;
-
-    if (typeof audioData !== 'string' || !audioData) {
-      throw new Error('Mistral TTS returned no audio_data');
     }
 
-    logger.info('Text converted to speech with Mistral', {
-      model: options.model || DEFAULT_MISTRAL_TTS_MODEL,
-      voice: options.voice || null,
-      format,
-      textLength: text.length,
-    });
-
-    return Buffer.from(audioData, 'base64');
+    throw new Error('Mistral TTS failed after retries');
   } catch (error: any) {
     logger.error('Mistral TTS error', { error: error.message });
     throw error;

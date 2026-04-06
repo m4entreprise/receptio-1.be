@@ -98,6 +98,7 @@ interface TwilioStreamStopEvent {
 interface AssistantPlaybackMetrics {
   audioDurationMs: number;
   playbackStartedAt: number;
+  ttsProvider: 'deepgram' | 'mistral' | 'openai';
   ttsDurationMs: number;
 }
 
@@ -621,6 +622,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         transcriptLength: callerText.length,
         transcriptText: callerText,
         transferRequested: false,
+        providerTts: playbackMetrics?.ttsProvider ?? state.bbisTtsProvider,
         ttsDurationMs: playbackMetrics?.ttsDurationMs ?? null,
         turnIndex,
         turnIntent: detectedIntent.summaryIntent,
@@ -663,6 +665,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         transcriptLength: callerText.length,
         transcriptText: callerText,
         transferRequested: false,
+        providerTts: playbackMetrics?.ttsProvider ?? state.bbisTtsProvider,
         ttsDurationMs: playbackMetrics?.ttsDurationMs ?? null,
         turnIndex,
         turnIntent: detectedIntent.summaryIntent,
@@ -748,6 +751,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       transcriptLength: callerText.length,
       transcriptText: callerText,
       transferRequested: false,
+      providerTts: playbackMetrics?.ttsProvider ?? state.bbisTtsProvider,
       ttsDurationMs: playbackMetrics?.ttsDurationMs ?? null,
       turnIndex,
       turnIntent: detectedIntent.summaryIntent,
@@ -882,17 +886,42 @@ async function speakAssistantText(
     );
 
     const ttsStartedAt = Date.now();
-    const wavAudio = state.activeOfferMode === 'Bbis'
-      ? state.bbisTtsProvider === 'mistral'
-        ? await mistralTextToSpeech(cleanText, 'wav', 'fr', {
+    let effectiveTtsProvider: 'deepgram' | 'mistral' | 'openai' = state.activeOfferMode === 'Bbis'
+      ? state.bbisTtsProvider
+      : 'openai';
+    let wavAudio: Buffer;
+
+    if (state.activeOfferMode === 'Bbis') {
+      if (state.bbisTtsProvider === 'mistral') {
+        try {
+          wavAudio = await mistralTextToSpeech(cleanText, 'wav', 'fr', {
+            model: state.bbisTtsModel || undefined,
+            voice: state.bbisTtsVoice || undefined,
+          });
+        } catch (error: any) {
+          if (!DEEPGRAM_API_KEY) {
+            throw error;
+          }
+
+          logger.warn('Mistral TTS failed, falling back to Deepgram TTS', {
+            callId: state.callId,
+            error: error.message,
+            source: options.source,
+          });
+
+          effectiveTtsProvider = 'deepgram';
+          wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr');
+        }
+      } else {
+        wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
           model: state.bbisTtsModel || undefined,
           voice: state.bbisTtsVoice || undefined,
-        })
-        : await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
-          model: state.bbisTtsModel || undefined,
-          voice: state.bbisTtsVoice || undefined,
-        })
-      : await textToSpeech(cleanText, 'wav');
+        });
+      }
+    } else {
+      wavAudio = await textToSpeech(cleanText, 'wav');
+    }
+
     const ttsDurationMs = Date.now() - ttsStartedAt;
     const ulawAudio = convertWavToULaw(wavAudio);
     const audioDurationMs = calculateAudioDurationMs(ulawAudio);
@@ -905,6 +934,7 @@ async function speakAssistantText(
       callId: state.callId,
       activeOfferMode: state.activeOfferMode,
       source: options.source,
+      ttsProvider: effectiveTtsProvider,
       ttsDurationMs,
       audioDurationMs,
       textLength: cleanText.length,
@@ -926,6 +956,7 @@ async function speakAssistantText(
     return {
       audioDurationMs,
       playbackStartedAt,
+      ttsProvider: effectiveTtsProvider,
       ttsDurationMs,
     };
   } catch (error: any) {
