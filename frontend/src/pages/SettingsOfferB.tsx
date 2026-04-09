@@ -13,6 +13,8 @@ interface OfferBSettings {
   greetingText: string;
   knowledgeBaseEnabled: boolean;
   appointmentIntegrationEnabled: boolean;
+  smartRoutingEnabled: boolean;
+  routingQuestion: string;
 }
 
 interface Company {
@@ -42,6 +44,8 @@ const defaultOfferBSettings: OfferBSettings = {
   greetingText: '',
   knowledgeBaseEnabled: false,
   appointmentIntegrationEnabled: false,
+  smartRoutingEnabled: false,
+  routingQuestion: '',
 };
 
 const emptyKnowledgeForm = {
@@ -367,25 +371,61 @@ export default function SettingsOfferB() {
             </div>
 
             {formData.settings.offerMode === 'A' ? (
-              <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#344453]/10 text-[#344453]">
-                    <Bot className="h-4 w-4" />
+              <div className="space-y-4">
+                <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#344453]/10 text-[#344453]">
+                      <Bot className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-[#141F28]">Message d'accueil répondeur</h3>
+                      <p className="text-xs text-[#344453]/50">Offre A — lu par Twilio à chaque appel entrant</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-[#141F28]">Message d'accueil répondeur</h3>
-                    <p className="text-xs text-[#344453]/50">Offre A — lu par Twilio à chaque appel entrant</p>
-                  </div>
+                  <textarea
+                    id="greetingText"
+                    rows={3}
+                    value={formData.settings.greetingText}
+                    onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, greetingText: e.target.value } })}
+                    placeholder={`Bonjour, vous êtes bien chez ${formData.name || 'votre entreprise'}. Merci de laisser votre message après le bip.`}
+                    className="mt-4 block w-full resize-none rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
+                  />
+                  <p className="mt-2 text-xs text-[#344453]/45">Laissez vide pour utiliser le message par défaut.</p>
                 </div>
-                <textarea
-                  id="greetingText"
-                  rows={3}
-                  value={formData.settings.greetingText}
-                  onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, greetingText: e.target.value } })}
-                  placeholder={`Bonjour, vous êtes bien chez ${formData.name || 'votre entreprise'}. Merci de laisser votre message après le bip.`}
-                  className="mt-4 block w-full resize-none rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
-                />
-                <p className="mt-2 text-xs text-[#344453]/45">Laissez vide pour utiliser le message par défaut.</p>
+
+                <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
+                  <div className="flex items-start gap-3">
+                    <PhoneForwarded className="mt-0.5 h-5 w-5 text-[#344453]" />
+                    <div className="min-w-0 flex-1">
+                      <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
+                        <span>Routage intelligent activé</span>
+                        <input
+                          type="checkbox"
+                          checked={formData.settings.smartRoutingEnabled}
+                          onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, smartRoutingEnabled: e.target.checked } })}
+                          className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
+                        />
+                      </label>
+                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">L'appelant dit son motif, il est mis en attente, et vous le transférez manuellement depuis le dashboard.</p>
+                    </div>
+                  </div>
+
+                  {formData.settings.smartRoutingEnabled && (
+                    <div className="mt-4">
+                      <label htmlFor="routingQuestion" className="block text-sm font-medium text-[#344453]">
+                        Question posée à l'appelant
+                      </label>
+                      <input
+                        type="text"
+                        id="routingQuestion"
+                        value={formData.settings.routingQuestion}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, routingQuestion: e.target.value } })}
+                        placeholder="Quel est le motif de votre appel ?"
+                        className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="grid gap-5 lg:grid-cols-2">

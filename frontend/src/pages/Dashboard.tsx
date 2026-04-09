@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles } from 'lucide-react';
+import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck } from 'lucide-react';
 import axios from 'axios';
 import Layout from '../components/Layout';
 
@@ -19,22 +19,70 @@ interface RecentCall {
   status: string;
 }
 
+interface QueuedCall {
+  id: string;
+  caller_number?: string | null;
+  caller_name?: string | null;
+  call_sid?: string | null;
+  queue_reason?: string | null;
+  queued_at: string;
+}
+
+interface StaffMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone_number: string;
+  role?: string;
+  enabled: boolean;
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({ total: 0, today: 0, answered: 0, pending: 0 });
   const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
+  const [queuedCalls, setQueuedCalls] = useState<QueuedCall[]>([]);
+  const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [selectedStaff, setSelectedStaff] = useState<Record<string, string>>({});
+  const [transferring, setTransferring] = useState<Record<string, boolean>>({});
+  const [transferResult, setTransferResult] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchDashboardData();
+    fetchStaff();
 
     const intervalId = window.setInterval(() => {
       fetchDashboardData(false);
-    }, 10000);
+    }, 5000);
 
     return () => {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  const fetchStaff = async () => {
+    try {
+      const res = await axios.get('/api/staff');
+      setStaffList((res.data.staff || []).filter((s: StaffMember) => s.enabled));
+    } catch {
+    }
+  };
+
+  const handleTransfer = async (callId: string) => {
+    const phone = selectedStaff[callId];
+    if (!phone) return;
+    setTransferring((p) => ({ ...p, [callId]: true }));
+    setTransferResult((p) => ({ ...p, [callId]: '' }));
+    try {
+      await axios.post(`/api/calls/${callId}/transfer`, { staffPhone: phone });
+      setTransferResult((p) => ({ ...p, [callId]: 'Transféré ✓' }));
+      setTimeout(() => fetchDashboardData(false), 1500);
+    } catch {
+      setTransferResult((p) => ({ ...p, [callId]: 'Erreur lors du transfert' }));
+    } finally {
+      setTransferring((p) => ({ ...p, [callId]: false }));
+    }
+  };
 
   const fetchDashboardData = async (showLoader: boolean = true) => {
     if (showLoader) {
@@ -42,12 +90,14 @@ export default function Dashboard() {
     }
 
     try {
-      const [callsRes] = await Promise.all([
+      const [callsRes, queuedRes] = await Promise.all([
         axios.get('/api/calls?limit=5'),
+        axios.get('/api/calls/queued').catch(() => ({ data: { calls: [] } })),
       ]);
 
       const calls: RecentCall[] = callsRes.data.calls || [];
       setRecentCalls(calls);
+      setQueuedCalls(queuedRes.data.calls || []);
 
       const today = new Date().toDateString();
       const todayCalls = calls.filter((c) => 
@@ -181,6 +231,90 @@ export default function Dashboard() {
             );
           })}
         </section>
+
+        {queuedCalls.length > 0 && (
+          <section className="rounded-[28px] border border-[#E6A817]/25 bg-white shadow-sm">
+            <div className="flex items-center gap-3 border-b border-[#E6A817]/15 px-4 py-5 sm:px-6">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#E6A817]/15 text-[#E6A817]">
+                <PhoneForwarded className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>
+                  En attente de transfert
+                </h2>
+                <p className="mt-1 text-sm text-[#344453]/55">{queuedCalls.length} appel{queuedCalls.length > 1 ? 's' : ''} en file — transférez-les vers le bon agent.</p>
+              </div>
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#E6A817] text-xs font-bold text-white">
+                {queuedCalls.length}
+              </span>
+            </div>
+
+            <div className="space-y-3 px-4 py-4 sm:px-6 sm:py-5">
+              {queuedCalls.map((call) => (
+                <div key={call.id} className="rounded-[22px] border border-[#E6A817]/20 bg-[#E6A817]/5 p-4 sm:p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#E6A817]/20 text-[#E6A817]">
+                        <Phone className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-[#141F28]">
+                          {call.caller_number || 'Numéro inconnu'}
+                        </p>
+                        <p className="mt-0.5 text-xs text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>
+                          {call.queued_at ? new Date(call.queued_at).toLocaleTimeString('fr-BE') : ''}
+                        </p>
+                        {call.queue_reason && (
+                          <p className="mt-2 text-sm italic text-[#344453]/60">
+                            « {call.queue_reason} »
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 sm:items-end">
+                      {staffList.length > 0 ? (
+                        <>
+                          <select
+                            value={selectedStaff[call.id] || ''}
+                            onChange={(e) => setSelectedStaff((p) => ({ ...p, [call.id]: e.target.value }))}
+                            className="w-full rounded-xl border border-[#344453]/15 bg-white px-3 py-2 text-sm text-[#141F28] outline-none focus:border-[#344453]/30 sm:w-56"
+                          >
+                            <option value="">— Choisir un agent —</option>
+                            {staffList.map((s) => (
+                              <option key={s.id} value={s.phone_number}>
+                                {s.first_name} {s.last_name} {s.role ? `(${s.role})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => handleTransfer(call.id)}
+                            disabled={!selectedStaff[call.id] || transferring[call.id]}
+                            className="inline-flex items-center gap-2 rounded-full bg-[#344453] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2a3642] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {transferring[call.id] ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <UserCheck className="h-4 w-4" />
+                            )}
+                            Transférer
+                          </button>
+                          {transferResult[call.id] && (
+                            <p className={`text-xs font-medium ${transferResult[call.id].includes('✓') ? 'text-[#2D9D78]' : 'text-[#D94052]'}`}>
+                              {transferResult[call.id]}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs text-[#344453]/50">Aucun agent disponible — ajoutez du staff dans l'onglet Équipe.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-[28px] border border-[#344453]/10 bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b border-[#344453]/8 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">

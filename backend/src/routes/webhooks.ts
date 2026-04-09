@@ -84,6 +84,14 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
       return;
     }
 
+    if (offerBSettings.smartRoutingEnabled) {
+      const routingQuestion = offerBSettings.routingQuestion || 'Quel est le motif de votre appel ?';
+      const gatherUrl = joinUrl(baseUrl, `/api/webhooks/twilio/gather-reason?callId=${callId}&companyId=${company.id}`);
+      const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}&routing=1&question=${encodeURIComponent(routingQuestion)}`);
+      res.type('text/xml').send(buildOfferARoutingTwiml(greetingUrl, gatherUrl));
+      return;
+    }
+
     const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
     const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
     res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
@@ -96,6 +104,9 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
 router.get('/twilio/greeting', async (req: Request, res: Response) => {
   try {
     const companyId = String(req.query.companyId || '');
+    const isRouting = req.query.routing === '1';
+    const routingQuestion = String(req.query.question || 'Quel est le motif de votre appel ?');
+
     const result = await query(
       'SELECT id, name, settings FROM companies WHERE id = $1',
       [companyId]
@@ -108,13 +119,43 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
 
     const company = result.rows[0];
     const greetingText = company.settings?.greetingText || company.settings?.twilioGreetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
-    const audio = await textToSpeech(greetingText);
+    const fullText = isRouting ? `${greetingText} ${routingQuestion}` : greetingText;
+    const audio = await textToSpeech(fullText);
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(audio);
   } catch (error: any) {
     logger.error('Twilio greeting generation error', { error: error.message });
     res.status(500).send('Greeting unavailable');
+  }
+});
+
+router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
+  try {
+    const callId = String(req.query.callId || '');
+    const companyId = String(req.query.companyId || '');
+    const speechResult = String(req.body.SpeechResult || req.query.SpeechResult || '').trim();
+    const callSid = String(req.body.CallSid || '');
+
+    if (callId) {
+      await query(
+        `UPDATE calls SET queue_status = $1, queue_reason = $2, queued_at = NOW(), status = $3 WHERE id = $4`,
+        ['waiting', speechResult || null, 'queued', callId]
+      );
+
+      await query(
+        `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+        [callId, 'twilio.routing.queued', { speechResult, callSid, companyId }]
+      );
+    }
+
+    const holdAudioUrl = `http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical`;
+    res.type('text/xml').send(buildTwiml(
+      `<Say language="fr-FR" voice="Google.fr-FR-Standard-A">Merci. Veuillez patienter, un agent va vous prendre en charge.</Say><Play loop="10">${escapeXml(holdAudioUrl)}</Play><Hangup />`
+    ));
+  } catch (error: any) {
+    logger.error('Twilio gather-reason webhook error', { error: error.message });
+    res.type('text/xml').send(buildTwiml('<Say language="fr-FR">Une erreur est survenue. Veuillez rappeler.</Say><Hangup />'));
   }
 });
 
@@ -530,6 +571,12 @@ function buildOfferBStreamingTwiml(streamUrl: string, callId: string, companyId:
 function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string): string {
   return buildTwiml(
     `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+  );
+}
+
+function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string): string {
+  return buildTwiml(
+    `<Gather input="speech" language="fr-FR" speechTimeout="auto" action="${escapeXml(gatherUrl)}" method="POST"><Play>${escapeXml(greetingUrl)}</Play></Gather><Redirect>${escapeXml(gatherUrl)}</Redirect>`
   );
 }
 

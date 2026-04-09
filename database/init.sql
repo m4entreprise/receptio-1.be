@@ -229,6 +229,13 @@ BEGIN
     END IF;
 END $$;
 
+-- Smart routing: queue columns on calls
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS queue_status VARCHAR(30) DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS queue_reason TEXT DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_calls_queue_status ON calls(company_id, queue_status) WHERE queue_status IS NOT NULL;
+
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES
 ('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}')
