@@ -131,32 +131,34 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
 });
 
 router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
-  try {
-    const callId = String(req.query.callId || '');
-    const companyId = String(req.query.companyId || '');
-    const speechResult = String(req.body.SpeechResult || req.query.SpeechResult || '').trim();
-    const callSid = String(req.body.CallSid || '');
+  const callId = String(req.query.callId || '');
+  const companyId = String(req.query.companyId || '');
+  const speechResult = String(req.body.SpeechResult || req.query.SpeechResult || '').trim();
+  const callSid = String(req.body.CallSid || '');
 
-    if (callId) {
+  logger.info('gather-reason received', { callId, companyId, speechResult: speechResult.slice(0, 80), callSid });
+
+  if (callId) {
+    try {
       await query(
         `UPDATE calls SET queue_status = $1, queue_reason = $2, queued_at = NOW(), status = $3 WHERE id = $4`,
         ['waiting', speechResult || null, 'queued', callId]
       );
-
       await query(
         `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
         [callId, 'twilio.routing.queued', { speechResult, callSid, companyId }]
       );
+      logger.info('Call queued for transfer', { callId, speechResult: speechResult.slice(0, 80) });
+    } catch (dbError: any) {
+      logger.error('gather-reason DB error (columns may be missing — run migration)', { callId, error: dbError.message });
     }
-
-    const holdAudioUrl = `http://twimlets.com/holdmusic?Bucket=com.twilio.music.classical`;
-    res.type('text/xml').send(buildTwiml(
-      `<Say language="fr-FR" voice="Google.fr-FR-Standard-A">Merci. Veuillez patienter, un agent va vous prendre en charge.</Say><Play loop="10">${escapeXml(holdAudioUrl)}</Play><Hangup />`
-    ));
-  } catch (error: any) {
-    logger.error('Twilio gather-reason webhook error', { error: error.message });
-    res.type('text/xml').send(buildTwiml('<Say language="fr-FR">Une erreur est survenue. Veuillez rappeler.</Say><Hangup />'));
   }
+
+  res.type('text/xml').send(buildTwiml(
+    `<Say language="fr-FR">Merci. Veuillez patienter, un agent va vous prendre en charge.</Say>` +
+    `<Say language="fr-FR">...</Say>`.repeat(0) +
+    `<Pause length="30"/><Say language="fr-FR">Nous vous remercions de votre patience.</Say><Pause length="30"/><Hangup />`
+  ));
 });
 
 router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
