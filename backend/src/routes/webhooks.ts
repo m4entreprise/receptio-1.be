@@ -482,9 +482,9 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
     await query(
       `UPDATE calls
-       SET recording_url = $1, duration = $2, status = $3, ended_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
-      [recordingUrl, recordingDuration, 'completed', call.id]
+       SET recording_url = $1, duration = COALESCE(NULLIF($2, 0), duration), status = CASE WHEN status NOT IN ('transferred') THEN 'completed' ELSE status END, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP)
+       WHERE id = $3`,
+      [recordingUrl, recordingDuration, call.id]
     );
 
     await query(
@@ -495,28 +495,52 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
     const transcription = await transcribeAudio(recordingUrl, 'fr');
 
-    await query(
-      `INSERT INTO transcriptions (call_id, text, language, confidence)
-       VALUES ($1, $2, $3, $4)`,
-      [call.id, transcription.text, transcription.language, transcription.confidence]
+    const existingTranscription = await query(
+      'SELECT id, text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
+      [call.id]
     );
+
+    const fullText = existingTranscription.rows.length > 0
+      ? `[Motif initial] ${existingTranscription.rows[0].text}\n\n[Conversation avec l'agent]\n${transcription.text}`
+      : transcription.text;
+
+    if (existingTranscription.rows.length > 0) {
+      await query(
+        `UPDATE transcriptions SET text = $1 WHERE id = $2`,
+        [fullText, existingTranscription.rows[0].id]
+      );
+    } else {
+      await query(
+        `INSERT INTO transcriptions (call_id, text, language, confidence)
+         VALUES ($1, $2, $3, $4)`,
+        [call.id, fullText, transcription.language, transcription.confidence]
+      );
+    }
 
     const [summary, intentData] = await Promise.all([
-      summarizeCall(transcription.text),
-      detectIntent(transcription.text),
+      summarizeCall(fullText),
+      detectIntent(fullText),
     ]);
 
-    await query(
-      `INSERT INTO call_summaries (call_id, summary, intent, actions)
-       VALUES ($1, $2, $3, $4)`,
-      [call.id, summary, intentData.intent, JSON.stringify([])]
-    );
+    const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [call.id]);
+    if (existingSummary.rows.length > 0) {
+      await query(
+        `UPDATE call_summaries SET summary = $1, intent = $2 WHERE call_id = $3`,
+        [summary, intentData.intent, call.id]
+      );
+    } else {
+      await query(
+        `INSERT INTO call_summaries (call_id, summary, intent, actions)
+         VALUES ($1, $2, $3, $4)`,
+        [call.id, summary, intentData.intent, JSON.stringify([])]
+      );
+    }
 
     if (call.company_email) {
       try {
         await sendTranscriptionEmail(call.company_email, {
           callerNumber: call.caller_number || 'Inconnu',
-          transcription: transcription.text,
+          transcription: fullText,
           duration: recordingDuration,
           createdAt: call.created_at,
         });

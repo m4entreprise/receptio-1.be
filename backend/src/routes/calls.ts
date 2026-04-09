@@ -172,7 +172,11 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
     }
 
     const callResult = await query(
-      `SELECT call_sid, queue_status FROM calls WHERE id = $1 AND company_id = $2`,
+      `SELECT c.call_sid, c.queue_status, c.queue_reason,
+              COALESCE(co.settings->>'publicWebhookUrl', '') AS public_webhook_url
+       FROM calls c
+       LEFT JOIN companies co ON co.id = c.company_id
+       WHERE c.id = $1 AND c.company_id = $2`,
       [id, companyId]
     );
 
@@ -196,10 +200,19 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
       return;
     }
 
+    const baseWebhookUrl = (process.env.PUBLIC_WEBHOOK_URL || '').replace(/\/+$/, '');
+    const recordingCallbackUrl = baseWebhookUrl
+      ? `${baseWebhookUrl}/api/webhooks/twilio/recording-complete`
+      : null;
+
+    const recordAttr = recordingCallbackUrl
+      ? ` record="record-from-answer" recordingStatusCallback="${recordingCallbackUrl}" recordingStatusCallbackMethod="POST"`
+      : '';
+
     const twilio = require('twilio')(accountSid, authToken);
 
     await twilio.calls(callSid).update({
-      twiml: `<Response><Say language="fr-FR">Nous vous transférons maintenant. Veuillez patienter.</Say><Dial><Number>${staffPhone}</Number></Dial></Response>`,
+      twiml: `<Response><Say language="fr-FR">Nous vous transférons maintenant. Veuillez patienter.</Say><Dial${recordAttr}><Number>${staffPhone}</Number></Dial></Response>`,
     });
 
     await query(
