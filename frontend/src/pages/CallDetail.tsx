@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
-import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2 } from 'lucide-react';
+import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, ChevronDown } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -41,6 +41,33 @@ export default function CallDetail() {
   const [audioDuration, setAudioDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isVolumeOpen, setIsVolumeOpen] = useState(false);
+  const [staff, setStaff] = useState<{ id: string; first_name: string; last_name: string; phone_number: string; role: string }[]>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState('');
+  const [dialing, setDialing] = useState(false);
+  const [dialResult, setDialResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showDialPanel, setShowDialPanel] = useState(false);
+
+  useEffect(() => {
+    axios.get('/api/staff').then((res) => {
+      const enabled = (res.data.staff || []).filter((s: any) => s.enabled);
+      setStaff(enabled);
+      if (enabled.length > 0) setSelectedStaffId(enabled[0].id);
+    }).catch(() => {});
+  }, []);
+
+  const handleDial = async () => {
+    if (!selectedStaffId || !id) return;
+    setDialing(true);
+    setDialResult(null);
+    try {
+      await axios.post(`/api/staff/${selectedStaffId}/call/${id}`);
+      setDialResult({ type: 'success', message: 'Appel initié. Le client va être contacté et transféré à l\'agent.' });
+    } catch (err: any) {
+      setDialResult({ type: 'error', message: err?.response?.data?.error || 'Erreur lors du déclenchement de l\'appel.' });
+    } finally {
+      setDialing(false);
+    }
+  };
 
   useEffect(() => {
     fetchCallDetail();
@@ -219,6 +246,77 @@ export default function CallDetail() {
             </div>
           </div>
 
+          <div className="flex flex-col gap-4">
+          {/* Click-to-call panel */}
+          <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>Rappeler ce numéro</p>
+              <button
+                onClick={() => setShowDialPanel((v) => !v)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#344453]/15 bg-[#344453]/5 px-3 py-1.5 text-xs font-medium text-[#344453] transition hover:bg-[#344453]/10"
+              >
+                <PhoneOutgoing className="h-3.5 w-3.5" />
+                {showDialPanel ? 'Fermer' : 'Initier un appel'}
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showDialPanel ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {showDialPanel && (
+              <div className="mt-4 space-y-3">
+                {staff.length === 0 ? (
+                  <p className="rounded-2xl bg-[#344453]/5 px-4 py-3 text-sm text-[#344453]/55">
+                    Aucun agent actif. <a href="/staff" className="font-medium text-[#C7601D] hover:underline">Configurer l'équipe →</a>
+                  </p>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-[#344453]/60">Transférer vers</label>
+                      <div className="mt-1.5 flex items-center gap-2 rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 focus-within:border-[#344453]/25 focus-within:bg-white">
+                        <Phone className="h-4 w-4 shrink-0 text-[#344453]/35" />
+                        <select
+                          value={selectedStaffId}
+                          onChange={(e) => setSelectedStaffId(e.target.value)}
+                          className="w-full bg-transparent text-sm text-[#141F28] outline-none"
+                        >
+                          {staff.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.first_name} {s.last_name} — {s.role} ({s.phone_number})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {dialResult && (
+                      <div className={`rounded-2xl border px-4 py-3 text-sm font-medium ${
+                        dialResult.type === 'success'
+                          ? 'border-[#2D9D78]/25 bg-[#2D9D78]/8 text-[#2D9D78]'
+                          : 'border-[#D94052]/20 bg-[#D94052]/6 text-[#D94052]'
+                      }`}>
+                        {dialResult.message}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleDial}
+                      disabled={dialing || !selectedStaffId}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#C7601D] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(199,96,29,0.28)] transition hover:bg-[#b35519] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {dialing ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Appel en cours…</>
+                      ) : (
+                        <><PhoneOutgoing className="h-4 w-4" /> Rappeler le client</>
+                      )}
+                    </button>
+                    <p className="text-center text-xs text-[#344453]/40">
+                      Twilio appellera {call?.caller_number || 'le numéro'} et le transférera à l'agent choisi.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
             <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>Repères rapides</p>
             <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -258,6 +356,7 @@ export default function CallDetail() {
               )}
             </div>
           </div>
+          </div>{/* end right column wrapper */}
         </section>
 
         <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">

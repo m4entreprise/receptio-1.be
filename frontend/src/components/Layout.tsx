@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Phone, LayoutDashboard, Settings, LogOut, Gauge } from 'lucide-react';
+import { Phone, LayoutDashboard, Settings, LogOut, Gauge, Users } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LayoutProps {
@@ -21,6 +21,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/calls', icon: Phone, label: 'Appels' },
+    { path: '/staff', icon: Users, label: 'Équipe' },
     { path: '/monitoring/bbis', icon: Gauge, label: 'Monitoring' },
     { path: '/settings', icon: Settings, label: 'Paramètres' },
   ];
@@ -61,7 +62,7 @@ export default function Layout({ children }: LayoutProps) {
                   const Icon = item.icon;
                   const isActive = item.path === '/settings'
                     ? location.pathname.startsWith('/settings')
-                    : location.pathname === item.path;
+                    : location.pathname === item.path || location.pathname.startsWith(item.path + '/');
 
                   return (
                     <Link
@@ -89,12 +90,12 @@ export default function Layout({ children }: LayoutProps) {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#344453]/10 bg-[#F8F9FB]/95 px-3 py-3 backdrop-blur-xl sm:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-4 gap-2 rounded-2xl border border-[#344453]/10 bg-white p-2 shadow-[0_-8px_24px_rgba(52,68,83,0.08)]">
+        <div className="mx-auto grid max-w-md grid-cols-5 gap-1 rounded-2xl border border-[#344453]/10 bg-white p-2 shadow-[0_-8px_24px_rgba(52,68,83,0.08)]">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = item.path === '/settings'
               ? location.pathname.startsWith('/settings')
-              : location.pathname === item.path;
+              : location.pathname === item.path || location.pathname.startsWith(item.path + '/');
 
             return (
               <Link

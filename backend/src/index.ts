@@ -16,6 +16,7 @@ import companiesRoutes from './routes/companies';
 import knowledgeBaseRoutes from './routes/knowledgeBase';
 import monitoringRoutes from './routes/monitoring';
 import webhooksRoutes from './routes/webhooks';
+import staffRoutes from './routes/staff';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -51,6 +52,7 @@ app.use('/api/companies', companiesRoutes);
 app.use('/api/knowledge-base', knowledgeBaseRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/webhooks', webhooksRoutes);
+app.use('/api/staff', staffRoutes);
 
 app.use(errorHandler);
 

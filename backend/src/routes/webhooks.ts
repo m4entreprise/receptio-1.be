@@ -441,6 +441,42 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
   }
 });
 
+// Click-to-call: when the original caller picks up, Twilio calls this URL
+// and we bridge them to the staff member's phone.
+router.all('/twilio/transfer', async (req: Request, res: Response) => {
+  const staffPhone = String(req.query.staffPhone || req.body?.staffPhone || '');
+
+  if (!staffPhone) {
+    res.type('text/xml').send(buildTwiml('<Say language="fr-FR">Une erreur est survenue. Veuillez réessayer.</Say><Hangup />'));
+    return;
+  }
+
+  const twiml = buildTwiml(
+    `<Dial timeout="30" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
+  );
+  res.type('text/xml').send(twiml);
+});
+
+// Click-to-call: status callback — if no-answer / busy / failed, leave a voicemail
+router.post('/twilio/call-status', async (req: Request, res: Response) => {
+  const callStatus = String(req.body?.CallStatus || '');
+  const voicemailMessage = String(req.query.voicemailMessage || req.body?.voicemailMessage || '');
+  const callId = String(req.query.callId || '');
+  const staffId = String(req.query.staffId || '');
+
+  logger.info('Click-to-call status callback', { callStatus, callId, staffId });
+
+  if (['no-answer', 'busy', 'failed'].includes(callStatus) && voicemailMessage) {
+    const twiml = buildTwiml(
+      `<Say language="fr-FR">${escapeXml(voicemailMessage)}</Say><Hangup />`
+    );
+    res.type('text/xml').send(twiml);
+    return;
+  }
+
+  res.type('text/xml').send(buildTwiml('<Hangup />'));
+});
+
 function buildTwiml(body: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
 }
