@@ -153,11 +153,58 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
     } catch (dbError: any) {
       logger.error('gather-reason DB error (columns may be missing — run migration)', { callId, error: dbError.message });
     }
+
+    if (speechResult) {
+      setImmediate(async () => {
+        try {
+          const callRow = await query(
+            `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email
+             FROM calls c LEFT JOIN companies co ON co.id = c.company_id WHERE c.id = $1`,
+            [callId]
+          );
+          if (callRow.rows.length === 0) return;
+          const call = callRow.rows[0];
+
+          const existing = await query('SELECT id FROM transcriptions WHERE call_id = $1', [callId]);
+          if (existing.rows.length === 0) {
+            await query(
+              `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
+              [callId, speechResult, 'fr', 0.9]
+            );
+          }
+
+          const [summary, intentData] = await Promise.all([
+            summarizeCall(speechResult),
+            detectIntent(speechResult),
+          ]);
+
+          const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
+          if (existingSummary.rows.length === 0) {
+            await query(
+              `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
+              [callId, summary, intentData.intent, JSON.stringify([])]
+            );
+          }
+
+          if (call.company_email) {
+            await sendTranscriptionEmail(call.company_email, {
+              callerNumber: call.caller_number || 'Inconnu',
+              transcription: speechResult,
+              duration: 0,
+              createdAt: call.created_at,
+            }).catch((e: any) => logger.error('gather-reason email error', { error: e.message }));
+          }
+
+          logger.info('gather-reason: transcription + summary saved', { callId });
+        } catch (aiError: any) {
+          logger.error('gather-reason AI processing error', { callId, error: aiError.message });
+        }
+      });
+    }
   }
 
   res.type('text/xml').send(buildTwiml(
     `<Say language="fr-FR">Merci. Veuillez patienter, un agent va vous prendre en charge.</Say>` +
-    `<Say language="fr-FR">...</Say>`.repeat(0) +
     `<Pause length="30"/><Say language="fr-FR">Nous vous remercions de votre patience.</Say><Pause length="30"/><Hangup />`
   ));
 });
