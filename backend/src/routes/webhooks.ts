@@ -53,6 +53,7 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
     const callId = await createOrUpdateTwilioCall(payload, company.id);
     const baseUrl = getBaseUrl(req);
     const offerBSettings = await getCompanyOfferBSettings(company.id);
+    const voiceStatusUrl = joinUrl(baseUrl, '/api/webhooks/twilio/voice-status');
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data)
@@ -61,8 +62,8 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
     );
 
     await query(
-      `UPDATE calls SET status = $1 WHERE id = $2`,
-      ['answered', callId]
+      `UPDATE calls SET status = $1, metadata = metadata || $2 WHERE id = $3`,
+      ['answered', JSON.stringify({ voiceStatusUrl }), callId]
     );
 
     if (shouldUseRealtimeOfferAgent(offerBSettings)) {
@@ -88,13 +89,13 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
       const routingQuestion = offerBSettings.routingQuestion || 'Quel est le motif de votre appel ?';
       const gatherUrl = joinUrl(baseUrl, `/api/webhooks/twilio/gather-reason?callId=${callId}&companyId=${company.id}`);
       const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}&routing=1&question=${encodeURIComponent(routingQuestion)}`);
-      res.type('text/xml').send(buildOfferARoutingTwiml(greetingUrl, gatherUrl));
+      res.type('text/xml').send(buildOfferARoutingTwiml(greetingUrl, gatherUrl, voiceStatusUrl));
       return;
     }
 
     const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
     const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
-    res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+    res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl, voiceStatusUrl));
   } catch (error: any) {
     logger.error('Twilio voice webhook error', { error: error.message });
     res.type('text/xml').send(buildTwiml('<Hangup />'));
@@ -500,6 +501,42 @@ router.all('/twilio/transfer', async (req: Request, res: Response) => {
   res.type('text/xml').send(twiml);
 });
 
+// Generic inbound call status callback — fired by Twilio on every status change
+router.post('/twilio/voice-status', async (req: Request, res: Response) => {
+  try {
+    const callSid = String(req.body?.CallSid || '');
+    const callStatus = String(req.body?.CallStatus || '');
+    const callDuration = parseInt(req.body?.CallDuration || '0', 10);
+
+    logger.info('Twilio voice-status callback', { callSid, callStatus, callDuration });
+
+    if (!callSid) {
+      res.sendStatus(200);
+      return;
+    }
+
+    const terminalStatuses = ['completed', 'no-answer', 'busy', 'failed', 'canceled'];
+    if (terminalStatuses.includes(callStatus)) {
+      const mappedStatus = callStatus === 'completed' ? 'completed' : callStatus === 'no-answer' ? 'missed' : callStatus;
+
+      await query(
+        `UPDATE calls
+         SET status = $1, duration = COALESCE(NULLIF($2, 0), duration), ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+             queue_status = CASE WHEN queue_status = 'waiting' THEN 'abandoned' ELSE queue_status END
+         WHERE call_sid = $3 AND status NOT IN ('completed', 'missed', 'transferred')`,
+        [mappedStatus, callDuration, callSid]
+      );
+
+      logger.info('Call status updated via voice-status', { callSid, mappedStatus, callDuration });
+    }
+
+    res.sendStatus(200);
+  } catch (error: any) {
+    logger.error('voice-status webhook error', { error: error.message });
+    res.sendStatus(200);
+  }
+});
+
 // Click-to-call: status callback — if no-answer / busy / failed, leave a voicemail
 router.post('/twilio/call-status', async (req: Request, res: Response) => {
   const callStatus = String(req.body?.CallStatus || '');
@@ -570,15 +607,17 @@ function buildOfferBStreamingTwiml(streamUrl: string, callId: string, companyId:
   );
 }
 
-function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string): string {
+function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string, statusCallbackUrl?: string): string {
+  const statusAttr = statusCallbackUrl ? ` statusCallback="${escapeXml(statusCallbackUrl)}" statusCallbackMethod="POST"` : '';
   return buildTwiml(
-    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+    `<Play${statusAttr}>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
   );
 }
 
-function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string): string {
+function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string, statusCallbackUrl?: string): string {
+  const statusAttr = statusCallbackUrl ? ` statusCallback="${escapeXml(statusCallbackUrl)}" statusCallbackMethod="POST"` : '';
   return buildTwiml(
-    `<Gather input="speech" language="fr-FR" speechTimeout="auto" action="${escapeXml(gatherUrl)}" method="POST"><Play>${escapeXml(greetingUrl)}</Play></Gather><Redirect>${escapeXml(gatherUrl)}</Redirect>`
+    `<Gather input="speech" language="fr-FR" speechTimeout="auto" action="${escapeXml(gatherUrl)}" method="POST"${statusAttr}><Play>${escapeXml(greetingUrl)}</Play></Gather><Redirect>${escapeXml(gatherUrl)}</Redirect>`
   );
 }
 

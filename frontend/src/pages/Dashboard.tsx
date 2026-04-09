@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getStatusDisplay, isTerminalStatus } from '../utils/callStatus';
 import { Link } from 'react-router-dom';
 import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck } from 'lucide-react';
 import axios from 'axios';
@@ -107,8 +108,8 @@ export default function Dashboard() {
       setStats({
         total: callsRes.data.total || 0,
         today: todayCalls.length,
-        answered: calls.filter((c) => c.status === 'completed').length,
-        pending: calls.filter((c) => c.status === 'received').length,
+        answered: calls.filter((c) => c.status === 'completed' || c.status === 'transferred').length,
+        pending: calls.filter((c) => !isTerminalStatus(c.status)).length,
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -370,10 +371,8 @@ export default function Dashboard() {
                               Transcrit
                             </span>
                           )}
-                          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-                            call.status === 'completed' ? 'bg-[#344453]/10 text-[#344453]' : 'bg-[#E6A817]/12 text-[#E6A817]'
-                          }`}>
-                            {call.status === 'completed' ? 'Terminé' : 'En cours'}
+                          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${getStatusDisplay(call.status).color}`}>
+                            {getStatusDisplay(call.status).label}
                           </span>
                         </div>
                       </div>

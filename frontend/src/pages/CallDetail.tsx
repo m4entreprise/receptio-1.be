@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getStatusDisplay } from '../utils/callStatus';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
 import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, ChevronDown } from 'lucide-react';
@@ -323,13 +324,9 @@ export default function CallDetail() {
               <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
                 <p className="text-sm text-[#344453]/50">Statut</p>
                 <span className={`mt-2 inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-                  call.status === 'completed'
-                    ? 'bg-[#344453]/10 text-[#344453]'
-                    : call.status === 'answered'
-                    ? 'bg-[#2D9D78]/12 text-[#2D9D78]'
-                    : 'bg-[#E6A817]/12 text-[#E6A817]'
+                  getStatusDisplay(call.status).color
                 }`}>
-                  {call.status === 'completed' ? 'Terminé' : call.status === 'answered' ? 'Répondu' : 'Reçu'}
+                  {getStatusDisplay(call.status).label}
                 </span>
               </div>
 

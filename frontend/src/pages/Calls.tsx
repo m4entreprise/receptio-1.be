@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getStatusDisplay } from '../utils/callStatus';
 import { Link } from 'react-router-dom';
 import { Phone, Search, Filter, ArrowRight, CalendarClock, Sparkles } from 'lucide-react';
 import axios from 'axios';
@@ -176,8 +177,11 @@ export default function Calls() {
                   >
                     <option value="all">Tous les statuts</option>
                     <option value="received">Reçus</option>
+                    <option value="answered">En cours</option>
+                    <option value="queued">En attente</option>
+                    <option value="transferred">Transférés</option>
                     <option value="completed">Terminés</option>
-                    <option value="answered">Répondus</option>
+                    <option value="missed">Manqués</option>
                   </select>
                 </div>
               </div>
@@ -232,13 +236,9 @@ export default function Calls() {
                         </div>
 
                         <span className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-medium ${
-                          call.status === 'completed'
-                            ? 'bg-[#344453]/10 text-[#344453]'
-                            : call.status === 'answered'
-                            ? 'bg-[#2D9D78]/12 text-[#2D9D78]'
-                            : 'bg-[#E6A817]/12 text-[#E6A817]'
+                          getStatusDisplay(call.status).color
                         }`}>
-                          {call.status === 'completed' ? 'Terminé' : call.status === 'answered' ? 'Répondu' : 'Reçu'}
+                          {getStatusDisplay(call.status).label}
                         </span>
                       </div>
 
