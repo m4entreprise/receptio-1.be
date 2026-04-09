@@ -159,8 +159,8 @@ export default function CallDetail() {
       <Layout>
         <div className="flex h-[50vh] items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-center">
-            <div className="h-12 w-12 animate-spin rounded-full border-2 border-black/10 border-t-[#111118]" />
-            <p className="text-sm font-medium text-[#6f685d]">Chargement de l’appel…</p>
+            <div className="h-12 w-12 animate-spin rounded-full border-2 border-[#344453]/10 border-t-[#344453]" />
+            <p className="text-sm font-medium text-[#344453]/50">Chargement de l’appel…</p>
           </div>
         </div>
       </Layout>
@@ -170,9 +170,9 @@ export default function CallDetail() {
   if (!call) {
     return (
       <Layout>
-        <div className="rounded-[28px] border border-dashed border-black/10 bg-white/70 px-6 py-12 text-center">
-          <p className="text-lg font-semibold text-[#171821]">Appel non trouvé</p>
-          <p className="mt-2 text-sm text-[#6f685d]">Ce détail n’est plus disponible ou n’existe pas.</p>
+        <div className="rounded-[28px] border border-dashed border-[#344453]/15 bg-[#344453]/4 px-6 py-12 text-center">
+          <p className="text-lg font-semibold text-[#141F28]">Appel non trouvé</p>
+          <p className="mt-2 text-sm text-[#344453]/55">Ce détail n'est plus disponible ou n'existe pas.</p>
         </div>
       </Layout>
     );
@@ -182,27 +182,27 @@ export default function CallDetail() {
     <Layout>
       <div className="space-y-5 sm:space-y-6">
         <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="overflow-hidden rounded-[28px] border border-black/5 bg-[#111118] p-5 text-white shadow-[0_24px_60px_rgba(17,17,24,0.18)] sm:p-7">
+          <div className="overflow-hidden rounded-[28px] border border-[#344453]/15 bg-[#141F28] p-5 text-white shadow-[0_24px_60px_rgba(20,31,40,0.18)] sm:p-7">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <button
                   onClick={() => navigate('/calls')}
-                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-stone-200 transition hover:bg-white/10"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
                 >
                   <ArrowLeft className="h-4 w-4" />
                   Retour aux appels
                 </button>
 
-                <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-stone-300">
+                <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: "var(--font-mono)" }}>
                   <Sparkles className="h-3.5 w-3.5" />
                   Détail d'appel
                 </div>
 
                 <div className="mt-5 space-y-3">
-                  <h1 className="text-3xl font-semibold tracking-[-0.04em] text-[#f7f2e8] sm:text-4xl">
+                  <h1 className="text-3xl font-semibold tracking-[-0.03em] text-white sm:text-4xl" style={{ fontFamily: "var(--font-title)" }}>
                     {call.caller_number || 'Numéro inconnu'}
                   </h1>
-                  <p className="max-w-2xl text-sm leading-7 text-stone-300 sm:text-base">
+                  <p className="max-w-2xl text-sm leading-7 text-white/60 sm:text-base">
                     Consultez le contexte complet de l’échange, sa synthèse, sa transcription et les éventuelles actions associées dans une vue claire et mobile first.
                   </p>
                 </div>
@@ -219,38 +219,38 @@ export default function CallDetail() {
             </div>
           </div>
 
-          <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-[#8b8478]">Repères rapides</p>
+          <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>Repères rapides</p>
             <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl bg-[#f4f1ea] px-4 py-4">
-                <p className="text-sm text-[#8b8478]">Statut</p>
+              <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
+                <p className="text-sm text-[#344453]/50">Statut</p>
                 <span className={`mt-2 inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
                   call.status === 'completed'
-                    ? 'bg-blue-100 text-blue-700'
+                    ? 'bg-[#344453]/10 text-[#344453]'
                     : call.status === 'answered'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-amber-100 text-amber-700'
+                    ? 'bg-[#2D9D78]/12 text-[#2D9D78]'
+                    : 'bg-[#E6A817]/12 text-[#E6A817]'
                 }`}>
                   {call.status === 'completed' ? 'Terminé' : call.status === 'answered' ? 'Répondu' : 'Reçu'}
                 </span>
               </div>
 
-              <div className="rounded-2xl bg-[#f4f1ea] px-4 py-4">
-                <p className="text-sm text-[#8b8478]">Durée</p>
-                <p className="mt-2 text-base font-semibold text-[#171821]">
+              <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
+                <p className="text-sm text-[#344453]/50">Durée</p>
+                <p className="mt-2 text-base font-semibold text-[#141F28]" style={{ fontFamily: "var(--font-mono)" }}>
                   {call.duration ? `${call.duration} secondes` : 'Indisponible'}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#f4f1ea] px-4 py-4 sm:col-span-2">
-                <p className="text-sm text-[#8b8478]">Date</p>
-                <p className="mt-2 text-base font-semibold text-[#171821]">
+              <div className="rounded-2xl bg-[#344453]/6 px-4 py-4 sm:col-span-2">
+                <p className="text-sm text-[#344453]/50">Date</p>
+                <p className="mt-2 text-base font-semibold text-[#141F28]" style={{ fontFamily: "var(--font-mono)" }}>
                   {format(new Date(call.created_at), 'PPpp', { locale: fr })}
                 </p>
               </div>
 
               {(call.language || call.confidence) && (
-                <div className="sm:col-span-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+                <div className="sm:col-span-2 inline-flex items-center gap-2 rounded-full border border-[#2D9D78]/25 bg-[#2D9D78]/8 px-4 py-2 text-sm text-[#2D9D78]">
                   <ShieldCheck className="h-4 w-4" />
                   {call.language ? `langue détectée: ${call.language.toUpperCase()}` : 'analyse disponible'}
                   {call.confidence ? ` • confiance: ${(call.confidence * 100).toFixed(0)}%` : ''}
@@ -262,50 +262,50 @@ export default function CallDetail() {
 
         <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
           <div className="space-y-4">
-            <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
+            <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#f4f1ea] text-[#171821]">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
                   <Phone className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-[#8b8478]">Numéro</p>
-                  <p className="mt-2 text-base font-semibold text-[#171821]">{call.caller_number || 'Inconnu'}</p>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>Numéro</p>
+                  <p className="mt-2 text-base font-semibold text-[#141F28]">{call.caller_number || 'Inconnu'}</p>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
+            <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#f4f1ea] text-[#171821]">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
                   <Calendar className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-[#8b8478]">Date complète</p>
-                  <p className="mt-2 text-sm leading-7 text-[#171821]">{format(new Date(call.created_at), 'PPpp', { locale: fr })}</p>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>Date complète</p>
+                  <p className="mt-2 text-sm leading-7 text-[#141F28]" style={{ fontFamily: "var(--font-mono)" }}>{format(new Date(call.created_at), 'PPpp', { locale: fr })}</p>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
+            <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#f4f1ea] text-[#171821]">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
                   <Clock className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-[#8b8478]">Durée</p>
-                  <p className="mt-2 text-sm leading-7 text-[#171821]">{call.duration ? `${call.duration} secondes` : 'N/A'}</p>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>Durée</p>
+                  <p className="mt-2 text-sm leading-7 text-[#141F28]" style={{ fontFamily: "var(--font-mono)" }}>{call.duration ? `${call.duration} secondes` : 'N/A'}</p>
                 </div>
               </div>
             </div>
 
             {call.actions && call.actions.length > 0 && (
-              <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
-                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#171821]">Actions effectuées</h2>
+              <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Actions effectuées</h2>
                 <ul className="mt-4 space-y-3">
                   {call.actions.map((action, index) => (
-                    <li key={`${action.type}-${index}`} className="rounded-2xl bg-[#f7f4ee] px-4 py-3 text-sm leading-7 text-[#5f5a52]">
-                      <span className="font-semibold text-[#171821]">{action.type}</span>
-                      <span className="text-[#8b8478]"> — </span>
+                    <li key={`${action.type}-${index}`} className="rounded-2xl bg-[#344453]/5 px-4 py-3 text-sm leading-7 text-[#344453]/60">
+                      <span className="font-semibold text-[#141F28]">{action.type}</span>
+                      <span className="text-[#344453]/35"> — </span>
                       <span>{action.description}</span>
                     </li>
                   ))}
@@ -316,12 +316,12 @@ export default function CallDetail() {
 
           <div className="space-y-4">
             {call.summary && (
-              <div className="rounded-[28px] border border-blue-200 bg-blue-50 p-5 shadow-sm sm:p-6">
-                <h2 className="text-xl font-semibold tracking-[-0.03em] text-blue-900">Résumé IA</h2>
-                <p className="mt-4 text-sm leading-7 text-blue-800">{call.summary}</p>
+              <div className="rounded-[28px] border border-[#344453]/15 bg-[#141F28] p-5 shadow-sm sm:p-6">
+                <h2 className="text-xl font-semibold tracking-[-0.03em] text-white" style={{ fontFamily: "var(--font-title)" }}>Résumé IA</h2>
+                <p className="mt-4 text-sm leading-7 text-white/70">{call.summary}</p>
                 {call.intent && (
                   <div className="mt-4">
-                    <span className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800">
+                    <span className="inline-flex items-center rounded-full bg-[#C7601D]/20 px-3 py-1 text-xs font-medium text-[#e8915a]">
                       Intention: {call.intent}
                     </span>
                   </div>
@@ -330,10 +330,10 @@ export default function CallDetail() {
             )}
 
             {call.transcription_text && (
-              <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
-                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#171821]">Transcription</h2>
-                <div className="mt-4 rounded-[24px] border border-black/5 bg-[#f7f4ee] p-4 sm:p-5">
-                  <p className="whitespace-pre-wrap text-sm leading-7 text-[#5f5a52]">
+              <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Transcription</h2>
+                <div className="mt-4 rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-4 sm:p-5">
+                  <p className="whitespace-pre-wrap text-sm leading-7 text-[#344453]/65">
                     {call.transcription_text}
                   </p>
                 </div>
@@ -341,12 +341,12 @@ export default function CallDetail() {
             )}
 
             {call.recording_url && (
-              <div className="rounded-[28px] border border-black/5 bg-white/80 p-5 shadow-sm sm:p-6">
-                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#171821]">Enregistrement audio</h2>
-                <div className="mt-4 rounded-[24px] border border-black/5 bg-[#f7f4ee] p-4 sm:p-5">
+              <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Enregistrement audio</h2>
+                <div className="mt-4 rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-4 sm:p-5">
                   {recordingLoading && (
-                    <div className="flex items-center gap-3 rounded-2xl border border-black/5 bg-white px-4 py-4 text-sm text-[#5f5a52]">
-                      <Loader2 className="h-4 w-4 animate-spin text-[#171821]" />
+                    <div className="flex items-center gap-3 rounded-2xl border border-[#344453]/8 bg-white px-4 py-4 text-sm text-[#344453]/60">
+                      <Loader2 className="h-4 w-4 animate-spin text-[#344453]" />
                       Chargement de l’enregistrement...
                     </div>
                   )}
@@ -385,14 +385,14 @@ export default function CallDetail() {
                           <button
                             type="button"
                             onClick={handleTogglePlayback}
-                            className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#171821] text-white transition hover:bg-[#262837]"
+                            className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#344453] text-white shadow-[0_4px_14px_rgba(52,68,83,0.25)] transition hover:bg-[#2a3642]"
                           >
                             {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
                           </button>
 
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-4 text-sm text-[#6f685d]">
-                              <span className="font-medium text-[#171821]">Message vocal</span>
+                            <div className="flex items-center justify-between gap-4 text-sm text-[#344453]/50">
+                              <span className="font-medium text-[#141F28]">Message vocal</span>
                               <span>
                                 {formatAudioTime(currentTime)} / {formatAudioTime(audioDuration)}
                               </span>
@@ -406,14 +406,14 @@ export default function CallDetail() {
                                 step={0.1}
                                 value={Math.min(currentTime, audioDuration || 0)}
                                 onChange={(event) => handleSeek(Number(event.target.value))}
-                                className="h-2 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-black/10 accent-[#171821]"
+                                className="h-2 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-[#344453]/12 accent-[#344453]"
                               />
 
                               <div className="relative shrink-0">
                                 <button
                                   type="button"
                                   onClick={() => setIsVolumeOpen((current) => !current)}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/10 bg-white text-[#171821] transition hover:bg-[#fcfbf8]"
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#344453]/15 bg-white text-[#344453] transition hover:bg-[#344453]/5"
                                   title="Volume"
                                   aria-label="Contrôle du volume"
                                 >
@@ -421,7 +421,7 @@ export default function CallDetail() {
                                 </button>
 
                                 {isVolumeOpen && (
-                                  <div className="absolute bottom-12 right-0 z-10 rounded-2xl border border-black/10 bg-white px-3 py-4 shadow-lg">
+                                  <div className="absolute bottom-12 right-0 z-10 rounded-2xl border border-[#344453]/12 bg-white px-3 py-4 shadow-lg">
                                     <input
                                       type="range"
                                       min={0}
@@ -429,7 +429,7 @@ export default function CallDetail() {
                                       step={0.01}
                                       value={volume}
                                       onChange={(event) => handleVolumeChange(Number(event.target.value))}
-                                      className="h-24 w-2 cursor-pointer appearance-none rounded-full bg-black/10 accent-[#171821]"
+                                      className="h-24 w-2 cursor-pointer appearance-none rounded-full bg-[#344453]/12 accent-[#344453]"
                                       style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
                                     />
                                   </div>
@@ -439,7 +439,7 @@ export default function CallDetail() {
                               <a
                                 href={recordingBlobUrl}
                                 download={`appel-${call.id}.mp3`}
-                                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white text-[#171821] transition hover:bg-[#fcfbf8]"
+                                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#344453]/15 bg-white text-[#344453] transition hover:bg-[#344453]/5"
                                 title="Télécharger l'enregistrement"
                                 aria-label="Télécharger l'enregistrement"
                               >
