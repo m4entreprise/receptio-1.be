@@ -107,7 +107,7 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
     }
 
     const company = result.rows[0];
-    const greetingText = company.settings?.twilioGreetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
+    const greetingText = company.settings?.greetingText || company.settings?.twilioGreetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
     const audio = await textToSpeech(greetingText);
 
     res.setHeader('Content-Type', 'audio/mpeg');
