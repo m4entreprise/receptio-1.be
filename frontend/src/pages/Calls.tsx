@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
 import { Link } from 'react-router-dom';
-import { Phone, Search, Filter, ArrowRight, CalendarClock, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { Phone, Search, Filter, ArrowRight, CalendarClock, Sparkles } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -22,7 +22,6 @@ export default function Calls() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [deleting, setDeleting] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetchCalls();
@@ -54,18 +53,6 @@ export default function Calls() {
       if (showLoader) {
         setLoading(false);
       }
-    }
-  };
-
-  const handleDelete = async (e: React.MouseEvent, callId: string) => {
-    e.preventDefault();
-    if (!window.confirm('Supprimer cet appel de l\'historique ?')) return;
-    setDeleting((p) => ({ ...p, [callId]: true }));
-    try {
-      await axios.delete(`/api/calls/${callId}`);
-      setCalls((prev) => prev.filter((c) => c.id !== callId));
-    } catch {
-      setDeleting((p) => ({ ...p, [callId]: false }));
     }
   };
 
@@ -211,8 +198,8 @@ export default function Calls() {
             ) : (
               <div className="space-y-3">
                 {filteredCalls.map((call) => (
-                  <div key={call.id} className="relative">
                   <Link
+                    key={call.id}
                     to={`/calls/${call.id}`}
                     className="block rounded-[24px] border border-[#344453]/8 bg-[#F8F9FB] p-4 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_36px_rgba(52,68,83,0.10)] sm:p-5"
                   >
@@ -273,15 +260,6 @@ export default function Calls() {
                       </div>
                     </div>
                   </Link>
-                  <button
-                    onClick={(e) => handleDelete(e, call.id)}
-                    disabled={deleting[call.id]}
-                    title="Supprimer cet appel"
-                    className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#344453]/30 shadow-sm transition hover:text-[#D94052]"
-                  >
-                    {deleting[call.id] ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  </button>
-                  </div>
                 ))}
               </div>
             )}

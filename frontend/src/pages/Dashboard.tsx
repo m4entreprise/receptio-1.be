@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay, isTerminalStatus } from '../utils/callStatus';
 import { Link } from 'react-router-dom';
-import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck, X, Trash2 } from 'lucide-react';
+import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck, X } from 'lucide-react';
 import axios from 'axios';
 import Layout from '../components/Layout';
 
@@ -48,7 +48,6 @@ export default function Dashboard() {
   const [transferResult, setTransferResult] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [abandoning, setAbandoning] = useState<Record<string, boolean>>({});
-  const [deletingCall, setDeletingCall] = useState<Record<string, boolean>>({});
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -90,18 +89,6 @@ export default function Dashboard() {
       await fetchDashboardData(false);
     } catch {
       setAbandoning((p) => ({ ...p, [callId]: false }));
-    }
-  };
-
-  const handleDeleteCall = async (e: React.MouseEvent, callId: string) => {
-    e.preventDefault();
-    if (!window.confirm('Supprimer cet appel de l\'historique ?')) return;
-    setDeletingCall((p) => ({ ...p, [callId]: true }));
-    try {
-      await axios.delete(`/api/calls/${callId}`);
-      await fetchDashboardData(false);
-    } catch {
-      setDeletingCall((p) => ({ ...p, [callId]: false }));
     }
   };
 
@@ -387,8 +374,8 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-3">
                 {recentCalls.map((call) => (
-                  <div key={call.id} className="relative">
                   <Link
+                    key={call.id}
                     to={`/calls/${call.id}`}
                     className="block rounded-[24px] border border-[#344453]/8 bg-[#F8F9FB] p-4 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_36px_rgba(52,68,83,0.10)] sm:p-5"
                   >
@@ -429,16 +416,6 @@ export default function Dashboard() {
                       )}
                     </div>
                   </Link>
-                  <button
-                    onClick={(e) => handleDeleteCall(e, call.id)}
-                    disabled={deletingCall[call.id]}
-                    title="Supprimer cet appel"
-                    className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#344453]/30 opacity-0 shadow-sm transition hover:text-[#D94052] group-hover:opacity-100 [.block:hover_~_&]:opacity-100"
-                    style={{ opacity: 1 }}
-                  >
-                    {deletingCall[call.id] ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
                 ))}
               </div>
             )}
