@@ -48,6 +48,22 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
   }
 });
 
+router.get('/queued', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const result = await query(
+      `SELECT c.id, c.caller_number, c.caller_name, c.call_sid, c.queue_reason, c.queued_at, c.status
+       FROM calls c
+       WHERE c.company_id = $1 AND c.queue_status = 'waiting'
+       ORDER BY c.queued_at ASC`,
+      [companyId]
+    );
+    res.json({ calls: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     const { companyId } = req.user!;
@@ -140,22 +156,6 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       error: error.message,
       status: error.response?.status,
     });
-    next(error);
-  }
-});
-
-router.get('/queued', authenticateToken, async (req: AuthRequest, res: Response, next) => {
-  try {
-    const { companyId } = req.user!;
-    const result = await query(
-      `SELECT c.id, c.caller_number, c.caller_name, c.call_sid, c.queue_reason, c.queued_at, c.status
-       FROM calls c
-       WHERE c.company_id = $1 AND c.queue_status = 'waiting'
-       ORDER BY c.queued_at ASC`,
-      [companyId]
-    );
-    res.json({ calls: result.rows });
-  } catch (error) {
     next(error);
   }
 });
