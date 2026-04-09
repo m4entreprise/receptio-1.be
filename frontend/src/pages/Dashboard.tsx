@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay, isTerminalStatus } from '../utils/callStatus';
 import { Link } from 'react-router-dom';
-import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck } from 'lucide-react';
+import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck, X, Trash2 } from 'lucide-react';
 import axios from 'axios';
 import Layout from '../components/Layout';
 
@@ -47,6 +47,9 @@ export default function Dashboard() {
   const [transferring, setTransferring] = useState<Record<string, boolean>>({});
   const [transferResult, setTransferResult] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [abandoning, setAbandoning] = useState<Record<string, boolean>>({});
+  const [deletingCall, setDeletingCall] = useState<Record<string, boolean>>({});
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     fetchDashboardData();
@@ -56,8 +59,11 @@ export default function Dashboard() {
       fetchDashboardData(false);
     }, 5000);
 
+    const tickId = window.setInterval(() => setNow(Date.now()), 10000);
+
     return () => {
       window.clearInterval(intervalId);
+      window.clearInterval(tickId);
     };
   }, []);
 
@@ -66,6 +72,36 @@ export default function Dashboard() {
       const res = await axios.get('/api/staff');
       setStaffList((res.data.staff || []).filter((s: StaffMember) => s.enabled));
     } catch {
+    }
+  };
+
+  const formatElapsed = (isoDate: string): string => {
+    const secs = Math.floor((now - new Date(isoDate).getTime()) / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins} min`;
+    return `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}`;
+  };
+
+  const handleAbandon = async (callId: string) => {
+    setAbandoning((p) => ({ ...p, [callId]: true }));
+    try {
+      await axios.post(`/api/calls/${callId}/abandon`);
+      await fetchDashboardData(false);
+    } catch {
+      setAbandoning((p) => ({ ...p, [callId]: false }));
+    }
+  };
+
+  const handleDeleteCall = async (e: React.MouseEvent, callId: string) => {
+    e.preventDefault();
+    if (!window.confirm('Supprimer cet appel de l\'historique ?')) return;
+    setDeletingCall((p) => ({ ...p, [callId]: true }));
+    try {
+      await axios.delete(`/api/calls/${callId}`);
+      await fetchDashboardData(false);
+    } catch {
+      setDeletingCall((p) => ({ ...p, [callId]: false }));
     }
   };
 
@@ -263,7 +299,7 @@ export default function Dashboard() {
                           {call.caller_number || 'Numéro inconnu'}
                         </p>
                         <p className="mt-0.5 text-xs text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>
-                          {call.queued_at ? new Date(call.queued_at).toLocaleTimeString('fr-BE') : ''}
+                          {call.queued_at ? `En attente depuis ${formatElapsed(call.queued_at)}` : ''}
                         </p>
                         {call.queue_reason && (
                           <p className="mt-2 text-sm italic text-[#344453]/60">
@@ -274,6 +310,15 @@ export default function Dashboard() {
                     </div>
 
                     <div className="flex flex-col gap-2 sm:items-end">
+                      <button
+                        onClick={() => handleAbandon(call.id)}
+                        disabled={abandoning[call.id]}
+                        title="Mettre fin à l'attente"
+                        className="self-start rounded-full border border-[#D94052]/20 bg-[#D94052]/8 px-3 py-1 text-xs font-medium text-[#D94052] transition hover:bg-[#D94052]/15 disabled:opacity-40 sm:self-end"
+                      >
+                        {abandoning[call.id] ? <Loader2 className="inline h-3 w-3 animate-spin" /> : <X className="inline h-3 w-3" />}
+                        {' '}Terminer l'attente
+                      </button>
                       {staffList.length > 0 ? (
                         <>
                           <select
@@ -342,8 +387,8 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-3">
                 {recentCalls.map((call) => (
+                  <div key={call.id} className="relative">
                   <Link
-                    key={call.id}
                     to={`/calls/${call.id}`}
                     className="block rounded-[24px] border border-[#344453]/8 bg-[#F8F9FB] p-4 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_36px_rgba(52,68,83,0.10)] sm:p-5"
                   >
@@ -384,6 +429,16 @@ export default function Dashboard() {
                       )}
                     </div>
                   </Link>
+                  <button
+                    onClick={(e) => handleDeleteCall(e, call.id)}
+                    disabled={deletingCall[call.id]}
+                    title="Supprimer cet appel"
+                    className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#344453]/30 opacity-0 shadow-sm transition hover:text-[#D94052] group-hover:opacity-100 [.block:hover_~_&]:opacity-100"
+                    style={{ opacity: 1 }}
+                  >
+                    {deletingCall[call.id] ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
                 ))}
               </div>
             )}

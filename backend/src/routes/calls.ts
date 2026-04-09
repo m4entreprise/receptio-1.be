@@ -160,6 +160,53 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
   }
 });
 
+router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const { id } = req.params;
+
+    const callResult = await query(
+      `SELECT call_sid FROM calls WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
+
+    if (callResult.rows.length === 0) {
+      res.status(404).json({ error: 'Call not found' });
+      return;
+    }
+
+    const { call_sid: callSid } = callResult.rows[0];
+
+    if (callSid) {
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      if (accountSid && authToken) {
+        try {
+          const twilio = require('twilio')(accountSid, authToken);
+          await twilio.calls(callSid).update({ status: 'completed' });
+        } catch {
+        }
+      }
+    }
+
+    await query(
+      `UPDATE calls SET queue_status = 'abandoned', status = 'completed', ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $1`,
+      [id]
+    );
+
+    await query(
+      `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+      [id, 'twilio.routing.abandoned', { companyId }]
+    );
+
+    logger.info('Queued call abandoned by agent', { callId: id, companyId });
+    res.json({ success: true });
+  } catch (error: any) {
+    logger.error('Abandon error', { callId: req.params.id, error: error.message });
+    next(error);
+  }
+});
+
 router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     const { companyId } = req.user!;
