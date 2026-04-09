@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Building2, Save, ShieldCheck, Sparkles } from 'lucide-react';
+import { Building2, Save, ShieldCheck, Sparkles, MessageSquare } from 'lucide-react';
 import axios from 'axios';
 import Layout from '../components/Layout';
 
@@ -8,6 +8,10 @@ interface Company {
   phone_number?: string | null;
   email?: string | null;
   created_at?: string | null;
+  settings?: {
+    offerMode?: string;
+    twilioGreetingText?: string;
+  } | null;
 }
 
 export default function Settings() {
@@ -15,7 +19,9 @@ export default function Settings() {
   const [formData, setFormData] = useState({
     name: '',
     phoneNumber: '',
+    twilioGreetingText: '',
   });
+  const [offerMode, setOfferMode] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -32,7 +38,9 @@ export default function Settings() {
       setFormData({
         name: companyData.name || '',
         phoneNumber: companyData.phone_number || '',
+        twilioGreetingText: companyData.settings?.twilioGreetingText || '',
       });
+      setOfferMode(companyData.settings?.offerMode || null);
     } catch (error) {
       console.error('Error fetching company:', error);
     } finally {
@@ -46,7 +54,14 @@ export default function Settings() {
     setMessage('');
 
     try {
-      await axios.patch('/api/companies/me', formData);
+      const payload: any = {
+        name: formData.name,
+        phoneNumber: formData.phoneNumber,
+      };
+      if (offerMode === 'A') {
+        payload.settings = { twilioGreetingText: formData.twilioGreetingText || undefined };
+      }
+      await axios.patch('/api/companies/me', payload);
       setMessage('Paramètres sauvegardés avec succès');
       fetchCompany();
     } catch (error) {
@@ -165,6 +180,29 @@ export default function Settings() {
                 </p>
               </div>
             </div>
+
+            {offerMode === 'A' && (
+              <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#344453]/10 text-[#344453]">
+                    <MessageSquare className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#141F28]">Message d'accueil répondeur</h3>
+                    <p className="text-xs text-[#344453]/50">Offre A — lu par Twilio quand un appel arrive</p>
+                  </div>
+                </div>
+                <textarea
+                  id="twilioGreetingText"
+                  rows={4}
+                  value={formData.twilioGreetingText}
+                  onChange={(e) => setFormData({ ...formData, twilioGreetingText: e.target.value })}
+                  placeholder={`Bonjour, vous êtes bien chez ${formData.name || 'votre entreprise'}. Merci de laisser votre message après le bip.`}
+                  className="mt-4 block w-full resize-none rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
+                />
+                <p className="mt-2 text-xs text-[#344453]/45">Laissez vide pour utiliser le message par défaut.</p>
+              </div>
+            )}
 
             <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
               <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>Informations du compte</h3>
