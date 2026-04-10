@@ -175,6 +175,7 @@ function ActiveCallView({
   const [transferring, setTransferring] = useState(false);
   const [transferResult, setTransferResult] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const postCallPollsRef = useRef(0);
   const [nowMs, setNowMs] = useState(Date.now());
 
   useEffect(() => {
@@ -201,11 +202,20 @@ function ActiveCallView({
   }, [callId]);
 
   useEffect(() => {
-    if (call && isTerminalStatus(call.status) && intervalRef.current) {
+    if (!call || !isTerminalStatus(call.status) || !intervalRef.current) return;
+
+    const hasTranscription = !!(call.transcription_segments?.length || call.live_transcript || call.transcription_text);
+    const hasSummary = !!(call.live_summary || call.ai_summary);
+    const maxPostCallPolls = 40; // ~2 min at 3 s intervals
+
+    if ((hasTranscription && hasSummary) || postCallPollsRef.current >= maxPostCallPolls) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+      postCallPollsRef.current = 0;
+    } else {
+      postCallPollsRef.current += 1;
     }
-  }, [call?.status]);
+  }, [call?.status, call?.transcription_segments, call?.live_transcript, call?.transcription_text, call?.live_summary, call?.ai_summary]);
 
   const handleHangup = async () => {
     setHangingUp(true);
@@ -239,12 +249,12 @@ function ActiveCallView({
     return `${m}:${String(s).padStart(2, '0')}`;
   };
 
-  const elapsedSecs = call?.duration != null
+  const isActive = call ? ACTIVE_STATUSES.has(call.status) : false;
+  const elapsedSecs = (!isActive && call?.duration != null && call.duration > 0)
     ? call.duration
     : call
       ? Math.floor((nowMs - new Date(call.created_at).getTime()) / 1000)
       : 0;
-  const isActive = call ? ACTIVE_STATUSES.has(call.status) : false;
   type TranscriptSegment = { role: 'client' | 'agent'; text: string; ts?: number };
   const parseTranscript = (raw: string | null | undefined): TranscriptSegment[] | null => {
     if (!raw) return null;
