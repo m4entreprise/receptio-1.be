@@ -22,10 +22,23 @@ interface CallDetailItem {
   summary?: string | null;
   intent?: string | null;
   transcription_text?: string | null;
+  live_transcript?: string | null;
   language?: string | null;
   confidence?: number | null;
   recording_url?: string | null;
   actions?: CallAction[];
+  direction?: string | null;
+}
+
+type TranscriptSegment = { role: 'client' | 'agent'; text: string; ts?: number };
+
+function parseTranscriptSegments(raw: string | null | undefined): TranscriptSegment[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0 && 'role' in parsed[0]) return parsed as TranscriptSegment[];
+  } catch { /* plain text */ }
+  return null;
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -441,16 +454,42 @@ export default function CallDetail() {
               </div>
             )}
 
-            {call.transcription_text && (
-              <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
-                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Transcription</h2>
-                <div className="mt-4 rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-4 sm:p-5">
-                  <p className="whitespace-pre-wrap text-sm leading-7 text-[#344453]/65">
-                    {call.transcription_text}
-                  </p>
+            {(() => {
+              const segments = parseTranscriptSegments(call.live_transcript);
+              const plainText = call.transcription_text;
+              if (!segments && !plainText) return null;
+              return (
+                <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+                  <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Transcription</h2>
+                  <div className="mt-4">
+                    {segments ? (
+                      <div className="space-y-2">
+                        {segments.map((seg, i) => (
+                          <div key={i} className={`flex gap-2 ${seg.role === 'agent' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+                              seg.role === 'agent'
+                                ? 'bg-[#344453] text-white rounded-br-md'
+                                : 'bg-[#F8F9FB] text-[#344453]/80 rounded-bl-md border border-[#344453]/8'
+                            }`}>
+                              <p className={`mb-0.5 text-[10px] font-semibold uppercase tracking-widest ${
+                                seg.role === 'agent' ? 'text-white/50' : 'text-[#344453]/40'
+                              }`}>
+                                {seg.role === 'agent' ? 'Agent' : 'Client'}
+                              </p>
+                              {seg.text}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-4 sm:p-5">
+                        <p className="whitespace-pre-wrap text-sm leading-7 text-[#344453]/65">{plainText}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {call.recording_url && (
               <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">

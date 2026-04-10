@@ -84,6 +84,7 @@ interface TwilioStreamMediaEvent {
   event?: string;
   media?: {
     payload?: string;
+    track?: string;
   };
 }
 
@@ -139,18 +140,39 @@ const OUTBOUND_FLUSH_INTERVAL_MS = 3000;
 const OUTBOUND_MIN_SPEECH_MS = 200;
 const OUTBOUND_SILENCE_THRESHOLD_MS = 600;
 
-interface OutboundStreamState {
-  callId: string;
-  companyId: string;
-  initialized: boolean;
+interface OutboundTrackState {
   pendingAudioChunks: Buffer[];
   speechDetected: boolean;
   speechDurationMs: number;
   silenceDurationMs: number;
   pendingProcessScheduled: boolean;
   processingUtterance: boolean;
-  accumulatedTranscript: string;
+}
+
+interface OutboundTranscriptSegment {
+  role: 'client' | 'agent';
+  text: string;
+  ts: number;
+}
+
+interface OutboundStreamState {
+  callId: string;
+  companyId: string;
+  initialized: boolean;
+  tracks: Record<string, OutboundTrackState>;
+  segments: OutboundTranscriptSegment[];
   lastFlushAt: number;
+}
+
+function makeTrackState(): OutboundTrackState {
+  return {
+    pendingAudioChunks: [],
+    speechDetected: false,
+    speechDurationMs: 0,
+    silenceDurationMs: 0,
+    pendingProcessScheduled: false,
+    processingUtterance: false,
+  };
 }
 
 async function handleOutboundTranscriptionConnection(ws: WebSocket, request: IncomingMessage) {
@@ -162,13 +184,11 @@ async function handleOutboundTranscriptionConnection(ws: WebSocket, request: Inc
     callId,
     companyId,
     initialized: false,
-    pendingAudioChunks: [],
-    speechDetected: false,
-    speechDurationMs: 0,
-    silenceDurationMs: 0,
-    pendingProcessScheduled: false,
-    processingUtterance: false,
-    accumulatedTranscript: '',
+    tracks: {
+      inbound: makeTrackState(),
+      outbound: makeTrackState(),
+    },
+    segments: [],
     lastFlushAt: Date.now(),
   };
 
@@ -191,8 +211,10 @@ async function handleOutboundTranscriptionConnection(ws: WebSocket, request: Inc
 
   ws.on('close', async () => {
     clearInterval(flushInterval);
-    if (state.pendingAudioChunks.length > 0) {
-      await processOutboundUtterance(state);
+    for (const track of Object.keys(state.tracks)) {
+      if (state.tracks[track].pendingAudioChunks.length > 0) {
+        await processOutboundTrackUtterance(state, track);
+      }
     }
     await flushOutboundTranscript(state);
     logger.info('Outbound transcription stream closed', { callId: state.callId });
@@ -222,62 +244,68 @@ async function handleOutboundStreamMessage(data: RawData, state: OutboundStreamS
   if (eventType === 'media') {
     const mediaEvent = payload as TwilioStreamMediaEvent;
     const audioPayload = String(mediaEvent.media?.payload || '');
+    const rawTrack = String(mediaEvent.media?.track || 'inbound');
+    const track = rawTrack === 'outbound' ? 'outbound' : 'inbound';
     if (!audioPayload) return;
 
     const audioBuffer = Buffer.from(audioPayload, 'base64');
     if (audioBuffer.length === 0) return;
 
+    const ts = state.tracks[track];
     const frameEnergy = computeULawFrameEnergy(audioBuffer);
     const hasSpeech = frameEnergy >= ENERGY_THRESHOLD;
 
     if (hasSpeech) {
-      state.speechDetected = true;
-      state.speechDurationMs += ULaw_FRAME_DURATION_MS;
-      state.silenceDurationMs = 0;
-      state.pendingAudioChunks.push(audioBuffer);
+      ts.speechDetected = true;
+      ts.speechDurationMs += ULaw_FRAME_DURATION_MS;
+      ts.silenceDurationMs = 0;
+      ts.pendingAudioChunks.push(audioBuffer);
       return;
     }
 
-    if (!state.speechDetected) return;
-    if (state.pendingProcessScheduled) return;
+    if (!ts.speechDetected) return;
+    if (ts.pendingProcessScheduled) return;
 
-    state.pendingAudioChunks.push(audioBuffer);
-    state.silenceDurationMs += ULaw_FRAME_DURATION_MS;
+    ts.pendingAudioChunks.push(audioBuffer);
+    ts.silenceDurationMs += ULaw_FRAME_DURATION_MS;
 
     if (
-      state.silenceDurationMs >= OUTBOUND_SILENCE_THRESHOLD_MS
-      && state.speechDurationMs >= OUTBOUND_MIN_SPEECH_MS
-      && !state.pendingProcessScheduled
+      ts.silenceDurationMs >= OUTBOUND_SILENCE_THRESHOLD_MS
+      && ts.speechDurationMs >= OUTBOUND_MIN_SPEECH_MS
+      && !ts.pendingProcessScheduled
     ) {
-      state.pendingProcessScheduled = true;
-      if (!state.processingUtterance) {
-        void processOutboundUtterance(state);
+      ts.pendingProcessScheduled = true;
+      if (!ts.processingUtterance) {
+        void processOutboundTrackUtterance(state, track);
       }
     }
     return;
   }
 
   if (eventType === 'stop') {
-    if (state.pendingAudioChunks.length > 0) {
-      await processOutboundUtterance(state);
+    for (const track of Object.keys(state.tracks)) {
+      if (state.tracks[track].pendingAudioChunks.length > 0) {
+        await processOutboundTrackUtterance(state, track);
+      }
     }
     await flushOutboundTranscript(state);
   }
 }
 
-async function processOutboundUtterance(state: OutboundStreamState) {
-  if (state.processingUtterance || state.pendingAudioChunks.length === 0) {
-    state.pendingProcessScheduled = false;
+async function processOutboundTrackUtterance(state: OutboundStreamState, track: string) {
+  const ts = state.tracks[track];
+  if (!ts || ts.processingUtterance || ts.pendingAudioChunks.length === 0) {
+    if (ts) ts.pendingProcessScheduled = false;
     return;
   }
 
-  const utteranceBuffer = Buffer.concat(state.pendingAudioChunks);
-  state.pendingAudioChunks = [];
-  state.pendingProcessScheduled = false;
-  state.processingUtterance = true;
-  state.silenceDurationMs = 0;
-  state.speechDurationMs = 0;
-  state.speechDetected = false;
+  const utteranceBuffer = Buffer.concat(ts.pendingAudioChunks);
+  ts.pendingAudioChunks = [];
+  ts.pendingProcessScheduled = false;
+  ts.processingUtterance = true;
+  ts.silenceDurationMs = 0;
+  ts.speechDurationMs = 0;
+  ts.speechDetected = false;
 
   try {
     const pcmBuffer = decodeULawToPcm16(utteranceBuffer);
@@ -290,27 +318,25 @@ async function processOutboundUtterance(state: OutboundStreamState) {
         : null;
 
     if (transcription && transcription.text.trim()) {
-      const segment = transcription.text.trim();
-      state.accumulatedTranscript = state.accumulatedTranscript
-        ? `${state.accumulatedTranscript}\n${segment}`
-        : segment;
-      logger.info('Outbound utterance transcribed', { callId: state.callId, segment });
+      const text = transcription.text.trim();
+      const role: 'client' | 'agent' = track === 'outbound' ? 'agent' : 'client';
+      state.segments.push({ role, text, ts: Date.now() });
+      logger.info('Outbound utterance transcribed', { callId: state.callId, role, text });
     }
   } catch (err: any) {
-    logger.error('Outbound utterance transcription error', { callId: state.callId, error: err.message });
+    logger.error('Outbound utterance transcription error', { callId: state.callId, track, error: err.message });
   } finally {
-    state.processingUtterance = false;
+    ts.processingUtterance = false;
   }
 }
 
 async function flushOutboundTranscript(state: OutboundStreamState) {
-  if (!state.accumulatedTranscript || !state.callId) return;
-  const textSnapshot = state.accumulatedTranscript;
+  if (!state.callId || state.segments.length === 0) return;
 
   try {
     await query(
       `UPDATE calls SET live_transcript = $1 WHERE id = $2`,
-      [textSnapshot, state.callId]
+      [JSON.stringify(state.segments), state.callId]
     );
   } catch (err: any) {
     logger.error('Outbound transcript flush error', { callId: state.callId, error: err.message });

@@ -244,7 +244,17 @@ function ActiveCallView({
       ? Math.floor((nowMs - new Date(call.created_at).getTime()) / 1000)
       : 0;
   const isActive = call ? ACTIVE_STATUSES.has(call.status) : false;
-  const liveTranscript = call?.live_transcript || call?.transcription_text || '';
+  type TranscriptSegment = { role: 'client' | 'agent'; text: string; ts: number };
+  const parseTranscript = (raw: string | null | undefined): TranscriptSegment[] | null => {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0 && 'role' in parsed[0]) return parsed as TranscriptSegment[];
+    } catch { /* plain text */ }
+    return null;
+  };
+  const transcriptSegments = parseTranscript(call?.live_transcript);
+  const transcriptFallbackText = !transcriptSegments ? (call?.live_transcript || call?.transcription_text || '') : '';
   const liveSummary = call?.live_summary || call?.ai_summary || '';
 
   const statusEventLabel: Record<string, string> = {
@@ -344,9 +354,28 @@ function ActiveCallView({
             <p className="text-xs text-[#344453]/45">{isActive ? 'Mise à jour automatique toutes les 3 s' : 'Transcription finale'}</p>
           </div>
         </div>
-        {liveTranscript ? (
+        {transcriptSegments ? (
+          <div className="space-y-2">
+            {transcriptSegments.map((seg, i) => (
+              <div key={i} className={`flex gap-2 ${seg.role === 'agent' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+                  seg.role === 'agent'
+                    ? 'bg-[#344453] text-white rounded-br-md'
+                    : 'bg-[#F8F9FB] text-[#344453]/80 rounded-bl-md border border-[#344453]/8'
+                }`}>
+                  <p className={`mb-0.5 text-[10px] font-semibold uppercase tracking-widest ${
+                    seg.role === 'agent' ? 'text-white/50' : 'text-[#344453]/40'
+                  }`}>
+                    {seg.role === 'agent' ? (call?.staff_first_name || 'Agent') : 'Client'}
+                  </p>
+                  {seg.text}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : transcriptFallbackText ? (
           <p className="rounded-2xl bg-[#F8F9FB] px-4 py-4 text-sm leading-7 text-[#344453]/75 whitespace-pre-wrap">
-            {liveTranscript}
+            {transcriptFallbackText}
           </p>
         ) : (
           <div className="rounded-2xl border border-dashed border-[#344453]/12 px-4 py-6 text-center">
