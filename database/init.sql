@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS transcriptions (
     text TEXT NOT NULL,
     language VARCHAR(10) DEFAULT 'fr',
     confidence DECIMAL(3,2),
+    segments JSONB DEFAULT NULL, -- Structured transcript with speaker roles: [{role: 'agent'|'client', text, ts}]
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

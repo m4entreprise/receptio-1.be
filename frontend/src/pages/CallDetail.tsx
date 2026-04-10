@@ -22,6 +22,7 @@ interface CallDetailItem {
   summary?: string | null;
   intent?: string | null;
   transcription_text?: string | null;
+  transcription_segments?: Array<{ role: 'client' | 'agent'; text: string; ts?: number }> | null;
   live_transcript?: string | null;
   language?: string | null;
   confidence?: number | null;
@@ -475,7 +476,9 @@ export default function CallDetail() {
             )}
 
             {(() => {
-              const segments = parseTranscriptSegments(call.live_transcript)
+              // Priority: 1) transcription_segments (DB), 2) live_transcript (JSON), 3) transcription_text with prefixes
+              const segments = call.transcription_segments
+                || parseTranscriptSegments(call.live_transcript)
                 || parseTranscriptTextWithPrefixes(call.transcription_text);
               const plainText = call.transcription_text;
               if (!segments && !plainText) return null;

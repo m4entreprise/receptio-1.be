@@ -1272,6 +1272,7 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
         const liveTranscript = callResult.rows[0]?.live_transcript;
 
         let transcriptionText: string;
+        let transcriptionSegments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null = null;
         let transcriptionLanguage = 'fr';
         let transcriptionConfidence = 0.9;
 
@@ -1279,7 +1280,8 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
           try {
             const segments = JSON.parse(liveTranscript);
             if (Array.isArray(segments) && segments.length > 0 && 'role' in segments[0]) {
-              // Format structured transcript with speaker labels
+              transcriptionSegments = segments;
+              // Format structured transcript with speaker labels for text column
               transcriptionText = segments
                 .map((seg: { role: string; text: string }) => {
                   const label = seg.role === 'agent' ? 'Agent' : 'Client';
@@ -1312,12 +1314,12 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
         const existingT = await query('SELECT id, text FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
         if (existingT.rows.length === 0) {
           await query(
-            `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
-            [callId, transcriptionText, transcriptionLanguage, transcriptionConfidence]
+            `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
+            [callId, transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null]
           );
         } else {
-          await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3 WHERE id = $4',
-            [transcriptionText, transcriptionLanguage, transcriptionConfidence, existingT.rows[0].id]);
+          await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE id = $5',
+            [transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null, existingT.rows[0].id]);
         }
 
         const [summary, intentData] = await Promise.all([

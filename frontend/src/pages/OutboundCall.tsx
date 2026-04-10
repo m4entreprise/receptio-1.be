@@ -35,6 +35,7 @@ interface OutboundCallRecord {
   live_transcript?: string | null;
   live_summary?: string | null;
   transcription_text?: string | null;
+  transcription_segments?: Array<{ role: 'client' | 'agent'; text: string; ts?: number }> | null;
   ai_summary?: string | null;
   staff_first_name?: string | null;
   staff_last_name?: string | null;
@@ -268,7 +269,9 @@ function ActiveCallView({
     }
     return segments.length > 0 ? segments : null;
   };
-  const transcriptSegments = parseTranscript(call?.live_transcript)
+  // Priority: 1) transcription_segments (DB), 2) live_transcript (JSON), 3) transcription_text with prefixes
+  const transcriptSegments = call?.transcription_segments
+    || parseTranscript(call?.live_transcript)
     || parseTranscriptTextWithPrefixes(call?.transcription_text);
   const transcriptFallbackText = !transcriptSegments ? (call?.live_transcript || call?.transcription_text || '') : '';
   const liveSummary = call?.live_summary || call?.ai_summary || '';

@@ -21,7 +21,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
     const { status, limit = 50, offset = 0 } = req.query;
 
     let queryText = `
-      SELECT c.*, t.text as transcription_text, t.language, cs.summary, cs.intent
+      SELECT c.*, t.text as transcription_text, t.language, t.segments as transcription_segments, cs.summary, cs.intent
       FROM calls c
       LEFT JOIN transcriptions t ON c.id = t.call_id
       LEFT JOIN call_summaries cs ON c.id = cs.call_id
@@ -78,7 +78,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
     assertValidCallId(id);
 
     const result = await query(
-      `SELECT c.*, t.text as transcription_text, t.language, t.confidence,
+      `SELECT c.*, t.text as transcription_text, t.language, t.confidence, t.segments as transcription_segments,
               cs.summary, cs.intent, cs.sentiment, cs.actions
        FROM calls c
        LEFT JOIN transcriptions t ON c.id = t.call_id

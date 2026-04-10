@@ -112,7 +112,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
     const result = await query(
       `SELECT c.*, cs.summary AS ai_summary, cs.intent,
               s.first_name AS staff_first_name, s.last_name AS staff_last_name,
-              t.text AS transcription_text
+              t.text AS transcription_text, t.segments AS transcription_segments
        FROM calls c
        LEFT JOIN call_summaries cs ON cs.call_id = c.id
        LEFT JOIN staff s ON s.id = c.initiated_by_staff_id
@@ -141,7 +141,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
     const result = await query(
       `SELECT c.*, cs.summary AS ai_summary, cs.intent, cs.actions,
               s.first_name AS staff_first_name, s.last_name AS staff_last_name,
-              t.text AS transcription_text
+              t.text AS transcription_text, t.segments AS transcription_segments
        FROM calls c
        LEFT JOIN call_summaries cs ON cs.call_id = c.id
        LEFT JOIN staff s ON s.id = c.initiated_by_staff_id

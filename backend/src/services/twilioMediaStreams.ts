@@ -344,10 +344,30 @@ async function flushOutboundTranscript(state: OutboundStreamState) {
   if (!state.callId || state.segments.length === 0) return;
 
   try {
+    // Update calls.live_transcript for real-time display
     await query(
       `UPDATE calls SET live_transcript = $1 WHERE id = $2`,
       [JSON.stringify(state.segments), state.callId]
     );
+
+    // Also upsert into transcriptions with segments for persistence
+    const textFormat = state.segments
+      .map((seg) => `${seg.role === 'agent' ? 'Agent' : 'Client'}: ${seg.text}`)
+      .join('\n\n');
+
+    const existing = await query('SELECT id FROM transcriptions WHERE call_id = $1', [state.callId]);
+    if (existing.rows.length === 0) {
+      await query(
+        `INSERT INTO transcriptions (call_id, text, language, confidence, segments)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [state.callId, textFormat, 'fr', 0.9, JSON.stringify(state.segments)]
+      );
+    } else {
+      await query(
+        `UPDATE transcriptions SET segments = $1, text = $2 WHERE id = $3`,
+        [JSON.stringify(state.segments), textFormat, existing.rows[0].id]
+      );
+    }
   } catch (err: any) {
     logger.error('Outbound transcript flush error', { callId: state.callId, error: err.message });
   }
@@ -1282,16 +1302,19 @@ async function ensureCallSummaryExists(callId: string) {
 async function appendTranscriptLine(callId: string, speaker: 'Client' | 'Agent', text: string) {
   const label = speaker === 'Client' ? 'Client' : 'Agent';
   const transcript = `${label}: ${text.trim()}`;
+  const role: 'client' | 'agent' = speaker === 'Client' ? 'client' : 'agent';
+  const newSegment: { role: 'client' | 'agent'; text: string; ts?: number } = { role, text: text.trim(), ts: Date.now() };
+
   const transcriptionResult = await query(
-    'SELECT id, text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
+    'SELECT id, text, segments FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
     [callId]
   );
 
   if (transcriptionResult.rows.length === 0) {
     await query(
-      `INSERT INTO transcriptions (call_id, text, language, confidence)
-       VALUES ($1, $2, $3, $4)`,
-      [callId, transcript, 'fr', 1]
+      `INSERT INTO transcriptions (call_id, text, language, confidence, segments)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [callId, transcript, 'fr', 1, JSON.stringify([newSegment])]
     );
     return;
   }
@@ -1299,9 +1322,19 @@ async function appendTranscriptLine(callId: string, speaker: 'Client' | 'Agent',
   const existingText = String(transcriptionResult.rows[0].text || '');
   const nextText = existingText ? `${existingText}\n${transcript}` : transcript;
 
+  // Parse existing segments or create from text
+  let segments: Array<{ role: 'client' | 'agent'; text: string; ts?: number }> = [];
+  const existingSegments = transcriptionResult.rows[0].segments;
+  if (existingSegments) {
+    try {
+      segments = JSON.parse(existingSegments);
+    } catch { /* ignore */ }
+  }
+  segments.push(newSegment);
+
   await query(
-    'UPDATE transcriptions SET text = $1 WHERE id = $2',
-    [nextText, transcriptionResult.rows[0].id]
+    'UPDATE transcriptions SET text = $1, segments = $2 WHERE id = $3',
+    [nextText, JSON.stringify(segments), transcriptionResult.rows[0].id]
   );
 }
 
