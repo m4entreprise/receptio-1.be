@@ -406,13 +406,13 @@ function ActiveCallView({
         ) : isActive ? (
           <div className="space-y-3 animate-pulse">
             <div className="flex justify-start">
-              <div className="h-10 w-2/3 rounded-2xl bg-[#344453]/8" />
+              <div className="h-10 w-2/3 rounded-2xl bg-[#344453]/15" />
             </div>
             <div className="flex justify-end">
-              <div className="h-10 w-1/2 rounded-2xl bg-[#344453]/12" />
+              <div className="h-10 w-1/2 rounded-2xl bg-[#344453]/20" />
             </div>
             <div className="flex justify-start">
-              <div className="h-10 w-3/5 rounded-2xl bg-[#344453]/8" />
+              <div className="h-10 w-3/5 rounded-2xl bg-[#344453]/15" />
             </div>
             <p className="text-center text-xs text-[#344453]/35 pt-1">Disponible en fin d'appel</p>
           </div>
