@@ -1267,21 +1267,62 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
 
     setImmediate(async () => {
       try {
-        const transcription = await transcribeAudio(recordingUrl, 'fr');
+        // Check for structured live transcript with speaker roles
+        const callResult = await query('SELECT live_transcript FROM calls WHERE id = $1', [callId]);
+        const liveTranscript = callResult.rows[0]?.live_transcript;
+
+        let transcriptionText: string;
+        let transcriptionLanguage = 'fr';
+        let transcriptionConfidence = 0.9;
+
+        if (liveTranscript) {
+          try {
+            const segments = JSON.parse(liveTranscript);
+            if (Array.isArray(segments) && segments.length > 0 && 'role' in segments[0]) {
+              // Format structured transcript with speaker labels
+              transcriptionText = segments
+                .map((seg: { role: string; text: string }) => {
+                  const label = seg.role === 'agent' ? 'Agent' : 'Client';
+                  return `${label}: ${seg.text}`;
+                })
+                .join('\n\n');
+              logger.info('Using structured live transcript with speaker separation', { callId, segmentsCount: segments.length });
+            } else {
+              // Fallback to recording transcription
+              const transcription = await transcribeAudio(recordingUrl, 'fr');
+              transcriptionText = transcription.text;
+              transcriptionLanguage = transcription.language;
+              transcriptionConfidence = transcription.confidence;
+            }
+          } catch {
+            // Fallback to recording transcription if JSON parsing fails
+            const transcription = await transcribeAudio(recordingUrl, 'fr');
+            transcriptionText = transcription.text;
+            transcriptionLanguage = transcription.language;
+            transcriptionConfidence = transcription.confidence;
+          }
+        } else {
+          // No live transcript available, use recording transcription
+          const transcription = await transcribeAudio(recordingUrl, 'fr');
+          transcriptionText = transcription.text;
+          transcriptionLanguage = transcription.language;
+          transcriptionConfidence = transcription.confidence;
+        }
 
         const existingT = await query('SELECT id, text FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
         if (existingT.rows.length === 0) {
           await query(
             `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
-            [callId, transcription.text, transcription.language, transcription.confidence]
+            [callId, transcriptionText, transcriptionLanguage, transcriptionConfidence]
           );
         } else {
-          await query('UPDATE transcriptions SET text = $1 WHERE id = $2', [transcription.text, existingT.rows[0].id]);
+          await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3 WHERE id = $4',
+            [transcriptionText, transcriptionLanguage, transcriptionConfidence, existingT.rows[0].id]);
         }
 
         const [summary, intentData] = await Promise.all([
-          summarizeCall(transcription.text),
-          detectIntent(transcription.text),
+          summarizeCall(transcriptionText),
+          detectIntent(transcriptionText),
         ]);
 
         const existingS = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
