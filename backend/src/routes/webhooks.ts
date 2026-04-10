@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
 import { textToSpeech as deepgramTextToSpeech } from '../services/deepgram';
+import { textToSpeech as mistralTextToSpeech } from '../services/mistral';
 import { detectIntent, generateResponse, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
 import { buildKnowledgeBaseContext, defaultEscalationPolicy, getActiveOfferMode, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
 import { shouldUseOfferBStreamingPipeline } from '../services/twilioMediaStreams';
@@ -119,9 +120,12 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
     }
 
     const company = result.rows[0];
-    const greetingText = company.settings?.greetingText || company.settings?.twilioGreetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
+    const greetingText = company.settings?.twilioGreetingText || company.settings?.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
     const fullText = isRouting ? `${greetingText} ${routingQuestion}` : greetingText;
-    const audio = await textToSpeech(fullText);
+    const audio = await mistralTextToSpeech(fullText, 'mp3', 'fr', {
+      model: 'voxtral-mini-tts-2603',
+      voice: 'c9cc6578-7734-4604-b2d3-51ce694f3afc',
+    });
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(audio);
