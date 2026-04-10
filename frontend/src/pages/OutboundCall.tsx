@@ -502,7 +502,7 @@ function ActiveCallView({
             </div>
             <p className="text-sm font-semibold text-[#141F28]">Chronologie</p>
           </div>
-          <ol className="relative space-y-0 border-l-2 border-[#344453]/8 pl-5">
+          <ol className="space-y-0">
             {events.map((ev, idx) => {
               const isFirst = idx === 0;
               const isLast = idx === events.length - 1;
@@ -517,19 +517,26 @@ function ActiveCallView({
                 : 'bg-[#344453]/30';
               const ts = new Date(ev.timestamp);
               return (
-                <li key={ev.id} className={`relative pb-5 ${isLast ? 'pb-0' : ''}`}>
-                  <div className={`absolute -left-[21px] top-[3px] h-3 w-3 rounded-full border-2 border-white ${dotColor}`} />
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                    <p className="text-sm font-semibold text-[#141F28]">
-                      {statusEventLabel[ev.event_type] || ev.event_type}
-                    </p>
-                    <p className="text-[11px] text-[#344453]/40 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
-                      {ts.toLocaleDateString('fr-BE', { day: '2-digit', month: '2-digit' })} · {ts.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </p>
+                <li key={ev.id} className="flex gap-3">
+                  {/* Colonne gauche : dot + ligne verticale */}
+                  <div className="flex flex-col items-center">
+                    <div className={`mt-[3px] h-3 w-3 shrink-0 rounded-full border-2 border-white ${dotColor}`} />
+                    {!isLast && <div className="mt-1 w-0.5 flex-1 bg-[#344453]/12" />}
                   </div>
-                  {ev.data?.staffName && (
-                    <p className="mt-0.5 text-xs text-[#344453]/55">→ {ev.data.staffName}</p>
-                  )}
+                  {/* Colonne droite : contenu */}
+                  <div className={`min-w-0 flex-1 ${isLast ? 'pb-0' : 'pb-5'}`}>
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                      <p className="text-sm font-semibold text-[#141F28]">
+                        {statusEventLabel[ev.event_type] || ev.event_type}
+                      </p>
+                      <p className="text-[11px] text-[#344453]/40 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
+                        {ts.toLocaleDateString('fr-BE', { day: '2-digit', month: '2-digit' })} · {ts.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </p>
+                    </div>
+                    {ev.data?.staffName && (
+                      <p className="mt-0.5 text-xs text-[#344453]/55">→ {ev.data.staffName}</p>
+                    )}
+                  </div>
                 </li>
               );
             })}
