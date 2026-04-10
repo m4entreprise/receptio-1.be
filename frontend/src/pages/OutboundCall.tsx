@@ -244,7 +244,7 @@ function ActiveCallView({
       ? Math.floor((nowMs - new Date(call.created_at).getTime()) / 1000)
       : 0;
   const isActive = call ? ACTIVE_STATUSES.has(call.status) : false;
-  type TranscriptSegment = { role: 'client' | 'agent'; text: string; ts: number };
+  type TranscriptSegment = { role: 'client' | 'agent'; text: string; ts?: number };
   const parseTranscript = (raw: string | null | undefined): TranscriptSegment[] | null => {
     if (!raw) return null;
     try {
@@ -253,7 +253,23 @@ function ActiveCallView({
     } catch { /* plain text */ }
     return null;
   };
-  const transcriptSegments = parseTranscript(call?.live_transcript);
+  // Parse text format like "Client: ...\n\nAgent: ..." into segments
+  const parseTranscriptTextWithPrefixes = (text: string | null | undefined): TranscriptSegment[] | null => {
+    if (!text || !text.trim()) return null;
+    const lines = text.split(/\n+/).filter(l => l.trim());
+    const segments: TranscriptSegment[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^(Client|Agent)\s*:\s*(.+)$/i);
+      if (match) {
+        const role = match[1].toLowerCase() === 'agent' ? 'agent' : 'client';
+        segments.push({ role, text: match[2].trim() });
+      }
+    }
+    return segments.length > 0 ? segments : null;
+  };
+  const transcriptSegments = parseTranscript(call?.live_transcript)
+    || parseTranscriptTextWithPrefixes(call?.transcription_text);
   const transcriptFallbackText = !transcriptSegments ? (call?.live_transcript || call?.transcription_text || '') : '';
   const liveSummary = call?.live_summary || call?.ai_summary || '';
 

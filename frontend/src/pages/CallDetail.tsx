@@ -41,6 +41,26 @@ function parseTranscriptSegments(raw: string | null | undefined): TranscriptSegm
   return null;
 }
 
+// Parse text format like "Client: ...\n\nAgent: ..." into segments
+function parseTranscriptTextWithPrefixes(text: string | null | undefined): TranscriptSegment[] | null {
+  if (!text || !text.trim()) return null;
+
+  const lines = text.split(/\n+/).filter(l => l.trim());
+  const segments: TranscriptSegment[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Match "Client:" or "Agent:" at the start
+    const match = trimmed.match(/^(Client|Agent)\s*:\s*(.+)$/i);
+    if (match) {
+      const role = match[1].toLowerCase() === 'agent' ? 'agent' : 'client';
+      segments.push({ role, text: match[2].trim() });
+    }
+  }
+
+  return segments.length > 0 ? segments : null;
+}
+
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function CallDetail() {
@@ -455,7 +475,8 @@ export default function CallDetail() {
             )}
 
             {(() => {
-              const segments = parseTranscriptSegments(call.live_transcript);
+              const segments = parseTranscriptSegments(call.live_transcript)
+                || parseTranscriptTextWithPrefixes(call.transcription_text);
               const plainText = call.transcription_text;
               if (!segments && !plainText) return null;
               return (

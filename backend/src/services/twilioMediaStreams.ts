@@ -1114,7 +1114,7 @@ async function speakAssistantText(
   try {
     if (options.persistTranscript) {
       void runNonBlockingPersistence(
-        appendTranscriptLine(state.callId, 'IA', cleanText),
+        appendTranscriptLine(state.callId, 'Agent', cleanText),
         'streaming.assistant_transcript_persist_failed',
         state
       );
@@ -1279,8 +1279,9 @@ async function ensureCallSummaryExists(callId: string) {
   );
 }
 
-async function appendTranscriptLine(callId: string, speaker: 'Client' | 'IA', text: string) {
-  const transcript = `${speaker}: ${text.trim()}`;
+async function appendTranscriptLine(callId: string, speaker: 'Client' | 'Agent', text: string) {
+  const label = speaker === 'Client' ? 'Client' : 'Agent';
+  const transcript = `${label}: ${text.trim()}`;
   const transcriptionResult = await query(
     'SELECT id, text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
     [callId]
