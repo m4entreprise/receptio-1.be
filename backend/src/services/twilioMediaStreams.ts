@@ -148,6 +148,7 @@ interface OutboundTrackState {
   speechDurationMs: number;
   silenceDurationMs: number;
   pendingProcessScheduled: boolean;
+  lastSpeechFrameAt: number;
 }
 
 interface OutboundTranscriptSegment {
@@ -172,6 +173,7 @@ function makeTrackState(): OutboundTrackState {
     speechDurationMs: 0,
     silenceDurationMs: 0,
     pendingProcessScheduled: false,
+    lastSpeechFrameAt: 0,
   };
 }
 
@@ -201,6 +203,23 @@ async function handleOutboundTranscriptionConnection(ws: WebSocket, request: Inc
   state.initialized = true;
   logger.info('Outbound transcription stream connected', { callId, companyId });
 
+  const silenceCheckInterval = setInterval(() => {
+    const now = Date.now();
+    for (const track of Object.keys(state.tracks)) {
+      const ts = state.tracks[track];
+      if (
+        ts.speechDetected
+        && !ts.pendingProcessScheduled
+        && ts.lastSpeechFrameAt > 0
+        && (now - ts.lastSpeechFrameAt) >= OUTBOUND_SILENCE_THRESHOLD_MS
+        && ts.speechDurationMs >= OUTBOUND_MIN_SPEECH_MS
+      ) {
+        ts.pendingProcessScheduled = true;
+        void processOutboundTrackUtterance(state, track);
+      }
+    }
+  }, 100);
+
   const flushInterval = setInterval(() => {
     void flushOutboundTranscript(state);
   }, OUTBOUND_FLUSH_INTERVAL_MS);
@@ -210,6 +229,7 @@ async function handleOutboundTranscriptionConnection(ws: WebSocket, request: Inc
   });
 
   ws.on('close', async () => {
+    clearInterval(silenceCheckInterval);
     clearInterval(flushInterval);
     for (const track of Object.keys(state.tracks)) {
       if (state.tracks[track].pendingAudioChunks.length > 0) {
@@ -221,6 +241,7 @@ async function handleOutboundTranscriptionConnection(ws: WebSocket, request: Inc
   });
 
   ws.on('error', (error) => {
+    clearInterval(silenceCheckInterval);
     clearInterval(flushInterval);
     logger.error('Outbound transcription stream error', { callId: state.callId, error: error.message });
   });
@@ -259,6 +280,7 @@ async function handleOutboundStreamMessage(data: RawData, state: OutboundStreamS
       ts.speechDetected = true;
       ts.speechDurationMs += ULaw_FRAME_DURATION_MS;
       ts.silenceDurationMs = 0;
+      ts.lastSpeechFrameAt = Date.now();
       ts.pendingAudioChunks.push(audioBuffer);
 
       if (ts.speechDurationMs >= OUTBOUND_MAX_UTTERANCE_MS && !ts.pendingProcessScheduled) {
@@ -269,19 +291,6 @@ async function handleOutboundStreamMessage(data: RawData, state: OutboundStreamS
     }
 
     if (!ts.speechDetected) return;
-    if (ts.pendingProcessScheduled) return;
-
-    ts.pendingAudioChunks.push(audioBuffer);
-    ts.silenceDurationMs += ULaw_FRAME_DURATION_MS;
-
-    if (
-      ts.silenceDurationMs >= OUTBOUND_SILENCE_THRESHOLD_MS
-      && ts.speechDurationMs >= OUTBOUND_MIN_SPEECH_MS
-      && !ts.pendingProcessScheduled
-    ) {
-      ts.pendingProcessScheduled = true;
-      void processOutboundTrackUtterance(state, track);
-    }
     return;
   }
 
