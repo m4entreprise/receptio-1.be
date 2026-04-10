@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
-import { textToSpeech as deepgramTextToSpeech } from '../services/deepgram';
+import { textToSpeech as deepgramTextToSpeech, transcribeAudioWithSpeakers } from '../services/deepgram';
 import { textToSpeech as mistralTextToSpeech } from '../services/mistral';
 import { detectIntent, generateResponse, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
 import { buildKnowledgeBaseContext, defaultEscalationPolicy, getActiveOfferMode, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
@@ -1313,22 +1313,31 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
                   .join('\n\n');
                 logger.info('Using structured live transcript with speaker separation', { callId, segmentsCount: segments.length });
               } else {
-                // Fallback to recording transcription
-                const transcription = await transcribeAudio(recordingUrl, 'fr');
-                transcriptionText = transcription.text;
+                // Fallback to diarized recording transcription
+                const transcription = await transcribeAudioWithSpeakers(recordingUrl, 'fr', 'agent');
+                transcriptionSegments = transcription.segments;
+                transcriptionText = transcription.segments
+                  ? transcription.segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
+                  : transcription.text;
                 transcriptionLanguage = transcription.language;
                 transcriptionConfidence = transcription.confidence;
               }
             } catch {
-              const transcription = await transcribeAudio(recordingUrl, 'fr');
-              transcriptionText = transcription.text;
+              const transcription = await transcribeAudioWithSpeakers(recordingUrl, 'fr', 'agent');
+              transcriptionSegments = transcription.segments;
+              transcriptionText = transcription.segments
+                ? transcription.segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
+                : transcription.text;
               transcriptionLanguage = transcription.language;
               transcriptionConfidence = transcription.confidence;
             }
           } else {
-            // No live transcript available, use recording transcription
-            const transcription = await transcribeAudio(recordingUrl, 'fr');
-            transcriptionText = transcription.text;
+            // No live transcript available, use diarized recording transcription
+            const transcription = await transcribeAudioWithSpeakers(recordingUrl, 'fr', 'agent');
+            transcriptionSegments = transcription.segments;
+            transcriptionText = transcription.segments
+              ? transcription.segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
+              : transcription.text;
             transcriptionLanguage = transcription.language;
             transcriptionConfidence = transcription.confidence;
           }

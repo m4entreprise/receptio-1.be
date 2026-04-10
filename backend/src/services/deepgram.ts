@@ -41,15 +41,15 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
     );
 
     const transcript = response.data.results?.channels[0]?.alternatives[0];
-    
+
     if (!transcript) {
       throw new Error('No transcription result');
     }
 
-    logger.info('Audio transcribed', { 
-      audioUrl, 
+    logger.info('Audio transcribed', {
+      audioUrl,
       confidence: transcript.confidence,
-      wordCount: transcript.words?.length 
+      wordCount: transcript.words?.length
     });
 
     return {
@@ -58,10 +58,93 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
       language,
     };
   } catch (error: any) {
-    logger.error('Deepgram transcription error', { 
+    logger.error('Deepgram transcription error', {
       error: error.message,
-      audioUrl 
+      audioUrl
     });
+    throw error;
+  }
+}
+
+export async function transcribeAudioWithSpeakers(audioUrl: string, language: string = 'fr', firstSpeakerRole: 'agent' | 'client' = 'agent'): Promise<{
+  text: string;
+  confidence: number;
+  language: string;
+  segments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null;
+}> {
+  try {
+    ensureDeepgramConfigured();
+
+    const response = await axios.post(
+      `${DEEPGRAM_API_URL}/listen`,
+      { url: audioUrl },
+      {
+        headers: {
+          'Authorization': `Token ${DEEPGRAM_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        params: {
+          model: DEFAULT_DEEPGRAM_STT_MODEL,
+          language,
+          punctuate: true,
+          diarize: true,
+          smart_format: true,
+        },
+      }
+    );
+
+    const transcript = response.data.results?.channels[0]?.alternatives[0];
+
+    if (!transcript) {
+      throw new Error('No transcription result');
+    }
+
+    const words: Array<{ word: string; speaker?: number; start?: number }> = transcript.words || [];
+
+    // Group consecutive words from the same speaker into segments
+    let segments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null = null;
+
+    if (words.length > 0 && words.some(w => w.speaker !== undefined)) {
+      const rawSegments: Array<{ speaker: number; words: string[]; start?: number }> = [];
+
+      for (const word of words) {
+        const spk = word.speaker ?? 0;
+        const last = rawSegments[rawSegments.length - 1];
+        if (last && last.speaker === spk) {
+          last.words.push(word.word);
+        } else {
+          rawSegments.push({ speaker: spk, words: [word.word], start: word.start });
+        }
+      }
+
+      // Determine which speaker number maps to which role.
+      // The speaker who appears first in the recording maps to firstSpeakerRole.
+      const firstSpeakerNum = rawSegments[0]?.speaker ?? 0;
+      const secondRole: 'agent' | 'client' = firstSpeakerRole === 'agent' ? 'client' : 'agent';
+
+      segments = rawSegments.map(seg => ({
+        role: seg.speaker === firstSpeakerNum ? firstSpeakerRole : secondRole,
+        text: seg.words.join(' '),
+        ts: seg.start !== undefined ? Math.round(seg.start * 1000) : undefined,
+      }));
+
+      logger.info('Audio transcribed with speaker diarization', {
+        audioUrl,
+        segmentsCount: segments.length,
+        speakersDetected: new Set(rawSegments.map(s => s.speaker)).size,
+      });
+    } else {
+      logger.info('Audio transcribed without speaker diarization (no speaker data)', { audioUrl });
+    }
+
+    return {
+      text: transcript.transcript,
+      confidence: transcript.confidence,
+      language,
+      segments,
+    };
+  } catch (error: any) {
+    logger.error('Deepgram diarized transcription error', { error: error.message, audioUrl });
     throw error;
   }
 }
