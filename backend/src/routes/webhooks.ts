@@ -1265,61 +1265,82 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
       [callId, 'outbound.recording.completed', { recordingUrl, recordingDuration }]
     );
 
+    // Wait a bit for the WebSocket to flush final transcript segments
+    await new Promise(r => setTimeout(r, 3000));
+
     setImmediate(async () => {
       try {
-        // Check for structured live transcript with speaker roles
-        const callResult = await query('SELECT live_transcript FROM calls WHERE id = $1', [callId]);
-        const liveTranscript = callResult.rows[0]?.live_transcript;
+        // Check if transcription already exists with structured segments (from WebSocket flush)
+        const existingT = await query('SELECT id, text, segments FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
 
-        let transcriptionText: string;
+        let transcriptionText = '';
         let transcriptionSegments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null = null;
         let transcriptionLanguage = 'fr';
         let transcriptionConfidence = 0.9;
+        let hasExistingSegments = false;
 
-        if (liveTranscript) {
+        if (existingT.rows.length > 0 && existingT.rows[0].segments) {
+          // Transcription with segments already exists from WebSocket flush - don't overwrite
           try {
-            const segments = JSON.parse(liveTranscript);
-            if (Array.isArray(segments) && segments.length > 0 && 'role' in segments[0]) {
-              transcriptionSegments = segments;
-              // Format structured transcript with speaker labels for text column
-              transcriptionText = segments
-                .map((seg: { role: string; text: string }) => {
-                  const label = seg.role === 'agent' ? 'Agent' : 'Client';
-                  return `${label}: ${seg.text}`;
-                })
-                .join('\n\n');
-              logger.info('Using structured live transcript with speaker separation', { callId, segmentsCount: segments.length });
-            } else {
-              // Fallback to recording transcription
+            transcriptionSegments = JSON.parse(existingT.rows[0].segments);
+            if (Array.isArray(transcriptionSegments) && transcriptionSegments.length > 0) {
+              hasExistingSegments = true;
+              transcriptionText = existingT.rows[0].text || '';
+              logger.info('Using existing transcription segments from WebSocket', { callId, segmentsCount: transcriptionSegments.length });
+            }
+          } catch { /* ignore parse error */ }
+        }
+
+        if (!hasExistingSegments) {
+          // Check for live transcript with speaker roles
+          const callResult = await query('SELECT live_transcript FROM calls WHERE id = $1', [callId]);
+          const liveTranscript = callResult.rows[0]?.live_transcript;
+
+          if (liveTranscript) {
+            try {
+              const segments = JSON.parse(liveTranscript);
+              if (Array.isArray(segments) && segments.length > 0 && 'role' in segments[0]) {
+                transcriptionSegments = segments;
+                transcriptionText = segments
+                  .map((seg: { role: string; text: string }) => {
+                    const label = seg.role === 'agent' ? 'Agent' : 'Client';
+                    return `${label}: ${seg.text}`;
+                  })
+                  .join('\n\n');
+                logger.info('Using structured live transcript with speaker separation', { callId, segmentsCount: segments.length });
+              } else {
+                // Fallback to recording transcription
+                const transcription = await transcribeAudio(recordingUrl, 'fr');
+                transcriptionText = transcription.text;
+                transcriptionLanguage = transcription.language;
+                transcriptionConfidence = transcription.confidence;
+              }
+            } catch {
               const transcription = await transcribeAudio(recordingUrl, 'fr');
               transcriptionText = transcription.text;
               transcriptionLanguage = transcription.language;
               transcriptionConfidence = transcription.confidence;
             }
-          } catch {
-            // Fallback to recording transcription if JSON parsing fails
+          } else {
+            // No live transcript available, use recording transcription
             const transcription = await transcribeAudio(recordingUrl, 'fr');
             transcriptionText = transcription.text;
             transcriptionLanguage = transcription.language;
             transcriptionConfidence = transcription.confidence;
           }
-        } else {
-          // No live transcript available, use recording transcription
-          const transcription = await transcribeAudio(recordingUrl, 'fr');
-          transcriptionText = transcription.text;
-          transcriptionLanguage = transcription.language;
-          transcriptionConfidence = transcription.confidence;
         }
 
-        const existingT = await query('SELECT id, text FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
-        if (existingT.rows.length === 0) {
-          await query(
-            `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
-            [callId, transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null]
-          );
-        } else {
-          await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE id = $5',
-            [transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null, existingT.rows[0].id]);
+        // Only insert/update if we don't have existing segments
+        if (!hasExistingSegments) {
+          if (existingT.rows.length === 0) {
+            await query(
+              `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
+              [callId, transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null]
+            );
+          } else {
+            await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE id = $5',
+              [transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null, existingT.rows[0].id]);
+          }
         }
 
         const [summary, intentData] = await Promise.all([
