@@ -28,10 +28,13 @@ interface CallDetailItem {
   actions?: CallAction[];
 }
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export default function CallDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isValidCallId = !!id && uuidPattern.test(id);
   const [call, setCall] = useState<CallDetailItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
@@ -71,14 +74,20 @@ export default function CallDetail() {
   };
 
   useEffect(() => {
+    if (!isValidCallId) {
+      setCall(null);
+      setLoading(false);
+      return;
+    }
+
     fetchCallDetail();
-  }, [id]);
+  }, [id, isValidCallId]);
 
   useEffect(() => {
     let objectUrl: string | null = null;
 
     const fetchRecording = async () => {
-      if (!call?.recording_url || !id) {
+      if (!call?.recording_url || !id || !isValidCallId) {
         setRecordingBlobUrl(null);
         setRecordingLoading(false);
         setIsPlaying(false);
@@ -116,7 +125,7 @@ export default function CallDetail() {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [call?.recording_url, id]);
+  }, [call?.recording_url, id, isValidCallId]);
 
   const handleTogglePlayback = async () => {
     if (!audioRef.current) {
@@ -157,6 +166,12 @@ export default function CallDetail() {
   };
 
   const fetchCallDetail = async () => {
+    if (!id || !isValidCallId) {
+      setCall(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await axios.get(`/api/calls/${id}`);
       setCall(response.data.call as CallDetailItem);
@@ -168,6 +183,7 @@ export default function CallDetail() {
   };
 
   const handleDelete = async () => {
+    if (!id || !isValidCallId) return;
     if (!confirm('Êtes-vous sûr de vouloir supprimer cet appel ?')) return;
     
     setDeleting(true);

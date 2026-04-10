@@ -7,6 +7,13 @@ import { AppError } from '../middleware/errorHandler';
 import logger from '../utils/logger';
 
 const router = Router();
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertValidCallId(id: string) {
+  if (!uuidPattern.test(id)) {
+    throw new AppError('Invalid call id', 400);
+  }
+}
 
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
@@ -68,6 +75,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
   try {
     const { companyId } = req.user!;
     const { id } = req.params;
+    assertValidCallId(id);
 
     const result = await query(
       `SELECT c.*, t.text as transcription_text, t.language, t.confidence,
@@ -101,6 +109,7 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
   try {
     const { companyId } = req.user!;
     const { id } = req.params;
+    assertValidCallId(id);
 
     const result = await query(
       'SELECT recording_url FROM calls WHERE id = $1 AND company_id = $2',
@@ -164,6 +173,7 @@ router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Res
   try {
     const { companyId } = req.user!;
     const { id } = req.params;
+    assertValidCallId(id);
 
     const callResult = await query(
       `SELECT call_sid FROM calls WHERE id = $1 AND company_id = $2`,
@@ -211,6 +221,7 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
   try {
     const { companyId } = req.user!;
     const { id } = req.params;
+    assertValidCallId(id);
     const { staffPhone } = req.body;
 
     if (!staffPhone) {
@@ -284,6 +295,7 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response,
   try {
     const { companyId } = req.user!;
     const { id } = req.params;
+    assertValidCallId(id);
 
     const result = await query(
       'DELETE FROM calls WHERE id = $1 AND company_id = $2 RETURNING id',
