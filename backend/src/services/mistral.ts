@@ -156,6 +156,106 @@ export async function generateResponse(
   }
 }
 
+const MISTRAL_DIARIZATION_MODEL = 'voxtral-mini-2602';
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+
+async function downloadAudioForMistral(audioUrl: string): Promise<{ buffer: Buffer; mimeType: string; fileName: string }> {
+  const resolvedUrl = audioUrl.endsWith('.mp3') || audioUrl.endsWith('.wav') ? audioUrl : `${audioUrl}.mp3`;
+  const headers: Record<string, string> = {};
+
+  if (resolvedUrl.includes('twilio.com') && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+    headers.Authorization = `Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}`;
+  }
+
+  const response = await fetch(resolvedUrl, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to download audio: ${response.status} ${response.statusText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const isWav = resolvedUrl.endsWith('.wav');
+  return {
+    buffer,
+    mimeType: isWav ? 'audio/wav' : 'audio/mpeg',
+    fileName: isWav ? 'recording.wav' : 'recording.mp3',
+  };
+}
+
+export async function transcribeAudioUrlWithDiarization(audioUrl: string, language: string = 'fr', firstSpeakerRole: 'agent' | 'client' = 'agent'): Promise<{
+  text: string;
+  confidence: number;
+  language: string;
+  segments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null;
+}> {
+  try {
+    ensureMistralConfigured();
+
+    const audio = await downloadAudioForMistral(audioUrl);
+    const formData = new FormData();
+    formData.append('file', new Blob([audio.buffer], { type: audio.mimeType }), audio.fileName);
+    formData.append('model', MISTRAL_DIARIZATION_MODEL);
+    formData.append('language', language);
+    formData.append('diarize', 'true');
+    formData.append('timestamp_granularities', 'segment');
+
+    const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` },
+      body: formData,
+    });
+
+    const data = await response.json() as {
+      text?: string;
+      language?: string;
+      segments?: Array<{ text: string; start: number; end: number; speaker_id?: string }>;
+      error?: { message?: string };
+    };
+
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'Mistral diarized transcription failed');
+    }
+
+    const rawSegments = data.segments || [];
+    let segments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null = null;
+
+    if (rawSegments.length > 0 && rawSegments.some(s => s.speaker_id)) {
+      // Determine which speaker_id maps to which role (first speaker = firstSpeakerRole)
+      const firstSpeakerId = rawSegments[0]?.speaker_id;
+      const secondRole: 'agent' | 'client' = firstSpeakerRole === 'agent' ? 'client' : 'agent';
+
+      // Merge consecutive segments from the same speaker
+      const merged: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> = [];
+      for (const seg of rawSegments) {
+        const role: 'agent' | 'client' = seg.speaker_id === firstSpeakerId ? firstSpeakerRole : secondRole;
+        const last = merged[merged.length - 1];
+        if (last && last.role === role) {
+          last.text = `${last.text} ${seg.text.trim()}`.trim();
+        } else {
+          merged.push({ role, text: seg.text.trim(), ts: Math.round(seg.start * 1000) });
+        }
+      }
+      segments = merged;
+    }
+
+    logger.info('Audio transcribed with Mistral Voxtral diarization', {
+      audioUrl,
+      segmentsCount: segments?.length ?? 0,
+      hasDiarization: !!segments,
+    });
+
+    return {
+      text: data.text || '',
+      confidence: 1,
+      language: data.language || language,
+      segments,
+    };
+  } catch (error: any) {
+    logger.error('Mistral diarized transcription error', { error: error.message, audioUrl });
+    throw error;
+  }
+}
+
 export async function transcribeAudioBuffer(
   audioBuffer: Buffer,
   options: {
