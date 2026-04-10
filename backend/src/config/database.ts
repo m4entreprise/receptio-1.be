@@ -15,7 +15,9 @@ const pool = new Pool({
     : { rejectUnauthorized: false },
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 });
 
 // Test connection at startup
@@ -25,7 +27,6 @@ pool.query('SELECT NOW()')
 
 pool.on('error', (err: Error) => {
   console.error('Unexpected error on idle client', err);
-  process.exit(-1);
 });
 
 export const query = async (text: string, params?: any[]) => {
