@@ -66,46 +66,6 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
   }
 }
 
-export async function transcribeAudioWithDiarization(audioUrl: string, language: string = 'fr'): Promise<{
-  segments: Array<{ speaker: number; text: string; start: number; end: number }>;
-  fullText: string;
-  confidence: number;
-}> {
-  ensureDeepgramConfigured();
-
-  const response = await axios.post(
-    `${DEEPGRAM_API_URL}/listen`,
-    { url: audioUrl },
-    {
-      headers: { 'Authorization': `Token ${DEEPGRAM_API_KEY}`, 'Content-Type': 'application/json' },
-      params: { model: DEFAULT_DEEPGRAM_STT_MODEL, language, punctuate: true, diarize: true, smart_format: true, utterances: true },
-    }
-  );
-
-  const alternative = response.data.results?.channels[0]?.alternatives[0];
-  if (!alternative) throw new Error('No diarization result');
-
-  const words: Array<{ word: string; speaker: number; start: number; end: number; punctuated_word?: string }> =
-    alternative.words || [];
-
-  const segments: Array<{ speaker: number; text: string; start: number; end: number }> = [];
-  let current: { speaker: number; words: string[]; start: number; end: number } | null = null;
-
-  for (const w of words) {
-    const spk = w.speaker ?? 0;
-    if (!current || current.speaker !== spk) {
-      if (current) segments.push({ speaker: current.speaker, text: current.words.join(' '), start: current.start, end: current.end });
-      current = { speaker: spk, words: [w.punctuated_word || w.word], start: w.start, end: w.end };
-    } else {
-      current.words.push(w.punctuated_word || w.word);
-      current.end = w.end;
-    }
-  }
-  if (current) segments.push({ speaker: current.speaker, text: current.words.join(' '), start: current.start, end: current.end });
-
-  return { segments, fullText: alternative.transcript, confidence: alternative.confidence };
-}
-
 export async function transcribeAudioBuffer(audioBuffer: Buffer, options: {
   language?: string;
   mimeType?: string;
