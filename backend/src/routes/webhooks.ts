@@ -108,7 +108,7 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
     }
 
     const company = result.rows[0];
-    const greetingText = company.settings?.twilioGreetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
+    const greetingText = company.settings?.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
     const audio = await mistralTextToSpeech(greetingText, 'mp3', 'fr', {
       model: 'voxtral-mini-tts-2603',
       voice: 'c9cc6578-7734-4604-b2d3-51ce694f3afc',
