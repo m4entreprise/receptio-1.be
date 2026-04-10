@@ -40,6 +40,8 @@ const defaultOfferBSettings: Required<OfferBSettings> = {
   greetingText: '',
   knowledgeBaseEnabled: false,
   appointmentIntegrationEnabled: false,
+  smartRoutingEnabled: false,
+  routingQuestion: '',
   bbisAgent: {
     systemPrompt: '',
     temperature: 0.4,

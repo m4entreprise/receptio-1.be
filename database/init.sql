@@ -201,6 +201,41 @@ BEGIN
     END IF;
 END $$;
 
+-- Staff table (tenant members: secretaries, agents, etc.)
+CREATE TABLE IF NOT EXISTS staff (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    phone_number VARCHAR(50) NOT NULL,
+    role VARCHAR(100) DEFAULT 'secrétaire',
+    voicemail_message TEXT,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_company_id ON staff(company_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_staff_updated_at'
+          AND tgrelid = 'staff'::regclass
+    ) THEN
+        CREATE TRIGGER update_staff_updated_at BEFORE UPDATE ON staff
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
+
+-- Smart routing: queue columns on calls
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS queue_status VARCHAR(30) DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS queue_reason TEXT DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_calls_queue_status ON calls(company_id, queue_status) WHERE queue_status IS NOT NULL;
+
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES
 ('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}')

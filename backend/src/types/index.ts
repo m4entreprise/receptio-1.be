@@ -44,6 +44,8 @@ export interface OfferBSettings {
   greetingText?: string;
   knowledgeBaseEnabled?: boolean;
   appointmentIntegrationEnabled?: boolean;
+  smartRoutingEnabled?: boolean;
+  routingQuestion?: string;
   bbisAgent?: BbisAgentSettings;
 }
 

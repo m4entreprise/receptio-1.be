@@ -53,6 +53,7 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
     const callId = await createOrUpdateTwilioCall(payload, company.id);
     const baseUrl = getBaseUrl(req);
     const offerBSettings = await getCompanyOfferBSettings(company.id);
+    const voiceStatusUrl = joinUrl(baseUrl, '/api/webhooks/twilio/voice-status');
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data)
@@ -61,8 +62,8 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
     );
 
     await query(
-      `UPDATE calls SET status = $1 WHERE id = $2`,
-      ['answered', callId]
+      `UPDATE calls SET status = $1, metadata = metadata || $2 WHERE id = $3`,
+      ['answered', JSON.stringify({ voiceStatusUrl }), callId]
     );
 
     if (shouldUseRealtimeOfferAgent(offerBSettings)) {
@@ -84,9 +85,17 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
       return;
     }
 
+    if (offerBSettings.smartRoutingEnabled) {
+      const routingQuestion = offerBSettings.routingQuestion || 'Quel est le motif de votre appel ?';
+      const gatherUrl = joinUrl(baseUrl, `/api/webhooks/twilio/gather-reason?callId=${callId}&companyId=${company.id}`);
+      const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}&routing=1&question=${encodeURIComponent(routingQuestion)}`);
+      res.type('text/xml').send(buildOfferARoutingTwiml(greetingUrl, gatherUrl, voiceStatusUrl));
+      return;
+    }
+
     const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
     const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
-    res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+    res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl, voiceStatusUrl));
   } catch (error: any) {
     logger.error('Twilio voice webhook error', { error: error.message });
     res.type('text/xml').send(buildTwiml('<Hangup />'));
@@ -96,6 +105,9 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
 router.get('/twilio/greeting', async (req: Request, res: Response) => {
   try {
     const companyId = String(req.query.companyId || '');
+    const isRouting = req.query.routing === '1';
+    const routingQuestion = String(req.query.question || 'Quel est le motif de votre appel ?');
+
     const result = await query(
       'SELECT id, name, settings FROM companies WHERE id = $1',
       [companyId]
@@ -107,8 +119,9 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
     }
 
     const company = result.rows[0];
-    const greetingText = company.settings?.twilioGreetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
-    const audio = await textToSpeech(greetingText);
+    const greetingText = company.settings?.greetingText || company.settings?.twilioGreetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
+    const fullText = isRouting ? `${greetingText} ${routingQuestion}` : greetingText;
+    const audio = await textToSpeech(fullText);
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(audio);
@@ -116,6 +129,84 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
     logger.error('Twilio greeting generation error', { error: error.message });
     res.status(500).send('Greeting unavailable');
   }
+});
+
+router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
+  const callId = String(req.query.callId || '');
+  const companyId = String(req.query.companyId || '');
+  const speechResult = String(req.body.SpeechResult || req.query.SpeechResult || '').trim();
+  const callSid = String(req.body.CallSid || '');
+
+  logger.info('gather-reason received', { callId, companyId, speechResult: speechResult.slice(0, 80), callSid });
+
+  if (callId) {
+    try {
+      await query(
+        `UPDATE calls SET queue_status = $1, queue_reason = $2, queued_at = NOW(), status = $3 WHERE id = $4`,
+        ['waiting', speechResult || null, 'queued', callId]
+      );
+      await query(
+        `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+        [callId, 'twilio.routing.queued', { speechResult, callSid, companyId }]
+      );
+      logger.info('Call queued for transfer', { callId, speechResult: speechResult.slice(0, 80) });
+    } catch (dbError: any) {
+      logger.error('gather-reason DB error (columns may be missing — run migration)', { callId, error: dbError.message });
+    }
+
+    if (speechResult) {
+      setImmediate(async () => {
+        try {
+          const callRow = await query(
+            `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email
+             FROM calls c LEFT JOIN companies co ON co.id = c.company_id WHERE c.id = $1`,
+            [callId]
+          );
+          if (callRow.rows.length === 0) return;
+          const call = callRow.rows[0];
+
+          const existing = await query('SELECT id FROM transcriptions WHERE call_id = $1', [callId]);
+          if (existing.rows.length === 0) {
+            await query(
+              `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
+              [callId, speechResult, 'fr', 0.9]
+            );
+          }
+
+          const [summary, intentData] = await Promise.all([
+            summarizeCall(speechResult),
+            detectIntent(speechResult),
+          ]);
+
+          const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
+          if (existingSummary.rows.length === 0) {
+            await query(
+              `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
+              [callId, summary, intentData.intent, JSON.stringify([])]
+            );
+          }
+
+          if (call.company_email) {
+            await sendTranscriptionEmail(call.company_email, {
+              callerNumber: call.caller_number || 'Inconnu',
+              transcription: speechResult,
+              duration: 0,
+              createdAt: call.created_at,
+            }).catch((e: any) => logger.error('gather-reason email error', { error: e.message }));
+          }
+
+          logger.info('gather-reason: transcription + summary saved', { callId });
+        } catch (aiError: any) {
+          logger.error('gather-reason AI processing error', { callId, error: aiError.message });
+        }
+      });
+    }
+  }
+
+  res.type('text/xml').send(buildTwiml(
+    `<Say language="fr-FR">Merci. Veuillez patienter, un agent va vous prendre en charge.</Say>` +
+    `<Pause length="30"/><Say language="fr-FR">Nous vous remercions de votre patience.</Say><Pause length="30"/><Hangup />`
+  ));
 });
 
 router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
@@ -391,9 +482,9 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
     await query(
       `UPDATE calls
-       SET recording_url = $1, duration = $2, status = $3, ended_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
-      [recordingUrl, recordingDuration, 'completed', call.id]
+       SET recording_url = $1, duration = COALESCE(NULLIF($2, 0), duration), status = CASE WHEN status NOT IN ('transferred') THEN 'completed' ELSE status END, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP)
+       WHERE id = $3`,
+      [recordingUrl, recordingDuration, call.id]
     );
 
     await query(
@@ -404,28 +495,52 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
     const transcription = await transcribeAudio(recordingUrl, 'fr');
 
-    await query(
-      `INSERT INTO transcriptions (call_id, text, language, confidence)
-       VALUES ($1, $2, $3, $4)`,
-      [call.id, transcription.text, transcription.language, transcription.confidence]
+    const existingTranscription = await query(
+      'SELECT id, text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
+      [call.id]
     );
+
+    const fullText = existingTranscription.rows.length > 0
+      ? `[Motif initial] ${existingTranscription.rows[0].text}\n\n[Conversation avec l'agent]\n${transcription.text}`
+      : transcription.text;
+
+    if (existingTranscription.rows.length > 0) {
+      await query(
+        `UPDATE transcriptions SET text = $1 WHERE id = $2`,
+        [fullText, existingTranscription.rows[0].id]
+      );
+    } else {
+      await query(
+        `INSERT INTO transcriptions (call_id, text, language, confidence)
+         VALUES ($1, $2, $3, $4)`,
+        [call.id, fullText, transcription.language, transcription.confidence]
+      );
+    }
 
     const [summary, intentData] = await Promise.all([
-      summarizeCall(transcription.text),
-      detectIntent(transcription.text),
+      summarizeCall(fullText),
+      detectIntent(fullText),
     ]);
 
-    await query(
-      `INSERT INTO call_summaries (call_id, summary, intent, actions)
-       VALUES ($1, $2, $3, $4)`,
-      [call.id, summary, intentData.intent, JSON.stringify([])]
-    );
+    const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [call.id]);
+    if (existingSummary.rows.length > 0) {
+      await query(
+        `UPDATE call_summaries SET summary = $1, intent = $2 WHERE call_id = $3`,
+        [summary, intentData.intent, call.id]
+      );
+    } else {
+      await query(
+        `INSERT INTO call_summaries (call_id, summary, intent, actions)
+         VALUES ($1, $2, $3, $4)`,
+        [call.id, summary, intentData.intent, JSON.stringify([])]
+      );
+    }
 
     if (call.company_email) {
       try {
         await sendTranscriptionEmail(call.company_email, {
           callerNumber: call.caller_number || 'Inconnu',
-          transcription: transcription.text,
+          transcription: fullText,
           duration: recordingDuration,
           createdAt: call.created_at,
         });
@@ -439,6 +554,78 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
     logger.error('Twilio recording webhook error', { error: error.message });
     res.status(200).send('ok');
   }
+});
+
+// Click-to-call: when the original caller picks up, Twilio calls this URL
+// and we bridge them to the staff member's phone.
+router.all('/twilio/transfer', async (req: Request, res: Response) => {
+  const staffPhone = String(req.query.staffPhone || req.body?.staffPhone || '');
+
+  if (!staffPhone) {
+    res.type('text/xml').send(buildTwiml('<Say language="fr-FR">Une erreur est survenue. Veuillez réessayer.</Say><Hangup />'));
+    return;
+  }
+
+  const twiml = buildTwiml(
+    `<Dial timeout="30" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
+  );
+  res.type('text/xml').send(twiml);
+});
+
+// Generic inbound call status callback — fired by Twilio on every status change
+router.post('/twilio/voice-status', async (req: Request, res: Response) => {
+  try {
+    const callSid = String(req.body?.CallSid || '');
+    const callStatus = String(req.body?.CallStatus || '');
+    const callDuration = parseInt(req.body?.CallDuration || '0', 10);
+
+    logger.info('Twilio voice-status callback', { callSid, callStatus, callDuration });
+
+    if (!callSid) {
+      res.sendStatus(200);
+      return;
+    }
+
+    const terminalStatuses = ['completed', 'no-answer', 'busy', 'failed', 'canceled'];
+    if (terminalStatuses.includes(callStatus)) {
+      const mappedStatus = callStatus === 'completed' ? 'completed' : callStatus === 'no-answer' ? 'missed' : callStatus;
+
+      await query(
+        `UPDATE calls
+         SET status = $1, duration = COALESCE(NULLIF($2, 0), duration), ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+             queue_status = CASE WHEN queue_status = 'waiting' THEN 'abandoned' ELSE queue_status END
+         WHERE call_sid = $3 AND status NOT IN ('completed', 'missed', 'transferred')`,
+        [mappedStatus, callDuration, callSid]
+      );
+
+      logger.info('Call status updated via voice-status', { callSid, mappedStatus, callDuration });
+    }
+
+    res.sendStatus(200);
+  } catch (error: any) {
+    logger.error('voice-status webhook error', { error: error.message });
+    res.sendStatus(200);
+  }
+});
+
+// Click-to-call: status callback — if no-answer / busy / failed, leave a voicemail
+router.post('/twilio/call-status', async (req: Request, res: Response) => {
+  const callStatus = String(req.body?.CallStatus || '');
+  const voicemailMessage = String(req.query.voicemailMessage || req.body?.voicemailMessage || '');
+  const callId = String(req.query.callId || '');
+  const staffId = String(req.query.staffId || '');
+
+  logger.info('Click-to-call status callback', { callStatus, callId, staffId });
+
+  if (['no-answer', 'busy', 'failed'].includes(callStatus) && voicemailMessage) {
+    const twiml = buildTwiml(
+      `<Say language="fr-FR">${escapeXml(voicemailMessage)}</Say><Hangup />`
+    );
+    res.type('text/xml').send(twiml);
+    return;
+  }
+
+  res.type('text/xml').send(buildTwiml('<Hangup />'));
 });
 
 function buildTwiml(body: string): string {
@@ -491,9 +678,17 @@ function buildOfferBStreamingTwiml(streamUrl: string, callId: string, companyId:
   );
 }
 
-function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string): string {
+function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string, statusCallbackUrl?: string): string {
+  const statusAttr = statusCallbackUrl ? ` statusCallback="${escapeXml(statusCallbackUrl)}" statusCallbackMethod="POST"` : '';
   return buildTwiml(
-    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+    `<Play${statusAttr}>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+  );
+}
+
+function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string, statusCallbackUrl?: string): string {
+  const statusAttr = statusCallbackUrl ? ` statusCallback="${escapeXml(statusCallbackUrl)}" statusCallbackMethod="POST"` : '';
+  return buildTwiml(
+    `<Gather input="speech" language="fr-FR" speechTimeout="auto" action="${escapeXml(gatherUrl)}" method="POST"${statusAttr}><Play>${escapeXml(greetingUrl)}</Play></Gather><Redirect>${escapeXml(gatherUrl)}</Redirect>`
   );
 }
 

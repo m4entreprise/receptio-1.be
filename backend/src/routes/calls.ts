@@ -48,6 +48,22 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
   }
 });
 
+router.get('/queued', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const result = await query(
+      `SELECT c.id, c.caller_number, c.caller_name, c.call_sid, c.queue_reason, c.queued_at, c.status
+       FROM calls c
+       WHERE c.company_id = $1 AND c.queue_status = 'waiting'
+       ORDER BY c.queued_at ASC`,
+      [companyId]
+    );
+    res.json({ calls: result.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     const { companyId } = req.user!;
@@ -140,6 +156,126 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       error: error.message,
       status: error.response?.status,
     });
+    next(error);
+  }
+});
+
+router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const { id } = req.params;
+
+    const callResult = await query(
+      `SELECT call_sid FROM calls WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
+
+    if (callResult.rows.length === 0) {
+      res.status(404).json({ error: 'Call not found' });
+      return;
+    }
+
+    const { call_sid: callSid } = callResult.rows[0];
+
+    if (callSid) {
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      if (accountSid && authToken) {
+        try {
+          const twilio = require('twilio')(accountSid, authToken);
+          await twilio.calls(callSid).update({ status: 'completed' });
+        } catch {
+        }
+      }
+    }
+
+    await query(
+      `UPDATE calls SET queue_status = 'abandoned', status = 'completed', ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $1`,
+      [id]
+    );
+
+    await query(
+      `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+      [id, 'twilio.routing.abandoned', { companyId }]
+    );
+
+    logger.info('Queued call abandoned by agent', { callId: id, companyId });
+    res.json({ success: true });
+  } catch (error: any) {
+    logger.error('Abandon error', { callId: req.params.id, error: error.message });
+    next(error);
+  }
+});
+
+router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const { id } = req.params;
+    const { staffPhone } = req.body;
+
+    if (!staffPhone) {
+      res.status(400).json({ error: 'staffPhone is required' });
+      return;
+    }
+
+    const callResult = await query(
+      `SELECT c.call_sid, c.queue_status, c.queue_reason,
+              COALESCE(co.settings->>'publicWebhookUrl', '') AS public_webhook_url
+       FROM calls c
+       LEFT JOIN companies co ON co.id = c.company_id
+       WHERE c.id = $1 AND c.company_id = $2`,
+      [id, companyId]
+    );
+
+    if (callResult.rows.length === 0) {
+      res.status(404).json({ error: 'Call not found' });
+      return;
+    }
+
+    const { call_sid: callSid } = callResult.rows[0];
+
+    if (!callSid) {
+      res.status(400).json({ error: 'No active call SID found' });
+      return;
+    }
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+    if (!accountSid || !authToken) {
+      res.status(500).json({ error: 'Twilio credentials not configured' });
+      return;
+    }
+
+    const baseWebhookUrl = (process.env.PUBLIC_WEBHOOK_URL || '').replace(/\/+$/, '');
+    const recordingCallbackUrl = baseWebhookUrl
+      ? `${baseWebhookUrl}/api/webhooks/twilio/recording-complete`
+      : null;
+
+    const recordAttr = recordingCallbackUrl
+      ? ` record="record-from-answer" recordingStatusCallback="${recordingCallbackUrl}" recordingStatusCallbackMethod="POST"`
+      : '';
+
+    const twilio = require('twilio')(accountSid, authToken);
+
+    await twilio.calls(callSid).update({
+      twiml: `<Response><Say language="fr-FR">Nous vous transférons maintenant. Veuillez patienter.</Say><Dial${recordAttr}><Number>${staffPhone}</Number></Dial></Response>`,
+    });
+
+    await query(
+      `UPDATE calls SET queue_status = 'transferred', status = 'transferred' WHERE id = $1`,
+      [id]
+    );
+
+    await query(
+      `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+      [id, 'twilio.routing.transferred', { staffPhone, companyId }]
+    );
+
+    logger.info('Call transferred', { callId: id, staffPhone, companyId });
+    res.json({ success: true });
+  } catch (error: any) {
+    logger.error('Transfer error', { callId: req.params.id, error: error.message });
     next(error);
   }
 });
