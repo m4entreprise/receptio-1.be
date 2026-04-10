@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
-import { textToSpeech as deepgramTextToSpeech } from '../services/deepgram';
+import { textToSpeech as deepgramTextToSpeech, transcribeAudioWithDiarization } from '../services/deepgram';
 import { textToSpeech as mistralTextToSpeech } from '../services/mistral';
 import { detectIntent, generateResponse, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
 import { buildKnowledgeBaseContext, defaultEscalationPolicy, getActiveOfferMode, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
@@ -1267,21 +1267,49 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
 
     setImmediate(async () => {
       try {
-        const transcription = await transcribeAudio(recordingUrl, 'fr');
+        const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
 
-        const existingT = await query('SELECT id, text FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
+        let fullText = '';
+        let confidence = 0;
+        let structuredSegments: Array<{ role: 'agent' | 'client'; text: string; ts: number }> | null = null;
+
+        if (DEEPGRAM_KEY) {
+          const diarized = await transcribeAudioWithDiarization(recordingUrl, 'fr');
+          fullText = diarized.fullText;
+          confidence = diarized.confidence;
+
+          if (diarized.segments.length > 0) {
+            const clientSpeaker = diarized.segments[0].speaker;
+
+            structuredSegments = diarized.segments.map((seg) => ({
+              role: seg.speaker === clientSpeaker ? 'client' : 'agent',
+              text: seg.text,
+              ts: Math.round(seg.start * 1000),
+            }));
+          }
+        } else {
+          const plain = await transcribeAudio(recordingUrl, 'fr');
+          fullText = plain.text;
+          confidence = plain.confidence;
+        }
+
+        const existingT = await query('SELECT id FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
         if (existingT.rows.length === 0) {
           await query(
             `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
-            [callId, transcription.text, transcription.language, transcription.confidence]
+            [callId, fullText, 'fr', confidence]
           );
         } else {
-          await query('UPDATE transcriptions SET text = $1 WHERE id = $2', [transcription.text, existingT.rows[0].id]);
+          await query('UPDATE transcriptions SET text = $1 WHERE id = $2', [fullText, existingT.rows[0].id]);
+        }
+
+        if (structuredSegments) {
+          await query('UPDATE calls SET live_transcript = $1 WHERE id = $2', [JSON.stringify(structuredSegments), callId]);
         }
 
         const [summary, intentData] = await Promise.all([
-          summarizeCall(transcription.text),
-          detectIntent(transcription.text),
+          summarizeCall(fullText),
+          detectIntent(fullText),
         ]);
 
         const existingS = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
@@ -1296,7 +1324,7 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
 
         await query('UPDATE calls SET live_summary = $1 WHERE id = $2', [summary, callId]);
 
-        logger.info('Outbound recording transcribed and summarized', { callId });
+        logger.info('Outbound recording transcribed and summarized', { callId, diarized: !!structuredSegments });
       } catch (err: any) {
         logger.error('Outbound recording processing error', { callId, error: err.message });
       }
