@@ -1281,8 +1281,12 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
 
         if (existingT.rows.length > 0 && existingT.rows[0].segments) {
           // Transcription with segments already exists from WebSocket flush - don't overwrite
+          // Note: JSONB columns are auto-parsed by pg into JS objects, handle both cases
+          const rawSegments = existingT.rows[0].segments;
           try {
-            transcriptionSegments = JSON.parse(existingT.rows[0].segments);
+            transcriptionSegments = Array.isArray(rawSegments)
+              ? rawSegments
+              : JSON.parse(rawSegments);
             if (Array.isArray(transcriptionSegments) && transcriptionSegments.length > 0) {
               hasExistingSegments = true;
               transcriptionText = existingT.rows[0].text || '';
@@ -1338,8 +1342,14 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
               [callId, transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null]
             );
           } else {
-            await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE id = $5',
-              [transcriptionText, transcriptionLanguage, transcriptionConfidence, transcriptionSegments ? JSON.stringify(transcriptionSegments) : null, existingT.rows[0].id]);
+            // Only update segments if we have new ones; never overwrite existing segments with null
+            if (transcriptionSegments) {
+              await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE id = $5',
+                [transcriptionText, transcriptionLanguage, transcriptionConfidence, JSON.stringify(transcriptionSegments), existingT.rows[0].id]);
+            } else {
+              await query('UPDATE transcriptions SET text = $1, language = $2, confidence = $3 WHERE id = $4',
+                [transcriptionText, transcriptionLanguage, transcriptionConfidence, existingT.rows[0].id]);
+            }
           }
         }
 

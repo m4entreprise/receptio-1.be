@@ -1326,8 +1326,9 @@ async function appendTranscriptLine(callId: string, speaker: 'Client' | 'Agent',
   let segments: Array<{ role: 'client' | 'agent'; text: string; ts?: number }> = [];
   const existingSegments = transcriptionResult.rows[0].segments;
   if (existingSegments) {
+    // JSONB columns are auto-parsed by pg into JS objects, handle both cases
     try {
-      segments = JSON.parse(existingSegments);
+      segments = Array.isArray(existingSegments) ? existingSegments : JSON.parse(existingSegments);
     } catch { /* ignore */ }
   }
   segments.push(newSegment);
