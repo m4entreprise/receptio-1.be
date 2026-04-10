@@ -1,0 +1,495 @@
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import axios from 'axios';
+import {
+  Phone,
+  PhoneOff,
+  PhoneForwarded,
+  Loader2,
+  Sparkles,
+  UserCheck,
+  MicOff,
+  Clock,
+  FileText,
+  ArrowLeft,
+} from 'lucide-react';
+import Layout from '../components/Layout';
+import { getStatusDisplay, isTerminalStatus } from '../utils/callStatus';
+
+interface StaffMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone_number: string;
+  role?: string;
+  enabled: boolean;
+}
+
+interface OutboundCallRecord {
+  id: string;
+  destination_number: string;
+  status: string;
+  created_at: string;
+  ended_at?: string | null;
+  duration?: number | null;
+  live_transcript?: string | null;
+  live_summary?: string | null;
+  transcription_text?: string | null;
+  ai_summary?: string | null;
+  staff_first_name?: string | null;
+  staff_last_name?: string | null;
+  metadata?: Record<string, any>;
+}
+
+interface CallEvent {
+  id: string;
+  event_type: string;
+  data: Record<string, any>;
+  timestamp: string;
+}
+
+const ACTIVE_STATUSES = new Set(['initiated', 'ringing', 'answered', 'in-progress']);
+
+// ---------------------------------------------------------------------------
+// Initiation panel — shown when no callId in URL
+// ---------------------------------------------------------------------------
+function InitiatePanel({ staff, onCallStarted }: { staff: StaffMember[]; onCallStarted: (id: string) => void }) {
+  const [destinationNumber, setDestinationNumber] = useState('');
+  const [staffId, setStaffId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (staff.length > 0 && !staffId) {
+      setStaffId(staff[0].id);
+    }
+  }, [staff]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!destinationNumber.trim() || !staffId) return;
+    setError('');
+    setLoading(true);
+    try {
+      const res = await axios.post('/api/outbound-calls', { destinationNumber: destinationNumber.trim(), staffId });
+      onCallStarted(res.data.callId);
+    } catch (err: any) {
+      setError(err?.response?.data?.error || 'Erreur lors de l\'initiation de l\'appel.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-xl">
+      <div className="overflow-hidden rounded-[28px] border border-[#344453]/15 bg-[#141F28] p-6 text-white shadow-[0_24px_60px_rgba(20,31,40,0.18)] sm:p-8">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: 'var(--font-mono)' }}>
+          <Phone className="h-3.5 w-3.5" />
+          Appel sortant
+        </div>
+        <h1 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-white sm:text-3xl" style={{ fontFamily: 'var(--font-title)' }}>
+          Passer un appel
+        </h1>
+        <p className="mt-2 text-sm leading-7 text-white/55">
+          Entrez le numéro à appeler et choisissez le membre de l'équipe qui sera mis en relation.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="mt-5 space-y-4 rounded-[28px] border border-[#344453]/10 bg-white p-6 shadow-sm sm:p-7">
+        <div>
+          <label className="block text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 mb-2" style={{ fontFamily: 'var(--font-mono)' }}>
+            Numéro de destination
+          </label>
+          <input
+            type="tel"
+            value={destinationNumber}
+            onChange={(e) => setDestinationNumber(e.target.value)}
+            placeholder="+32 470 12 34 56"
+            required
+            className="w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-base text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/30 focus:bg-white"
+          />
+        </div>
+
+        <div>
+          <label className="block text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 mb-2" style={{ fontFamily: 'var(--font-mono)' }}>
+            Agent mis en relation
+          </label>
+          {staff.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-[#344453]/15 px-4 py-3 text-sm text-[#344453]/55">
+              Aucun agent disponible — ajoutez du staff dans l'onglet Équipe.
+            </p>
+          ) : (
+            <select
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              required
+              className="w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition focus:border-[#344453]/30 focus:bg-white"
+            >
+              <option value="">— Choisir un agent —</option>
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.first_name} {s.last_name} {s.role ? `(${s.role})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {error && (
+          <p className="rounded-2xl bg-[#D94052]/8 px-4 py-3 text-sm font-medium text-[#D94052]">{error}</p>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading || !destinationNumber.trim() || !staffId}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#C7601D] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#a84e17] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
+          {loading ? 'Initiation en cours…' : 'Lancer l\'appel'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Active call view — live status, transcript, summary, transfer
+// ---------------------------------------------------------------------------
+function ActiveCallView({
+  callId,
+  staff,
+  onBack,
+}: {
+  callId: string;
+  staff: StaffMember[];
+  onBack: () => void;
+}) {
+  const [call, setCall] = useState<OutboundCallRecord | null>(null);
+  const [events, setEvents] = useState<CallEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [hangingUp, setHangingUp] = useState(false);
+  const [transferStaffId, setTransferStaffId] = useState('');
+  const [transferring, setTransferring] = useState(false);
+  const [transferResult, setTransferResult] = useState('');
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchCall = async (showLoader = false) => {
+    if (showLoader) setLoading(true);
+    try {
+      const res = await axios.get(`/api/outbound-calls/${callId}`);
+      setCall(res.data.call);
+      setEvents(res.data.events || []);
+    } catch {
+    } finally {
+      if (showLoader) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCall(true);
+    intervalRef.current = setInterval(() => fetchCall(), 3000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [callId]);
+
+  useEffect(() => {
+    if (call && isTerminalStatus(call.status) && intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, [call?.status]);
+
+  const handleHangup = async () => {
+    setHangingUp(true);
+    try {
+      await axios.post(`/api/outbound-calls/${callId}/hangup`);
+      await fetchCall();
+    } catch {
+    } finally {
+      setHangingUp(false);
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!transferStaffId) return;
+    setTransferring(true);
+    setTransferResult('');
+    try {
+      await axios.post(`/api/outbound-calls/${callId}/transfer`, { staffId: transferStaffId });
+      setTransferResult('Transfert effectué ✓');
+      await fetchCall();
+    } catch (err: any) {
+      setTransferResult(err?.response?.data?.error || 'Erreur lors du transfert');
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const formatDuration = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  const elapsedSecs = call?.duration ?? (call ? Math.floor((Date.now() - new Date(call.created_at).getTime()) / 1000) : 0);
+  const isActive = call ? ACTIVE_STATUSES.has(call.status) : false;
+  const liveTranscript = call?.live_transcript || call?.transcription_text || '';
+  const liveSummary = call?.live_summary || call?.ai_summary || '';
+
+  const statusEventLabel: Record<string, string> = {
+    'outbound.initiated': 'Appel initié',
+    'outbound.answered': 'Décroché — agent connecté',
+    'outbound.transferred': 'Transféré',
+    'outbound.hangup_by_agent': 'Raccroché par l\'agent',
+    'outbound.completed': 'Terminé',
+    'outbound.no-answer': 'Pas de réponse',
+    'outbound.busy': 'Occupé',
+    'outbound.failed': 'Échec',
+    'outbound.voicemail_sent': 'Message vocal envoyé',
+    'outbound.recording.completed': 'Enregistrement disponible',
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-[50vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-12 w-12 animate-spin rounded-full border-2 border-[#344453]/10 border-t-[#344453]" />
+          <p className="text-sm font-medium text-[#344453]/50">Chargement de l'appel…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!call) {
+    return (
+      <div className="rounded-[28px] border border-[#D94052]/20 bg-white p-8 text-center shadow-sm">
+        <p className="text-base font-medium text-[#D94052]">Appel introuvable.</p>
+        <button onClick={onBack} className="mt-4 inline-flex items-center gap-2 text-sm text-[#344453] underline">
+          <ArrowLeft className="h-4 w-4" /> Retour
+        </button>
+      </div>
+    );
+  }
+
+  const statusDisplay = getStatusDisplay(call.status);
+
+  return (
+    <div className="space-y-5">
+      {/* Header card */}
+      <div className="overflow-hidden rounded-[28px] border border-[#344453]/15 bg-[#141F28] p-5 text-white shadow-[0_24px_60px_rgba(20,31,40,0.18)] sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: 'var(--font-mono)' }}>
+              {isActive ? (
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#C7601D] opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#C7601D]" />
+                </span>
+              ) : (
+                <Phone className="h-3.5 w-3.5" />
+              )}
+              {isActive ? 'En cours' : 'Appel terminé'}
+            </div>
+            <p className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-white sm:text-3xl" style={{ fontFamily: 'var(--font-title)' }}>
+              {call.destination_number}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-white/55">
+              {call.staff_first_name && (
+                <span>Agent : {call.staff_first_name} {call.staff_last_name}</span>
+              )}
+              <span className="flex items-center gap-1">
+                <Clock className="h-3.5 w-3.5" />
+                {isActive ? `${formatDuration(elapsedSecs)} écoulées` : call.duration ? formatDuration(call.duration) : '—'}
+              </span>
+            </div>
+          </div>
+          <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusDisplay.color}`}>
+            {statusDisplay.label}
+          </span>
+        </div>
+
+        {isActive && (
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button
+              onClick={handleHangup}
+              disabled={hangingUp}
+              className="inline-flex items-center gap-2 rounded-full bg-[#D94052] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#b73040] disabled:opacity-40"
+            >
+              {hangingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneOff className="h-4 w-4" />}
+              Raccrocher
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Live transcript */}
+      <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
+            <MicOff className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-[#141F28]">Transcription en direct</p>
+            <p className="text-xs text-[#344453]/45">{isActive ? 'Mise à jour automatique toutes les 3 s' : 'Transcription finale'}</p>
+          </div>
+        </div>
+        {liveTranscript ? (
+          <p className="rounded-2xl bg-[#F8F9FB] px-4 py-4 text-sm leading-7 text-[#344453]/75 whitespace-pre-wrap">
+            {liveTranscript}
+          </p>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[#344453]/12 px-4 py-6 text-center">
+            <p className="text-sm text-[#344453]/40">
+              {isActive ? "En attente de parole…" : "Aucune transcription disponible."}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Live summary */}
+      <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#C7601D]/10 text-[#C7601D]">
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-[#141F28]">Résumé IA</p>
+            <p className="text-xs text-[#344453]/45">Généré automatiquement en fin d'appel</p>
+          </div>
+        </div>
+        {liveSummary ? (
+          <p className="rounded-2xl bg-[#C7601D]/5 px-4 py-4 text-sm leading-7 text-[#344453]/75">
+            {liveSummary}
+          </p>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[#344453]/12 px-4 py-6 text-center">
+            <p className="text-sm text-[#344453]/40">
+              {isActive ? "Résumé disponible après l'appel." : 'Résumé non disponible.'}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Transfer panel — only when active */}
+      {isActive && staff.length > 0 && (
+        <div className="rounded-[28px] border border-[#E6A817]/25 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#E6A817]/15 text-[#E6A817]">
+              <PhoneForwarded className="h-4 w-4" />
+            </div>
+            <p className="text-sm font-semibold text-[#141F28]">Transférer l'appel</p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <label className="block text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 mb-1.5" style={{ fontFamily: 'var(--font-mono)' }}>
+                Nouvel agent
+              </label>
+              <select
+                value={transferStaffId}
+                onChange={(e) => setTransferStaffId(e.target.value)}
+                className="w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-3 py-2.5 text-sm text-[#141F28] outline-none focus:border-[#344453]/25"
+              >
+                <option value="">— Choisir un agent —</option>
+                {staff.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.first_name} {s.last_name} {s.role ? `(${s.role})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={handleTransfer}
+              disabled={!transferStaffId || transferring}
+              className="inline-flex items-center gap-2 rounded-full bg-[#344453] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#2a3642] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {transferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+              Transférer
+            </button>
+          </div>
+          {transferResult && (
+            <p className={`mt-3 text-sm font-medium ${transferResult.includes('✓') ? 'text-[#2D9D78]' : 'text-[#D94052]'}`}>
+              {transferResult}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Event timeline */}
+      {events.length > 0 && (
+        <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
+              <FileText className="h-4 w-4" />
+            </div>
+            <p className="text-sm font-semibold text-[#141F28]">Chronologie</p>
+          </div>
+          <ol className="relative space-y-3 border-l border-[#344453]/10 pl-4">
+            {events.map((ev) => (
+              <li key={ev.id} className="relative">
+                <div className="absolute -left-[17px] top-[6px] h-2.5 w-2.5 rounded-full bg-[#344453]/25" />
+                <p className="text-xs text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
+                  {new Date(ev.timestamp).toLocaleTimeString('fr-BE')}
+                </p>
+                <p className="text-sm font-medium text-[#141F28]">
+                  {statusEventLabel[ev.event_type] || ev.event_type}
+                </p>
+                {ev.data?.staffName && (
+                  <p className="text-xs text-[#344453]/55">→ {ev.data.staffName}</p>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      <button
+        onClick={onBack}
+        className="inline-flex items-center gap-2 text-sm font-medium text-[#344453]/60 transition hover:text-[#344453]"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Nouveau appel sortant
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page root — routes between initiation and active call view
+// ---------------------------------------------------------------------------
+export default function OutboundCall() {
+  const { id: urlCallId } = useParams<{ id?: string }>();
+  const navigate = useNavigate();
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [activeCallId, setActiveCallId] = useState<string | null>(urlCallId ?? null);
+
+  useEffect(() => {
+    axios.get('/api/staff').then((res) => {
+      setStaff((res.data.staff || []).filter((s: StaffMember) => s.enabled));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (urlCallId) setActiveCallId(urlCallId);
+  }, [urlCallId]);
+
+  const handleCallStarted = (id: string) => {
+    setActiveCallId(id);
+    navigate(`/outbound/${id}`, { replace: true });
+  };
+
+  const handleBack = () => {
+    setActiveCallId(null);
+    navigate('/outbound', { replace: true });
+  };
+
+  return (
+    <Layout>
+      <div className="space-y-5 sm:space-y-6">
+        {activeCallId ? (
+          <ActiveCallView callId={activeCallId} staff={staff} onBack={handleBack} />
+        ) : (
+          <InitiatePanel staff={staff} onCallStarted={handleCallStarted} />
+        )}
+      </div>
+    </Layout>
+  );
+}

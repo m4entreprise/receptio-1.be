@@ -1105,4 +1105,206 @@ async function handleRecordingSaved(payload: any) {
   logger.info('Recording saved', { callSid: call_control_id, recordingUrl });
 }
 
+// ---------------------------------------------------------------------------
+// Outbound call: Twilio calls the destination, when answered we bridge to staff
+// GET/POST /api/webhooks/twilio/outbound-answer
+// ---------------------------------------------------------------------------
+router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
+  try {
+    const callId = String(req.query.callId || '');
+    const staffPhone = String(req.query.staffPhone || '');
+    const companyId = String(req.query.companyId || '');
+    const callStatus = String(req.body?.CallStatus || req.query.callStatus || '');
+
+    logger.info('Outbound answer webhook', { callId, callStatus, staffPhone });
+
+    if (!staffPhone) {
+      res.type('text/xml').send(buildTwiml('<Say language="fr-FR">Une erreur de configuration est survenue.</Say><Hangup />'));
+      return;
+    }
+
+    if (callId) {
+      await query(
+        `UPDATE calls SET status = 'answered' WHERE id = $1 AND direction = 'outbound'`,
+        [callId]
+      ).catch(() => {});
+
+      await query(
+        `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+        [callId, 'outbound.answered', { staffPhone, callStatus }]
+      ).catch(() => {});
+    }
+
+    const baseUrl = getBaseUrl(req);
+    const recordingCompleteUrl = joinUrl(baseUrl, `/api/webhooks/twilio/outbound-recording?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
+
+    const twiml = buildTwiml(
+      `<Dial record="record-from-answer" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" timeout="30" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
+    );
+    res.type('text/xml').send(twiml);
+  } catch (error: any) {
+    logger.error('Outbound answer webhook error', { error: error.message });
+    res.type('text/xml').send(buildTwiml('<Hangup />'));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Outbound call: status callback (ringing, no-answer, completed, etc.)
+// POST /api/webhooks/twilio/outbound-status
+// ---------------------------------------------------------------------------
+router.post('/twilio/outbound-status', async (req: Request, res: Response) => {
+  try {
+    const callId = String(req.query.callId || '');
+    const callStatus = String(req.body?.CallStatus || '');
+    const callDuration = parseInt(req.body?.CallDuration || '0', 10);
+
+    logger.info('Outbound status callback', { callId, callStatus, callDuration });
+
+    if (!callId) {
+      res.sendStatus(200);
+      return;
+    }
+
+    const terminalStatuses = ['completed', 'no-answer', 'busy', 'failed', 'canceled'];
+
+    if (callStatus === 'no-answer' || callStatus === 'busy' || callStatus === 'failed') {
+      await query(
+        `UPDATE calls SET status = 'missed', duration = $1, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $2`,
+        [callDuration, callId]
+      );
+
+      await query(
+        `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+        [callId, `outbound.${callStatus}`, { callDuration }]
+      );
+
+      const callRow = await query(
+        `SELECT c.destination_number, c.company_id, co.settings, co.name AS company_name
+         FROM calls c LEFT JOIN companies co ON co.id = c.company_id WHERE c.id = $1`,
+        [callId]
+      );
+
+      if (callRow.rows.length > 0) {
+        const { destination_number: destNumber, settings, company_name: companyName } = callRow.rows[0];
+        const voicemailText = settings?.outboundVoicemailText ||
+          `Bonjour, vous avez manqué un appel de ${companyName}. N'hésitez pas à nous rappeler.`;
+
+        const voicemailTwiml = buildTwiml(
+          `<Say language="fr-FR">${escapeXml(voicemailText)}</Say><Hangup />`
+        );
+
+        const accountSid = process.env.TWILIO_ACCOUNT_SID;
+        const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+        const companyRow = await query('SELECT phone_number FROM companies WHERE id = $1', [callRow.rows[0].company_id]);
+        const fromNumber = companyRow.rows[0]?.phone_number;
+
+        if (accountSid && authToken && fromNumber && destNumber) {
+          try {
+            const client = require('twilio')(accountSid, authToken);
+            await client.calls.create({
+              to: destNumber,
+              from: fromNumber,
+              twiml: voicemailTwiml,
+            });
+            await query(
+              `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+              [callId, 'outbound.voicemail_sent', { voicemailText }]
+            );
+            logger.info('Outbound voicemail sent', { callId, destNumber });
+          } catch (vmErr: any) {
+            logger.error('Outbound voicemail send error', { callId, error: vmErr.message });
+          }
+        }
+      }
+
+      res.sendStatus(200);
+      return;
+    }
+
+    if (terminalStatuses.includes(callStatus)) {
+      await query(
+        `UPDATE calls SET status = 'completed', duration = COALESCE(NULLIF($1, 0), duration), ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $2 AND direction = 'outbound'`,
+        [callDuration, callId]
+      );
+    }
+
+    res.sendStatus(200);
+  } catch (error: any) {
+    logger.error('Outbound status callback error', { error: error.message });
+    res.sendStatus(200);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Outbound call: recording complete → transcribe + summarize
+// POST /api/webhooks/twilio/outbound-recording
+// ---------------------------------------------------------------------------
+router.post('/twilio/outbound-recording', async (req: Request, res: Response) => {
+  try {
+    const callId = String(req.query.callId || '');
+    const rawRecordingUrl = req.body?.RecordingUrl;
+    const recordingDuration = Number(req.body?.RecordingDuration || 0);
+
+    if (!callId || !rawRecordingUrl) {
+      res.sendStatus(200);
+      return;
+    }
+
+    const recordingUrl = String(rawRecordingUrl).endsWith('.mp3') ? String(rawRecordingUrl) : `${String(rawRecordingUrl)}.mp3`;
+
+    await query(
+      `UPDATE calls SET recording_url = $1, duration = COALESCE(NULLIF($2, 0), duration), status = CASE WHEN status NOT IN ('missed', 'transferred') THEN 'completed' ELSE status END, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $3`,
+      [recordingUrl, recordingDuration, callId]
+    );
+
+    await query(
+      `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+      [callId, 'outbound.recording.completed', { recordingUrl, recordingDuration }]
+    );
+
+    setImmediate(async () => {
+      try {
+        const transcription = await transcribeAudio(recordingUrl, 'fr');
+
+        const existingT = await query('SELECT id, text FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
+        if (existingT.rows.length === 0) {
+          await query(
+            `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
+            [callId, transcription.text, transcription.language, transcription.confidence]
+          );
+        } else {
+          await query('UPDATE transcriptions SET text = $1 WHERE id = $2', [transcription.text, existingT.rows[0].id]);
+        }
+
+        const [summary, intentData] = await Promise.all([
+          summarizeCall(transcription.text),
+          detectIntent(transcription.text),
+        ]);
+
+        const existingS = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
+        if (existingS.rows.length === 0) {
+          await query(
+            `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
+            [callId, summary, intentData.intent, JSON.stringify([])]
+          );
+        } else {
+          await query('UPDATE call_summaries SET summary = $1, intent = $2 WHERE id = $3', [summary, intentData.intent, existingS.rows[0].id]);
+        }
+
+        await query('UPDATE calls SET live_summary = $1 WHERE id = $2', [summary, callId]);
+
+        logger.info('Outbound recording transcribed and summarized', { callId });
+      } catch (err: any) {
+        logger.error('Outbound recording processing error', { callId, error: err.message });
+      }
+    });
+
+    res.sendStatus(200);
+  } catch (error: any) {
+    logger.error('Outbound recording webhook error', { error: error.message });
+    res.sendStatus(200);
+  }
+});
+
 export default router;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay, isTerminalStatus } from '../utils/callStatus';
 import { Link } from 'react-router-dom';
-import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck, X } from 'lucide-react';
+import { Phone, Clock, CheckCircle, AlertCircle, ArrowRight, CalendarClock, Sparkles, PhoneForwarded, Loader2, UserCheck, X, PhoneOutgoing } from 'lucide-react';
 import axios from 'axios';
 import Layout from '../components/Layout';
 
@@ -206,6 +206,15 @@ export default function Dashboard() {
               <p className="max-w-2xl text-sm leading-7 text-white/60 sm:text-base">
                 Retrouvez l’essentiel des appels entrants, leur statut et les derniers échanges dans une interface compacte, claire et pensée d’abord pour petit écran.
               </p>
+              <div className="pt-2">
+                <Link
+                  to="/outbound"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#C7601D] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#a84e17]"
+                >
+                  <PhoneOutgoing className="h-4 w-4" />
+                  Passer un appel sortant
+                </Link>
+              </div>
             </div>
           </div>
 

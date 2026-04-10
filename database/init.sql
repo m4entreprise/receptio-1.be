@@ -236,6 +236,16 @@ ALTER TABLE calls ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP WITH TIME ZONE DE
 
 CREATE INDEX IF NOT EXISTS idx_calls_queue_status ON calls(company_id, queue_status) WHERE queue_status IS NOT NULL;
 
+-- Outbound calls: extra columns on calls table
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS initiated_by_staff_id UUID REFERENCES staff(id) ON DELETE SET NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS destination_number VARCHAR(50) DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS live_transcript TEXT DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS live_summary TEXT DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS outbound_call_sid VARCHAR(255) DEFAULT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_calls_direction ON calls(company_id, direction);
+CREATE INDEX IF NOT EXISTS idx_calls_initiated_by ON calls(initiated_by_staff_id) WHERE initiated_by_staff_id IS NOT NULL;
+
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES
 ('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}')

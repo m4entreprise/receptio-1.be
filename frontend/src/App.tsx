@@ -10,6 +10,7 @@ import MonitoringBbis from './pages/MonitoringBbis';
 import SettingsAgentIA from './pages/SettingsAgentIA';
 import SettingsOfferB from './pages/SettingsOfferB';
 import Staff from './pages/Staff';
+import OutboundCall from './pages/OutboundCall';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -33,6 +34,8 @@ function App() {
           <Route path="/monitoring/bbis" element={<PrivateRoute><MonitoringBbis /></PrivateRoute>} />
           <Route path="/settings/agent-ia" element={<PrivateRoute><SettingsAgentIA /></PrivateRoute>} />
           <Route path="/settings" element={<PrivateRoute><SettingsOfferB /></PrivateRoute>} />
+          <Route path="/outbound" element={<PrivateRoute><OutboundCall /></PrivateRoute>} />
+          <Route path="/outbound/:id" element={<PrivateRoute><OutboundCall /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
