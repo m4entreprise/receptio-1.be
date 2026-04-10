@@ -362,16 +362,13 @@ function ActiveCallView({
         )}
       </div>
 
-      {/* Live transcript */}
+      {/* Transcription */}
       <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
             <MicOff className="h-4 w-4" />
           </div>
-          <div>
-            <p className="text-sm font-semibold text-[#141F28]">Transcription en direct</p>
-            <p className="text-xs text-[#344453]/45">{isActive ? 'Mise à jour automatique toutes les 3 s' : 'Transcription finale'}</p>
-          </div>
+          <p className="text-sm font-semibold text-[#141F28]">Transcription</p>
         </div>
         {transcriptSegments ? (
           <div className="space-y-2">
@@ -396,35 +393,48 @@ function ActiveCallView({
           <p className="rounded-2xl bg-[#F8F9FB] px-4 py-4 text-sm leading-7 text-[#344453]/75 whitespace-pre-wrap">
             {transcriptFallbackText}
           </p>
+        ) : isActive ? (
+          <div className="space-y-3 animate-pulse">
+            <div className="flex justify-start">
+              <div className="h-10 w-2/3 rounded-2xl bg-[#344453]/8" />
+            </div>
+            <div className="flex justify-end">
+              <div className="h-10 w-1/2 rounded-2xl bg-[#344453]/12" />
+            </div>
+            <div className="flex justify-start">
+              <div className="h-10 w-3/5 rounded-2xl bg-[#344453]/8" />
+            </div>
+            <p className="text-center text-xs text-[#344453]/35 pt-1">Disponible en fin d'appel</p>
+          </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-[#344453]/12 px-4 py-6 text-center">
-            <p className="text-sm text-[#344453]/40">
-              {isActive ? "En attente de parole…" : "Aucune transcription disponible."}
-            </p>
+            <p className="text-sm text-[#344453]/40">Aucune transcription disponible.</p>
           </div>
         )}
       </div>
 
-      {/* Live summary */}
+      {/* Résumé */}
       <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#C7601D]/10 text-[#C7601D]">
             <Sparkles className="h-4 w-4" />
           </div>
-          <div>
-            <p className="text-sm font-semibold text-[#141F28]">Résumé IA</p>
-            <p className="text-xs text-[#344453]/45">Généré automatiquement en fin d'appel</p>
-          </div>
+          <p className="text-sm font-semibold text-[#141F28]">Résumé</p>
         </div>
         {liveSummary ? (
           <p className="rounded-2xl bg-[#C7601D]/5 px-4 py-4 text-sm leading-7 text-[#344453]/75">
             {liveSummary}
           </p>
+        ) : isActive ? (
+          <div className="space-y-2.5 animate-pulse">
+            <div className="h-3.5 w-full rounded-full bg-[#C7601D]/10" />
+            <div className="h-3.5 w-4/5 rounded-full bg-[#C7601D]/10" />
+            <div className="h-3.5 w-2/3 rounded-full bg-[#C7601D]/10" />
+            <p className="text-center text-xs text-[#344453]/35 pt-1">Disponible en fin d'appel</p>
+          </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-[#344453]/12 px-4 py-6 text-center">
-            <p className="text-sm text-[#344453]/40">
-              {isActive ? "Résumé disponible après l'appel." : 'Résumé non disponible.'}
-            </p>
+            <p className="text-sm text-[#344453]/40">Résumé non disponible.</p>
           </div>
         )}
       </div>
@@ -476,27 +486,43 @@ function ActiveCallView({
       {/* Event timeline */}
       {events.length > 0 && (
         <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3 mb-5">
             <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
               <FileText className="h-4 w-4" />
             </div>
             <p className="text-sm font-semibold text-[#141F28]">Chronologie</p>
           </div>
-          <ol className="relative space-y-3 border-l border-[#344453]/10 pl-4">
-            {events.map((ev) => (
-              <li key={ev.id} className="relative">
-                <div className="absolute -left-[17px] top-[6px] h-2.5 w-2.5 rounded-full bg-[#344453]/25" />
-                <p className="text-xs text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
-                  {new Date(ev.timestamp).toLocaleTimeString('fr-BE')}
-                </p>
-                <p className="text-sm font-medium text-[#141F28]">
-                  {statusEventLabel[ev.event_type] || ev.event_type}
-                </p>
-                {ev.data?.staffName && (
-                  <p className="text-xs text-[#344453]/55">→ {ev.data.staffName}</p>
-                )}
-              </li>
-            ))}
+          <ol className="relative space-y-0 border-l-2 border-[#344453]/8 pl-5">
+            {events.map((ev, idx) => {
+              const isFirst = idx === 0;
+              const isLast = idx === events.length - 1;
+              const isError = ['outbound.no-answer', 'outbound.busy', 'outbound.failed'].includes(ev.event_type);
+              const isSuccess = ['outbound.completed', 'outbound.answered'].includes(ev.event_type);
+              const dotColor = isError
+                ? 'bg-[#D94052]'
+                : isSuccess
+                ? 'bg-[#2D9D78]'
+                : isFirst
+                ? 'bg-[#C7601D]'
+                : 'bg-[#344453]/30';
+              const ts = new Date(ev.timestamp);
+              return (
+                <li key={ev.id} className={`relative pb-5 ${isLast ? 'pb-0' : ''}`}>
+                  <div className={`absolute -left-[21px] top-[3px] h-3 w-3 rounded-full border-2 border-white ${dotColor}`} />
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                    <p className="text-sm font-semibold text-[#141F28]">
+                      {statusEventLabel[ev.event_type] || ev.event_type}
+                    </p>
+                    <p className="text-[11px] text-[#344453]/40 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
+                      {ts.toLocaleDateString('fr-BE', { day: '2-digit', month: '2-digit' })} · {ts.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </p>
+                  </div>
+                  {ev.data?.staffName && (
+                    <p className="mt-0.5 text-xs text-[#344453]/55">→ {ev.data.staffName}</p>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}

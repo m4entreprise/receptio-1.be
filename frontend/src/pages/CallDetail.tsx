@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
-import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, ChevronDown } from 'lucide-react';
+import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, PhoneIncoming, ChevronDown } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -377,6 +377,14 @@ export default function CallDetail() {
                   getStatusDisplay(call.status).color
                 }`}>
                   {getStatusDisplay(call.status).label}
+                </span>
+              </div>
+
+              <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
+                <p className="text-sm text-[#344453]/50">Direction</p>
+                <span className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${call.direction === 'outbound' ? 'bg-[#C7601D]/12 text-[#C7601D]' : 'bg-[#344453]/10 text-[#344453]'}`}>
+                  {call.direction === 'outbound' ? <PhoneOutgoing className="h-3.5 w-3.5" /> : <PhoneIncoming className="h-3.5 w-3.5" />}
+                  {call.direction === 'outbound' ? 'Sortant' : 'Entrant'}
                 </span>
               </div>
 
