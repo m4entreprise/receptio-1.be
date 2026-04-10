@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(grep -r \"OFFER.*STREAMING\\\\|media.*stream\" /c/Users/filog/Documents/GitHub/receptio-1.be/backend/.env*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "WebSearch"
     ]
   }
 }

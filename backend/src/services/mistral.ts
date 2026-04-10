@@ -156,7 +156,7 @@ export async function generateResponse(
   }
 }
 
-const MISTRAL_DIARIZATION_MODEL = 'voxtral-mini-2602';
+const MISTRAL_DIARIZATION_MODEL = 'voxtral-mini-latest';
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 
@@ -198,6 +198,7 @@ export async function transcribeAudioUrlWithDiarization(audioUrl: string, langua
     formData.append('language', language);
     formData.append('diarize', 'true');
     formData.append('timestamp_granularities', 'segment');
+    formData.append('prompt', 'Appel téléphonique professionnel en français entre un client et un agent de réception. Transcription verbatim fidèle, y compris hésitations.');
 
     const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
       method: 'POST',
