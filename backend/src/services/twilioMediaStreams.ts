@@ -136,9 +136,11 @@ export function attachTwilioMediaStreamsServer(server: HttpServer) {
 // Outbound transcription-only WebSocket handler
 // Receives Twilio Media Streams audio, runs STT, persists live_transcript
 // ---------------------------------------------------------------------------
-const OUTBOUND_FLUSH_INTERVAL_MS = 3000;
-const OUTBOUND_MIN_SPEECH_MS = 200;
-const OUTBOUND_SILENCE_THRESHOLD_MS = 600;
+const OUTBOUND_FLUSH_INTERVAL_MS = 2000;
+const OUTBOUND_MIN_SPEECH_MS = 150;
+const OUTBOUND_SILENCE_THRESHOLD_MS = 500;
+const OUTBOUND_ENERGY_THRESHOLD = 200;
+const OUTBOUND_MAX_UTTERANCE_MS = 8000;
 
 interface OutboundTrackState {
   pendingAudioChunks: Buffer[];
@@ -146,7 +148,6 @@ interface OutboundTrackState {
   speechDurationMs: number;
   silenceDurationMs: number;
   pendingProcessScheduled: boolean;
-  processingUtterance: boolean;
 }
 
 interface OutboundTranscriptSegment {
@@ -171,7 +172,6 @@ function makeTrackState(): OutboundTrackState {
     speechDurationMs: 0,
     silenceDurationMs: 0,
     pendingProcessScheduled: false,
-    processingUtterance: false,
   };
 }
 
@@ -253,13 +253,18 @@ async function handleOutboundStreamMessage(data: RawData, state: OutboundStreamS
 
     const ts = state.tracks[track];
     const frameEnergy = computeULawFrameEnergy(audioBuffer);
-    const hasSpeech = frameEnergy >= ENERGY_THRESHOLD;
+    const hasSpeech = frameEnergy >= OUTBOUND_ENERGY_THRESHOLD;
 
     if (hasSpeech) {
       ts.speechDetected = true;
       ts.speechDurationMs += ULaw_FRAME_DURATION_MS;
       ts.silenceDurationMs = 0;
       ts.pendingAudioChunks.push(audioBuffer);
+
+      if (ts.speechDurationMs >= OUTBOUND_MAX_UTTERANCE_MS && !ts.pendingProcessScheduled) {
+        ts.pendingProcessScheduled = true;
+        void processOutboundTrackUtterance(state, track);
+      }
       return;
     }
 
@@ -275,9 +280,7 @@ async function handleOutboundStreamMessage(data: RawData, state: OutboundStreamS
       && !ts.pendingProcessScheduled
     ) {
       ts.pendingProcessScheduled = true;
-      if (!ts.processingUtterance) {
-        void processOutboundTrackUtterance(state, track);
-      }
+      void processOutboundTrackUtterance(state, track);
     }
     return;
   }
@@ -294,7 +297,7 @@ async function handleOutboundStreamMessage(data: RawData, state: OutboundStreamS
 
 async function processOutboundTrackUtterance(state: OutboundStreamState, track: string) {
   const ts = state.tracks[track];
-  if (!ts || ts.processingUtterance || ts.pendingAudioChunks.length === 0) {
+  if (!ts || ts.pendingAudioChunks.length === 0) {
     if (ts) ts.pendingProcessScheduled = false;
     return;
   }
@@ -302,7 +305,6 @@ async function processOutboundTrackUtterance(state: OutboundStreamState, track: 
   const utteranceBuffer = Buffer.concat(ts.pendingAudioChunks);
   ts.pendingAudioChunks = [];
   ts.pendingProcessScheduled = false;
-  ts.processingUtterance = true;
   ts.silenceDurationMs = 0;
   ts.speechDurationMs = 0;
   ts.speechDetected = false;
@@ -322,11 +324,10 @@ async function processOutboundTrackUtterance(state: OutboundStreamState, track: 
       const role: 'client' | 'agent' = track === 'outbound' ? 'agent' : 'client';
       state.segments.push({ role, text, ts: Date.now() });
       logger.info('Outbound utterance transcribed', { callId: state.callId, role, text });
+      void flushOutboundTranscript(state);
     }
   } catch (err: any) {
     logger.error('Outbound utterance transcription error', { callId: state.callId, track, error: err.message });
-  } finally {
-    ts.processingUtterance = false;
   }
 }
 
