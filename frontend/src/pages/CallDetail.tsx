@@ -271,7 +271,7 @@ export default function CallDetail() {
                   Retour aux appels
                 </button>
 
-                <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: "var(--font-mono)" }}>
+                <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: "var(--font-mono)" }}>
                   <Sparkles className="h-3.5 w-3.5" />
                   Détail d'appel
                 </div>
