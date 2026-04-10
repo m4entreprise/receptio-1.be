@@ -38,7 +38,9 @@ interface OutboundCallRecord {
   ai_summary?: string | null;
   staff_first_name?: string | null;
   staff_last_name?: string | null;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
+  call_sid?: string | null;
+  recording_url?: string | null;
 }
 
 interface CallEvent {
@@ -172,6 +174,12 @@ function ActiveCallView({
   const [transferring, setTransferring] = useState(false);
   const [transferResult, setTransferResult] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  useEffect(() => {
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
 
   const fetchCall = async (showLoader = false) => {
     if (showLoader) setLoading(true);
@@ -230,7 +238,11 @@ function ActiveCallView({
     return `${m}:${String(s).padStart(2, '0')}`;
   };
 
-  const elapsedSecs = call?.duration ?? (call ? Math.floor((Date.now() - new Date(call.created_at).getTime()) / 1000) : 0);
+  const elapsedSecs = call?.duration != null
+    ? call.duration
+    : call
+      ? Math.floor((nowMs - new Date(call.created_at).getTime()) / 1000)
+      : 0;
   const isActive = call ? ACTIVE_STATUSES.has(call.status) : false;
   const liveTranscript = call?.live_transcript || call?.transcription_text || '';
   const liveSummary = call?.live_summary || call?.ai_summary || '';

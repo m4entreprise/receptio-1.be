@@ -104,23 +104,217 @@ interface AssistantPlaybackMetrics {
 
 export function attachTwilioMediaStreamsServer(server: HttpServer) {
   const wss = new WebSocketServer({ noServer: true });
+  const wssOutbound = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
     const requestUrl = new URL(request.url || '/', 'http://localhost');
 
-    if (requestUrl.pathname !== '/api/media-streams/twilio') {
+    if (requestUrl.pathname === '/api/media-streams/twilio') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } else if (requestUrl.pathname === '/api/media-streams/outbound') {
+      wssOutbound.handleUpgrade(request, socket, head, (ws) => {
+        wssOutbound.emit('connection', ws, request);
+      });
+    } else {
       socket.destroy();
-      return;
     }
-
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
-    });
   });
 
   wss.on('connection', (twilioSocket, request) => {
     void handleTwilioConnection(twilioSocket, request);
   });
+
+  wssOutbound.on('connection', (twilioSocket, request) => {
+    void handleOutboundTranscriptionConnection(twilioSocket, request);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Outbound transcription-only WebSocket handler
+// Receives Twilio Media Streams audio, runs STT, persists live_transcript
+// ---------------------------------------------------------------------------
+const OUTBOUND_FLUSH_INTERVAL_MS = 3000;
+const OUTBOUND_MIN_SPEECH_MS = 200;
+const OUTBOUND_SILENCE_THRESHOLD_MS = 600;
+
+interface OutboundStreamState {
+  callId: string;
+  companyId: string;
+  initialized: boolean;
+  pendingAudioChunks: Buffer[];
+  speechDetected: boolean;
+  speechDurationMs: number;
+  silenceDurationMs: number;
+  pendingProcessScheduled: boolean;
+  processingUtterance: boolean;
+  accumulatedTranscript: string;
+  lastFlushAt: number;
+}
+
+async function handleOutboundTranscriptionConnection(ws: WebSocket, request: IncomingMessage) {
+  const requestUrl = new URL(request.url || '/', 'http://localhost');
+  const callId = String(requestUrl.searchParams.get('callId') || '');
+  const companyId = String(requestUrl.searchParams.get('companyId') || '');
+
+  const state: OutboundStreamState = {
+    callId,
+    companyId,
+    initialized: false,
+    pendingAudioChunks: [],
+    speechDetected: false,
+    speechDurationMs: 0,
+    silenceDurationMs: 0,
+    pendingProcessScheduled: false,
+    processingUtterance: false,
+    accumulatedTranscript: '',
+    lastFlushAt: Date.now(),
+  };
+
+  if (!callId || !companyId) {
+    logger.warn('Outbound media stream rejected: missing callId or companyId');
+    ws.close();
+    return;
+  }
+
+  state.initialized = true;
+  logger.info('Outbound transcription stream connected', { callId, companyId });
+
+  const flushInterval = setInterval(() => {
+    void flushOutboundTranscript(state);
+  }, OUTBOUND_FLUSH_INTERVAL_MS);
+
+  ws.on('message', (data: RawData) => {
+    void handleOutboundStreamMessage(data, state);
+  });
+
+  ws.on('close', async () => {
+    clearInterval(flushInterval);
+    if (state.pendingAudioChunks.length > 0) {
+      await processOutboundUtterance(state);
+    }
+    await flushOutboundTranscript(state);
+    logger.info('Outbound transcription stream closed', { callId: state.callId });
+  });
+
+  ws.on('error', (error) => {
+    clearInterval(flushInterval);
+    logger.error('Outbound transcription stream error', { callId: state.callId, error: error.message });
+  });
+}
+
+async function handleOutboundStreamMessage(data: RawData, state: OutboundStreamState) {
+  const payload = parseSocketMessage(data);
+  if (!payload || typeof payload !== 'object') return;
+
+  const eventType = String((payload as { event?: string }).event || '');
+
+  if (eventType === 'start') {
+    const startEvent = payload as TwilioStreamStartEvent;
+    const customParams = startEvent.start?.customParameters || {};
+    if (!state.callId && customParams.callId) state.callId = customParams.callId;
+    if (!state.companyId && customParams.companyId) state.companyId = customParams.companyId;
+    logger.info('Outbound stream started', { callId: state.callId });
+    return;
+  }
+
+  if (eventType === 'media') {
+    const mediaEvent = payload as TwilioStreamMediaEvent;
+    const audioPayload = String(mediaEvent.media?.payload || '');
+    if (!audioPayload) return;
+
+    const audioBuffer = Buffer.from(audioPayload, 'base64');
+    if (audioBuffer.length === 0) return;
+
+    const frameEnergy = computeULawFrameEnergy(audioBuffer);
+    const hasSpeech = frameEnergy >= ENERGY_THRESHOLD;
+
+    if (hasSpeech) {
+      state.speechDetected = true;
+      state.speechDurationMs += ULaw_FRAME_DURATION_MS;
+      state.silenceDurationMs = 0;
+      state.pendingAudioChunks.push(audioBuffer);
+      return;
+    }
+
+    if (!state.speechDetected) return;
+    if (state.pendingProcessScheduled) return;
+
+    state.pendingAudioChunks.push(audioBuffer);
+    state.silenceDurationMs += ULaw_FRAME_DURATION_MS;
+
+    if (
+      state.silenceDurationMs >= OUTBOUND_SILENCE_THRESHOLD_MS
+      && state.speechDurationMs >= OUTBOUND_MIN_SPEECH_MS
+      && !state.pendingProcessScheduled
+    ) {
+      state.pendingProcessScheduled = true;
+      if (!state.processingUtterance) {
+        void processOutboundUtterance(state);
+      }
+    }
+    return;
+  }
+
+  if (eventType === 'stop') {
+    if (state.pendingAudioChunks.length > 0) {
+      await processOutboundUtterance(state);
+    }
+    await flushOutboundTranscript(state);
+  }
+}
+
+async function processOutboundUtterance(state: OutboundStreamState) {
+  if (state.processingUtterance || state.pendingAudioChunks.length === 0) {
+    state.pendingProcessScheduled = false;
+    return;
+  }
+
+  const utteranceBuffer = Buffer.concat(state.pendingAudioChunks);
+  state.pendingAudioChunks = [];
+  state.pendingProcessScheduled = false;
+  state.processingUtterance = true;
+  state.silenceDurationMs = 0;
+  state.speechDurationMs = 0;
+  state.speechDetected = false;
+
+  try {
+    const pcmBuffer = decodeULawToPcm16(utteranceBuffer);
+    const wavBuffer = wrapPcm16AsWav(pcmBuffer, ULaw_SAMPLE_RATE, 1);
+
+    const transcription = DEEPGRAM_API_KEY
+      ? await deepgramTranscribeAudioBuffer(wavBuffer, { language: 'fr', mimeType: 'audio/wav' })
+      : OPENAI_API_KEY
+        ? await transcribeAudioBuffer(wavBuffer, { fileName: 'outbound.wav', language: 'fr', mimeType: 'audio/wav' })
+        : null;
+
+    if (transcription && transcription.text.trim()) {
+      const segment = transcription.text.trim();
+      state.accumulatedTranscript = state.accumulatedTranscript
+        ? `${state.accumulatedTranscript}\n${segment}`
+        : segment;
+      logger.info('Outbound utterance transcribed', { callId: state.callId, segment });
+    }
+  } catch (err: any) {
+    logger.error('Outbound utterance transcription error', { callId: state.callId, error: err.message });
+  } finally {
+    state.processingUtterance = false;
+  }
+}
+
+async function flushOutboundTranscript(state: OutboundStreamState) {
+  if (!state.accumulatedTranscript || !state.callId) return;
+  const textSnapshot = state.accumulatedTranscript;
+
+  try {
+    await query(
+      `UPDATE calls SET live_transcript = $1 WHERE id = $2`,
+      [textSnapshot, state.callId]
+    );
+  } catch (err: any) {
+    logger.error('Outbound transcript flush error', { callId: state.callId, error: err.message });
+  }
 }
 
 export function shouldUseOfferBStreamingPipeline(settings: OfferBSettings): boolean {

@@ -1137,9 +1137,11 @@ router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
 
     const baseUrl = getBaseUrl(req);
     const recordingCompleteUrl = joinUrl(baseUrl, `/api/webhooks/twilio/outbound-recording?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
+    const wsBaseUrl = toWebSocketBaseUrl(baseUrl);
+    const streamUrl = joinUrl(wsBaseUrl, `/api/media-streams/outbound?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
 
     const twiml = buildTwiml(
-      `<Dial record="record-from-answer" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" timeout="30" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
+      `<Start><Stream url="${escapeXml(streamUrl)}" track="both_tracks"><Parameter name="callId" value="${escapeXml(callId)}" /><Parameter name="companyId" value="${escapeXml(companyId)}" /></Stream></Start><Dial record="record-from-answer" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" timeout="30" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
     );
     res.type('text/xml').send(twiml);
   } catch (error: any) {
