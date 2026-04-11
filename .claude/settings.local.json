@@ -6,7 +6,9 @@
       "WebSearch",
       "Bash(git -C /c/Users/filog/Documents/GitHub/receptio-1.be log --oneline)",
       "Bash(xargs ls:*)",
-      "Bash(wc -l /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/services/*.ts)"
+      "Bash(wc -l /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/services/*.ts)",
+      "Bash(python3 -c ':*)",
+      "Bash(node -e ':*)"
     ]
   },
   "outputStyle": "default"

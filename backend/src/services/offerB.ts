@@ -2,8 +2,6 @@ import { query } from '../config/database';
 import { BbisAgentSettings, KnowledgeBaseEntry, OfferBSettings } from '../types';
 import logger from '../utils/logger';
 
-export type ActiveOfferMode = 'A' | 'B' | 'Bbis';
-
 export interface TelephonyProvider {
   provider: string;
   transferCall(targetNumber: string): Promise<void>;
@@ -32,7 +30,7 @@ export interface EscalationPolicy {
 }
 
 const defaultOfferBSettings: Required<OfferBSettings> = {
-  offerMode: 'A',
+  voicePipelineEnabled: false,
   agentEnabled: false,
   humanTransferNumber: '',
   fallbackToVoicemail: true,
@@ -77,7 +75,15 @@ const defaultBbisAgentSettings: Required<BbisAgentSettings> = {
 
 export async function getCompanyOfferBSettings(companyId: string): Promise<Required<OfferBSettings>> {
   const result = await query('SELECT settings FROM companies WHERE id = $1', [companyId]);
-  const settings = (result.rows[0]?.settings || {}) as OfferBSettings;
+  const raw = (result.rows[0]?.settings || {}) as any;
+
+  // Rétrocompatibilité : anciens enregistrements avec offerMode enum
+  let voicePipelineEnabled = raw.voicePipelineEnabled;
+  if (voicePipelineEnabled === undefined) {
+    voicePipelineEnabled = raw.offerMode === 'Bbis';
+  }
+
+  const settings: OfferBSettings = { ...raw, voicePipelineEnabled };
 
   return {
     ...defaultOfferBSettings,
@@ -151,28 +157,8 @@ export async function buildKnowledgeBaseContext(companyId: string, search?: stri
     .join('\n');
 }
 
-export function getActiveOfferMode(settings: OfferBSettings): ActiveOfferMode {
-  if (settings.offerMode === 'Bbis') {
-    return 'Bbis';
-  }
-
-  if (settings.offerMode === 'B') {
-    return 'B';
-  }
-
-  return 'A';
-}
-
-export function shouldUseOfferBAgent(settings: OfferBSettings): boolean {
-  return getActiveOfferMode(settings) === 'B' && Boolean(settings.agentEnabled);
-}
-
-export function shouldUseOfferBBisAgent(settings: OfferBSettings): boolean {
-  return getActiveOfferMode(settings) === 'Bbis' && Boolean(settings.agentEnabled);
-}
-
 export function shouldUseRealtimeOfferAgent(settings: OfferBSettings): boolean {
-  return Boolean(settings.agentEnabled) && getActiveOfferMode(settings) !== 'A';
+  return Boolean(settings.voicePipelineEnabled);
 }
 
 export const defaultEscalationPolicy: EscalationPolicy = {

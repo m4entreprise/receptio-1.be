@@ -36,7 +36,7 @@ export interface BbisAgentSettings {
 }
 
 export interface OfferBSettings {
-  offerMode?: 'A' | 'B' | 'Bbis';
+  voicePipelineEnabled?: boolean;
   agentEnabled?: boolean;
   humanTransferNumber?: string;
   fallbackToVoicemail?: boolean;
@@ -114,6 +114,44 @@ export interface KnowledgeBaseEntry {
   content: string;
   priority: number;
   enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DaySchedule {
+  enabled: boolean;
+  open: string;  // "HH:MM"
+  close: string; // "HH:MM"
+}
+
+export interface WeeklySchedule {
+  monday: DaySchedule;
+  tuesday: DaySchedule;
+  wednesday: DaySchedule;
+  thursday: DaySchedule;
+  friday: DaySchedule;
+  saturday: DaySchedule;
+  sunday: DaySchedule;
+}
+
+export interface StaffGroupMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone_number: string;
+  role: string;
+  enabled: boolean;
+}
+
+export interface StaffGroup {
+  id: string;
+  companyId: string;
+  name: string;
+  description?: string;
+  role?: string;
+  schedule: WeeklySchedule;
+  enabled: boolean;
+  members: StaffGroupMember[];
   createdAt: Date;
   updatedAt: Date;
 }

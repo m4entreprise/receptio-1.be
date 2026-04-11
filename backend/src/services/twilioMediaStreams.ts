@@ -3,10 +3,10 @@ import axios from 'axios';
 import { RawData, WebSocket, WebSocketServer } from 'ws';
 import { query } from '../config/database';
 import { OfferBSettings } from '../types';
-import { buildKnowledgeBaseContext, getActiveOfferMode, getBbisAgentSettings, getCompanyOfferBSettings } from './offerB';
+import { buildKnowledgeBaseContext, getBbisAgentSettings, getCompanyOfferBSettings } from './offerB';
 import { textToSpeech as deepgramTextToSpeech, transcribeAudioBuffer as deepgramTranscribeAudioBuffer } from './deepgram';
 import { generateResponse as mistralGenerateResponse, summarizeCall as mistralSummarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
-import { generateResponse, summarizeCall, textToSpeech, transcribeAudioBuffer } from './openai';
+import { generateResponse, summarizeCall, transcribeAudioBuffer } from './openai';
 import logger from '../utils/logger';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -15,9 +15,6 @@ const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const STREAMING_ENABLED = process.env.OFFER_B_STREAMING_ENABLED !== 'false';
-const SILENCE_THRESHOLD_MS = Number(process.env.OFFER_B_STREAMING_SILENCE_MS || 420);
-const MIN_SPEECH_MS = Number(process.env.OFFER_B_STREAMING_MIN_SPEECH_MS || 180);
-const BARGE_IN_MIN_SPEECH_MS = Number(process.env.OFFER_B_STREAMING_BARGE_IN_MS || 120);
 const ENERGY_THRESHOLD = Number(process.env.OFFER_B_STREAMING_ENERGY_THRESHOLD || 500);
 const BBIS_SILENCE_THRESHOLD_MS = Number(process.env.OFFER_BBIS_STREAMING_SILENCE_MS || 260);
 const BBIS_MIN_SPEECH_MS = Number(process.env.OFFER_BBIS_STREAMING_MIN_SPEECH_MS || 120);
@@ -29,7 +26,7 @@ const ULaw_FRAME_DURATION_MS = 20;
 const MAX_HISTORY_MESSAGES = 12;
 
 interface StreamSessionState {
-  activeOfferMode: 'B' | 'Bbis';
+  baseUrl: string;
   assistantPlaybackUntil: number;
   bbisBargeInMinSpeechMs: number;
   bbisLlmModel: string;
@@ -374,30 +371,25 @@ async function flushOutboundTranscript(state: OutboundStreamState) {
 }
 
 export function shouldUseOfferBStreamingPipeline(settings: OfferBSettings): boolean {
-  const activeOfferMode = getActiveOfferMode(settings);
-
-  if (!STREAMING_ENABLED || activeOfferMode === 'A') {
+  if (!STREAMING_ENABLED || !settings.voicePipelineEnabled) {
     return false;
   }
 
-  if (activeOfferMode === 'Bbis') {
-    const bbisAgentSettings = getBbisAgentSettings(settings);
-    const hasSttProvider = bbisAgentSettings.sttProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
-    const hasTtsProvider = bbisAgentSettings.ttsProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
-    const hasLlmProvider = bbisAgentSettings.llmProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(OPENAI_API_KEY);
-    return hasSttProvider && hasTtsProvider && hasLlmProvider;
-  }
-
-  return Boolean(OPENAI_API_KEY);
+  const bbisAgentSettings = getBbisAgentSettings(settings);
+  const hasSttProvider = bbisAgentSettings.sttProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
+  const hasTtsProvider = bbisAgentSettings.ttsProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
+  const hasLlmProvider = bbisAgentSettings.llmProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(OPENAI_API_KEY);
+  return hasSttProvider && hasTtsProvider && hasLlmProvider;
 }
 
 async function handleTwilioConnection(twilioSocket: WebSocket, request: IncomingMessage) {
   const requestUrl = new URL(request.url || '/', 'http://localhost');
   const callId = String(requestUrl.searchParams.get('callId') || '');
   const companyId = String(requestUrl.searchParams.get('companyId') || '');
+  const baseUrl = String(requestUrl.searchParams.get('baseUrl') || '');
 
   const state: StreamSessionState = {
-    activeOfferMode: 'B',
+    baseUrl,
     assistantPlaybackUntil: 0,
     bbisBargeInMinSpeechMs: BBIS_BARGE_IN_MIN_SPEECH_MS,
     bbisLlmModel: '',
@@ -456,6 +448,11 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
       await initializeStreamingSession(state, callId, companyId);
     } catch (error: any) {
       logger.error('Twilio media stream setup error', { error: error.message, callId, companyId });
+      if (state.fallbackToVoicemail && state.callSid && state.baseUrl) {
+        await redirectToVoicemail(state).catch((e: any) =>
+          logger.error('Voicemail fallback failed after init error', { error: e.message, callId })
+        );
+      }
       twilioSocket.close();
     }
   }
@@ -558,9 +555,7 @@ async function handleTwilioMessage(
         state.speechDurationMs += ULaw_FRAME_DURATION_MS;
         state.silenceDurationMs = 0;
 
-        const bargeInMinSpeechMs = state.activeOfferMode === 'Bbis'
-          ? state.bbisBargeInMinSpeechMs
-          : BARGE_IN_MIN_SPEECH_MS;
+        const bargeInMinSpeechMs = state.bbisBargeInMinSpeechMs;
 
         if (
           state.assistantPlaybackUntil > Date.now()
@@ -589,12 +584,8 @@ async function handleTwilioMessage(
       state.pendingAudioChunks.push(audioBuffer);
       state.silenceDurationMs += ULaw_FRAME_DURATION_MS;
 
-      const silenceThresholdMs = state.activeOfferMode === 'Bbis'
-        ? state.bbisSilenceThresholdMs
-        : SILENCE_THRESHOLD_MS;
-      const minSpeechMs = state.activeOfferMode === 'Bbis'
-        ? state.bbisMinSpeechMs
-        : MIN_SPEECH_MS;
+      const silenceThresholdMs = state.bbisSilenceThresholdMs;
+      const minSpeechMs = state.bbisMinSpeechMs;
 
       if (
         state.silenceDurationMs >= silenceThresholdMs
@@ -638,46 +629,42 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
     getStreamingCallContext(callId, companyId),
     getCompanyOfferBSettings(companyId),
   ]);
-  const activeOfferMode = getActiveOfferMode(offerBSettings);
   const bbisAgentSettings = getBbisAgentSettings(offerBSettings);
+
+  // Défini tôt pour que le catch de handleTwilioConnection puisse déclencher le fallback
+  state.fallbackToVoicemail = Boolean(offerBSettings.fallbackToVoicemail);
 
   if (!callContext) {
     logger.warn('Twilio media stream call context missing', { callId, companyId });
     throw new Error('Streaming call context missing');
   }
 
-  if (activeOfferMode === 'A') {
+  if (!offerBSettings.voicePipelineEnabled) {
     throw new Error('Streaming session requested for non-agent mode');
   }
 
-  if (activeOfferMode === 'B' && !OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY not configured');
+  if (bbisAgentSettings.llmProvider === 'mistral' && !MISTRAL_API_KEY) {
+    throw new Error('MISTRAL_API_KEY not configured for LLM');
   }
 
-  if (activeOfferMode === 'Bbis') {
-    if (bbisAgentSettings.llmProvider === 'mistral' && !MISTRAL_API_KEY) {
-      throw new Error('MISTRAL_API_KEY not configured for Bbis LLM');
-    }
+  if (bbisAgentSettings.llmProvider === 'openai' && !OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not configured for LLM');
+  }
 
-    if (bbisAgentSettings.llmProvider === 'openai' && !OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY not configured for Bbis LLM');
-    }
+  if (bbisAgentSettings.sttProvider === 'mistral' && !MISTRAL_API_KEY) {
+    throw new Error('MISTRAL_API_KEY not configured for STT');
+  }
 
-    if (bbisAgentSettings.sttProvider === 'mistral' && !MISTRAL_API_KEY) {
-      throw new Error('MISTRAL_API_KEY not configured for Bbis STT');
-    }
+  if (bbisAgentSettings.sttProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
+    throw new Error('DEEPGRAM_API_KEY not configured for STT');
+  }
 
-    if (bbisAgentSettings.sttProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
-      throw new Error('DEEPGRAM_API_KEY not configured for Bbis STT');
-    }
+  if (bbisAgentSettings.ttsProvider === 'mistral' && !MISTRAL_API_KEY) {
+    throw new Error('MISTRAL_API_KEY not configured for TTS');
+  }
 
-    if (bbisAgentSettings.ttsProvider === 'mistral' && !MISTRAL_API_KEY) {
-      throw new Error('MISTRAL_API_KEY not configured for Bbis TTS');
-    }
-
-    if (bbisAgentSettings.ttsProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
-      throw new Error('DEEPGRAM_API_KEY not configured for Bbis TTS');
-    }
+  if (bbisAgentSettings.ttsProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
+    throw new Error('DEEPGRAM_API_KEY not configured for TTS');
   }
 
   const knowledgeContext = offerBSettings.knowledgeBaseEnabled
@@ -689,12 +676,8 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
   await appendCallEvent(callId, 'twilio.media_stream.connection_opened', {
     companyId,
     provider: 'twilio',
-    mode: activeOfferMode === 'Bbis'
-      ? `${bbisAgentSettings.sttProvider}_${bbisAgentSettings.llmProvider}_${bbisAgentSettings.ttsProvider}`
-      : 'stt_llm_tts',
+    mode: `${bbisAgentSettings.sttProvider}_${bbisAgentSettings.llmProvider}_${bbisAgentSettings.ttsProvider}`,
   });
-
-  state.activeOfferMode = activeOfferMode;
   state.bbisBargeInMinSpeechMs = bbisAgentSettings.bargeInMinSpeechMs;
   state.bbisLlmModel = bbisAgentSettings.llmModel.trim();
   state.bbisLlmProvider = bbisAgentSettings.llmProvider;
@@ -756,23 +739,17 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
     const pcmBuffer = decodeULawToPcm16(utteranceBuffer);
     const wavBuffer = wrapPcm16AsWav(pcmBuffer, ULaw_SAMPLE_RATE, 1);
     const sttStartedAt = Date.now();
-    const transcription = state.activeOfferMode === 'Bbis'
-      ? state.bbisSttProvider === 'mistral'
-        ? await mistralTranscribeAudioBuffer(wavBuffer, {
-          fileName: 'twilio-stream.wav',
-          language: 'fr',
-          mimeType: 'audio/wav',
-          model: state.bbisSttModel || undefined,
-        })
-        : await deepgramTranscribeAudioBuffer(wavBuffer, {
-          language: 'fr',
-          mimeType: 'audio/wav',
-          model: state.bbisSttModel || undefined,
-        })
-      : await transcribeAudioBuffer(wavBuffer, {
+    const transcription = state.bbisSttProvider === 'mistral'
+      ? await mistralTranscribeAudioBuffer(wavBuffer, {
         fileName: 'twilio-stream.wav',
         language: 'fr',
         mimeType: 'audio/wav',
+        model: state.bbisSttModel || undefined,
+      })
+      : await deepgramTranscribeAudioBuffer(wavBuffer, {
+        language: 'fr',
+        mimeType: 'audio/wav',
+        model: state.bbisSttModel || undefined,
       });
     sttDurationMs = Date.now() - sttStartedAt;
     sttConfidence = transcription.confidence;
@@ -1013,7 +990,6 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
 
     logger.info('Realtime utterance processed', {
       callId: state.callId,
-      activeOfferMode: state.activeOfferMode,
       sttDurationMs,
       llmDurationMs,
       ttsDurationMs: playbackMetrics?.ttsDurationMs,
@@ -1048,7 +1024,6 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
     logger.error('Offer realtime STT-LLM-TTS pipeline error', {
       error: error.message,
       callId: state.callId,
-      activeOfferMode: state.activeOfferMode,
     });
 
     if (twilioSocket.readyState === WebSocket.OPEN) {
@@ -1058,13 +1033,15 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         persistTranscript: true,
         source: 'streaming_error',
       });
+    } else if (state.fallbackToVoicemail && state.callSid && state.baseUrl) {
+      await redirectToVoicemail(state).catch((e: any) =>
+        logger.error('Voicemail fallback failed after pipeline error', { error: e.message, callId: state.callId })
+      );
     }
   } finally {
     state.processingUtterance = false;
 
-    const silenceThresholdMs = state.activeOfferMode === 'Bbis'
-      ? state.bbisSilenceThresholdMs
-      : SILENCE_THRESHOLD_MS;
+    const silenceThresholdMs = state.bbisSilenceThresholdMs;
 
     const shouldProcessQueuedUtterance = state.pendingAudioChunks.length > 0
       && state.speechDetected
@@ -1086,8 +1063,8 @@ async function generateStreamingReply(state: StreamSessionState, callerText: str
     state.knowledgeContext ? `Informations métier disponibles:\n${state.knowledgeContext}` : 'Aucune information métier fiable n’est disponible.',
     state.humanTransferNumber ? `Numéro humain disponible : ${state.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.',
   ].join('\n\n');
-  const systemPrompt = state.activeOfferMode === 'Bbis' && state.bbisSystemPrompt
-    ? [state.bbisSystemPrompt, state.knowledgeContext ? `Informations métier disponibles:\n${state.knowledgeContext}` : '', state.humanTransferNumber ? `Numéro humain disponible : ${state.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.']
+  const systemPrompt = state.bbisSystemPrompt
+    ? [state.bbisSystemPrompt, state.knowledgeContext ? `Informations métier disponibles:\n${state.knowledgeContext}` : '', state.humanTransferNumber ? `Numéro humain disponible : ${state.humanTransferNumber}.` : "Aucun numéro humain n'est configuré."]
       .filter(Boolean)
       .join('\n\n')
     : defaultSystemPrompt;
@@ -1097,16 +1074,16 @@ async function generateStreamingReply(state: StreamSessionState, callerText: str
     { role: 'user', content: callerText },
   ].map((message) => ({ role: message.role, content: message.content }));
 
-  const response = state.activeOfferMode === 'Bbis' && state.bbisLlmProvider === 'mistral'
+  const response = state.bbisLlmProvider === 'mistral'
     ? await mistralGenerateResponse(messages, systemPrompt, {
       model: state.bbisLlmModel || undefined,
       maxCompletionTokens: state.bbisMaxCompletionTokens,
       temperature: state.bbisTemperature,
     })
     : await generateResponse(messages, systemPrompt, {
-      model: state.activeOfferMode === 'Bbis' ? state.bbisLlmModel || undefined : undefined,
-      maxCompletionTokens: state.activeOfferMode === 'Bbis' ? state.bbisMaxCompletionTokens : STREAMING_RESPONSE_MAX_TOKENS,
-      temperature: state.activeOfferMode === 'Bbis' ? state.bbisTemperature : undefined,
+      model: state.bbisLlmModel || undefined,
+      maxCompletionTokens: state.bbisMaxCompletionTokens,
+      temperature: state.bbisTemperature,
     });
   return response.trim();
 }
@@ -1123,9 +1100,7 @@ async function speakAssistantText(
   }
 ): Promise<AssistantPlaybackMetrics | null> {
   const cleanText = text.trim();
-  let effectiveTtsProvider: 'deepgram' | 'mistral' | 'openai' = state.activeOfferMode === 'Bbis'
-    ? state.bbisTtsProvider
-    : 'openai';
+  let effectiveTtsProvider: 'deepgram' | 'mistral' | 'openai' = state.bbisTtsProvider;
 
   if (!cleanText || !state.streamSid || twilioSocket.readyState !== WebSocket.OPEN) {
     return null;
@@ -1147,8 +1122,7 @@ async function speakAssistantText(
       appendOfferBAction(state.callId, options.actionType, {
         source: options.source,
         transcript: cleanText,
-        activeOfferMode: state.activeOfferMode,
-      }),
+        }),
       'streaming.assistant_action_persist_failed',
       state
     );
@@ -1156,35 +1130,31 @@ async function speakAssistantText(
     const ttsStartedAt = Date.now();
     let wavAudio: Buffer;
 
-    if (state.activeOfferMode === 'Bbis') {
-      if (state.bbisTtsProvider === 'mistral') {
-        try {
-          wavAudio = await mistralTextToSpeech(cleanText, 'wav', 'fr', {
-            model: state.bbisTtsModel || undefined,
-            voice: state.bbisTtsVoice || undefined,
-          });
-        } catch (error: any) {
-          if (!DEEPGRAM_API_KEY) {
-            throw error;
-          }
-
-          logger.warn('Mistral TTS failed, falling back to Deepgram TTS', {
-            callId: state.callId,
-            error: error.message,
-            source: options.source,
-          });
-
-          effectiveTtsProvider = 'deepgram';
-          wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr');
-        }
-      } else {
-        wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
+    if (state.bbisTtsProvider === 'mistral') {
+      try {
+        wavAudio = await mistralTextToSpeech(cleanText, 'wav', 'fr', {
           model: state.bbisTtsModel || undefined,
           voice: state.bbisTtsVoice || undefined,
         });
+      } catch (error: any) {
+        if (!DEEPGRAM_API_KEY) {
+          throw error;
+        }
+
+        logger.warn('Mistral TTS failed, falling back to Deepgram TTS', {
+          callId: state.callId,
+          error: error.message,
+          source: options.source,
+        });
+
+        effectiveTtsProvider = 'deepgram';
+        wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr');
       }
     } else {
-      wavAudio = await textToSpeech(cleanText, 'wav');
+      wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
+        model: state.bbisTtsModel || undefined,
+        voice: state.bbisTtsVoice || undefined,
+      });
     }
 
     const ttsDurationMs = Date.now() - ttsStartedAt;
@@ -1197,7 +1167,6 @@ async function speakAssistantText(
 
     logger.info('Realtime assistant audio generated', {
       callId: state.callId,
-      activeOfferMode: state.activeOfferMode,
       source: options.source,
       ttsProvider: effectiveTtsProvider,
       ttsDurationMs,
@@ -1387,12 +1356,11 @@ async function appendBbisTurnEvent(
   eventType: 'bbis.turn.completed' | 'bbis.turn.failed' | 'bbis.turn.no_transcript',
   data: Record<string, unknown>
 ) {
-  if (state.activeOfferMode !== 'Bbis' || !state.callId) {
+  if (!state.callId) {
     return;
   }
 
   await appendCallEvent(state.callId, eventType, {
-    activeOfferMode: state.activeOfferMode,
     llmModel: state.bbisLlmModel || (state.bbisLlmProvider === 'mistral' ? 'mistral-small-latest' : process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano'),
     providerLlm: state.bbisLlmProvider,
     providerStt: state.bbisSttProvider,
@@ -1409,7 +1377,6 @@ function runNonBlockingPersistence(task: Promise<unknown>, eventType: string, st
     logger.warn(eventType, {
       callId: state.callId,
       companyId: state.companyId,
-      activeOfferMode: state.activeOfferMode,
       error: error.message,
     });
   });
@@ -1435,7 +1402,7 @@ async function finalizeStreamingCall(state: StreamSessionState, reason: string) 
     ['completed', durationSeconds, state.callId]
   );
 
-  await persistFinalSummary(state.callId, state.lastIntent, state.activeOfferMode === 'Bbis' ? state.bbisLlmProvider : 'openai');
+  await persistFinalSummary(state.callId, state.lastIntent, state.bbisLlmProvider);
   await appendCallEvent(state.callId, 'twilio.media_stream.finalized', {
     durationSeconds,
     reason,
@@ -1466,6 +1433,14 @@ async function persistFinalSummary(callId: string, intent: string, llmProvider: 
     'UPDATE call_summaries SET summary = $1, intent = $2 WHERE id = $3',
     [summary, intent, summaryResult.rows[0].id]
   );
+}
+
+async function redirectToVoicemail(state: StreamSessionState) {
+  const greetingUrl = `${state.baseUrl}/api/webhooks/twilio/greeting?companyId=${encodeURIComponent(state.companyId)}`;
+  const recordingCompleteUrl = `${state.baseUrl}/api/webhooks/twilio/recording-complete`;
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${greetingUrl}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${recordingCompleteUrl}" recordingStatusCallbackMethod="POST" /><Hangup /></Response>`;
+  logger.info('Redirecting call to Core voicemail fallback', { callSid: state.callSid, companyId: state.companyId });
+  await redirectTwilioCall(state.callSid, twiml);
 }
 
 async function redirectTwilioCall(callSid: string, twiml: string) {

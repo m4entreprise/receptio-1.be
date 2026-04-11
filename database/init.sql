@@ -247,6 +247,45 @@ ALTER TABLE calls ADD COLUMN IF NOT EXISTS outbound_call_sid VARCHAR(255) DEFAUL
 CREATE INDEX IF NOT EXISTS idx_calls_direction ON calls(company_id, direction);
 CREATE INDEX IF NOT EXISTS idx_calls_initiated_by ON calls(initiated_by_staff_id) WHERE initiated_by_staff_id IS NOT NULL;
 
+-- Staff groups: logical groupings for dispatch/call routing
+CREATE TABLE IF NOT EXISTS staff_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    role VARCHAR(255),
+    schedule JSONB DEFAULT '{"monday":{"enabled":true,"open":"08:00","close":"18:00"},"tuesday":{"enabled":true,"open":"08:00","close":"18:00"},"wednesday":{"enabled":true,"open":"08:00","close":"18:00"},"thursday":{"enabled":true,"open":"08:00","close":"18:00"},"friday":{"enabled":true,"open":"08:00","close":"18:00"},"saturday":{"enabled":false,"open":"08:00","close":"18:00"},"sunday":{"enabled":false,"open":"08:00","close":"18:00"}}',
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_groups_company_id ON staff_groups(company_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_staff_groups_updated_at'
+          AND tgrelid = 'staff_groups'::regclass
+    ) THEN
+        CREATE TRIGGER update_staff_groups_updated_at BEFORE UPDATE ON staff_groups
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
+
+-- Junction table: which staff members belong to which group
+CREATE TABLE IF NOT EXISTS staff_group_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    group_id UUID REFERENCES staff_groups(id) ON DELETE CASCADE,
+    staff_id UUID REFERENCES staff(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(group_id, staff_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_group_members_group_id ON staff_group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_staff_group_members_staff_id ON staff_group_members(staff_id);
+
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES
 ('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}')

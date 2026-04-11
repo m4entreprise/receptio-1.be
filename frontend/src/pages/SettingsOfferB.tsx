@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 
 interface OfferBSettings {
-  offerMode: 'A' | 'B' | 'Bbis';
+  voicePipelineEnabled: boolean;
   agentEnabled: boolean;
   humanTransferNumber: string;
   fallbackToVoicemail: boolean;
@@ -36,7 +36,7 @@ interface KnowledgeBaseEntry {
 }
 
 const defaultOfferBSettings: OfferBSettings = {
-  offerMode: 'A',
+  voicePipelineEnabled: false,
   agentEnabled: false,
   humanTransferNumber: '',
   fallbackToVoicemail: true,
@@ -230,7 +230,7 @@ export default function SettingsOfferB() {
                 Préparez votre réceptionniste IA temps réel sans perdre la main métier.
               </h1>
               <p className="max-w-2xl text-sm leading-7 text-white/60 sm:text-base">
-                Activez progressivement l'offre B, configurez le transfert humain et enrichissez la base de connaissances que l'agent utilisera pour répondre vite et proprement.
+                Activez l'agent vocal temps réel, configurez le transfert humain et enrichissez la base de connaissances que l'agent utilisera pour répondre vite et proprement.
               </p>
             </div>
           </div>
@@ -238,11 +238,11 @@ export default function SettingsOfferB() {
           <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
             <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>Compte</p>
             <div className="mt-5 space-y-4">
-              {formData.settings.offerMode === 'Bbis' && (
+              {formData.settings.voicePipelineEnabled && (
                 <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
-                  <p className="text-sm text-[#344453]/50">Réglages avancés Bbis</p>
+                  <p className="text-sm text-[#344453]/50">Réglages avancés de l'agent vocal</p>
                   <div className="mt-3 flex flex-col gap-3">
-                    <p className="text-sm text-[#141F28]">Modifie le prompt, la température et les modèles de l'agent IA dédié à l'Offre Bbis.</p>
+                    <p className="text-sm text-[#141F28]">Modifie le prompt, la température et les modèles de l'agent IA vocal temps réel.</p>
                     <Link
                       to="/settings/agent-ia"
                       className="inline-flex items-center justify-center rounded-full bg-[#344453] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2a3642]"
@@ -325,29 +325,31 @@ export default function SettingsOfferB() {
             </div>
 
             <div className="grid gap-5 lg:grid-cols-2">
-              <div>
-                <label htmlFor="offerMode" className="block text-sm font-medium text-[#344453]">
-                  Mode actif
-                </label>
-                <select
-                  id="offerMode"
-                  value={formData.settings.offerMode}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    settings: {
-                      ...formData.settings,
-                      offerMode: e.target.value as 'A' | 'B' | 'Bbis',
-                    },
-                  })}
-                  className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition focus:border-[#344453]/25 focus:bg-white"
-                >
-                  <option value="A">Offre A — Répondeur intelligent</option>
-                  <option value="B">Offre B — Agent vocal IA</option>
-                  <option value="Bbis">Offre Bbis — Agent vocal Deepgram</option>
-                </select>
+              <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
+                <div className="flex items-start gap-3">
+                  <Bot className="mt-0.5 h-5 w-5 text-[#344453]" />
+                  <div className="min-w-0 flex-1">
+                    <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
+                      <span>Agent vocal temps réel activé</span>
+                      <input
+                        type="checkbox"
+                        checked={formData.settings.voicePipelineEnabled}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          settings: {
+                            ...formData.settings,
+                            voicePipelineEnabled: e.target.checked,
+                          },
+                        })}
+                        className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
+                      />
+                    </label>
+                    <p className="mt-2 text-sm leading-6 text-[#344453]/55">Active le réceptionniste IA temps réel (Deepgram STT/TTS) à la place du répondeur classique.</p>
+                  </div>
+                </div>
               </div>
 
-              {formData.settings.offerMode !== 'A' && (
+              {formData.settings.voicePipelineEnabled && (
                 <div>
                   <label htmlFor="humanTransferNumber" className="block text-sm font-medium text-[#344453]">
                     Numéro de transfert humain
@@ -370,7 +372,7 @@ export default function SettingsOfferB() {
               )}
             </div>
 
-            {formData.settings.offerMode === 'A' ? (
+            {!formData.settings.voicePipelineEnabled ? (
               <div className="space-y-4">
                 <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
                   <div className="flex items-center gap-3">
@@ -379,7 +381,7 @@ export default function SettingsOfferB() {
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-[#141F28]">Message d'accueil répondeur</h3>
-                      <p className="text-xs text-[#344453]/50">Offre A — lu par Twilio à chaque appel entrant</p>
+                      <p className="text-xs text-[#344453]/50">Répondeur — lu par Twilio à chaque appel entrant</p>
                     </div>
                   </div>
                   <textarea
@@ -459,7 +461,7 @@ export default function SettingsOfferB() {
               </div>
             )}
 
-            {formData.settings.offerMode !== 'A' && (
+            {formData.settings.voicePipelineEnabled && (
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
                   <div className="flex items-start gap-3">
@@ -469,7 +471,7 @@ export default function SettingsOfferB() {
                         <span>Agent vocal activé</span>
                         <input type="checkbox" checked={formData.settings.agentEnabled} onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, agentEnabled: e.target.checked } })} className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]" />
                       </label>
-                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">Permet d'utiliser le flux temps réel de l'offre B au lieu du simple répondeur.</p>
+                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">Permet à l'agent IA de décrocher activement et de dialoguer avec l'appelant.</p>
                     </div>
                   </div>
                 </div>

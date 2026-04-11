@@ -3,9 +3,9 @@ import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
 import { textToSpeech as deepgramTextToSpeech } from '../services/deepgram';
 import { textToSpeech as mistralTextToSpeech } from '../services/mistral';
-import { detectIntent, generateResponse, summarizeCall, textToSpeech, transcribeAudio } from '../services/openai';
+import { detectIntent, generateResponse, summarizeCall, transcribeAudio } from '../services/openai';
 import { transcribeAudioUrlWithDiarization } from '../services/mistral';
-import { buildKnowledgeBaseContext, defaultEscalationPolicy, getActiveOfferMode, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
+import { buildKnowledgeBaseContext, defaultEscalationPolicy, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
 import { shouldUseOfferBStreamingPipeline } from '../services/twilioMediaStreams';
 import logger from '../utils/logger';
 
@@ -69,22 +69,22 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
     );
 
     if (shouldUseRealtimeOfferAgent(offerBSettings)) {
-      await getOrCreateConversation(callId);
-
-      await query(
-        `INSERT INTO call_events (call_id, event_type, data)
-         VALUES ($1, $2, $3)`,
-        [callId, 'twilio.offer_b.started', { settings: offerBSettings, callSid: payload.CallSid }]
-      );
-
       if (shouldUseOfferBStreamingPipeline(offerBSettings)) {
+        await getOrCreateConversation(callId);
+
+        await query(
+          `INSERT INTO call_events (call_id, event_type, data)
+           VALUES ($1, $2, $3)`,
+          [callId, 'twilio.offer_b.started', { settings: offerBSettings, callSid: payload.CallSid }]
+        );
+
         const streamUrl = buildOfferBStreamingUrl(baseUrl, callId, company.id);
         res.type('text/xml').send(buildOfferBStreamingTwiml(streamUrl, callId, company.id));
         return;
       }
 
-      res.type('text/xml').send(buildOfferBWelcomeTwiml(baseUrl, company, callId, offerBSettings));
-      return;
+      logger.warn('Voice pipeline enabled but streaming providers unavailable, falling back to Core voicemail', { companyId: company.id });
+      // fall-through vers Core
     }
 
     if (offerBSettings.smartRoutingEnabled) {
@@ -217,22 +217,19 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
 router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
   try {
     const promptText = String(req.query.text || '').trim();
-    const offerMode = String(req.query.offerMode || 'B');
 
     if (!promptText) {
       res.status(400).send('Prompt text required');
       return;
     }
 
-    const audio = offerMode === 'Bbis'
-      ? await deepgramTextToSpeech(promptText.slice(0, 500), 'wav')
-      : await textToSpeech(promptText.slice(0, 500));
+    const audio = await deepgramTextToSpeech(promptText.slice(0, 500), 'wav');
 
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Type', offerMode === 'Bbis' ? 'audio/wav' : 'audio/mpeg');
+    res.setHeader('Content-Type', 'audio/wav');
     res.send(audio);
   } catch (error: any) {
-    logger.error('Twilio Offer B prompt generation error', { error: error.message });
+    logger.error('Twilio agent audio generation error', { error: error.message });
     res.status(500).send('Prompt unavailable');
   }
 });
@@ -262,8 +259,6 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
     };
     const baseUrl = getBaseUrl(req);
     const offerBSettings = await getCompanyOfferBSettings(company.id);
-    const activeOfferMode = getActiveOfferMode(offerBSettings);
-    const responseOfferMode: 'B' | 'Bbis' = activeOfferMode === 'Bbis' ? 'Bbis' : 'B';
 
     if (!shouldUseRealtimeOfferAgent(offerBSettings)) {
       const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
@@ -307,7 +302,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
       }
 
       res.type('text/xml').send(
-        buildOfferBFollowupTwiml(baseUrl, call.id, 'Je n’ai rien entendu. Pouvez-vous répéter votre demande en une phrase ?', responseOfferMode)
+        buildOfferBFollowupTwiml(baseUrl, call.id, 'Je n’ai rien entendu. Pouvez-vous répéter votre demande en une phrase ?')
       );
       return;
     }
@@ -323,7 +318,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
       await upsertOfferBSummary(call.id, speechResult, 'autre');
       await registerOfferBAction(call.id, 'agent_replied', { intent: 'autre', input: speechResult });
 
-      res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, greetingReply, responseOfferMode));
+      res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, greetingReply));
       return;
     }
 
@@ -344,7 +339,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
         ['completed', call.id]
       );
 
-      res.type('text/xml').send(buildOfferBHangupTwiml(baseUrl, goodbyeReply, responseOfferMode));
+      res.type('text/xml').send(buildOfferBHangupTwiml(baseUrl, goodbyeReply));
       return;
     }
 
@@ -386,8 +381,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
           buildOfferBFollowupTwiml(
             baseUrl,
             call.id,
-            'Je n’ai pas encore assez d’informations pour répondre précisément. Pouvez-vous reformuler ou préciser votre demande ?',
-            responseOfferMode
+            'Je n\u2019ai pas encore assez d\u2019informations pour r\u00e9pondre pr\u00e9cis\u00e9ment. Pouvez-vous reformuler ou pr\u00e9ciser votre demande ?'
           )
         );
         return;
@@ -412,7 +406,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
       }
 
       res.type('text/xml').send(
-        buildOfferBFollowupTwiml(baseUrl, call.id, 'Je préfère vous orienter vers un humain. Pouvez-vous reformuler une dernière fois votre besoin ?', responseOfferMode)
+        buildOfferBFollowupTwiml(baseUrl, call.id, 'Je préfère vous orienter vers un humain. Pouvez-vous reformuler une dernière fois votre besoin ?')
       );
       return;
     }
@@ -425,7 +419,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
     await upsertOfferBSummary(call.id, speechResult, intentData.intent);
     await registerOfferBAction(call.id, 'agent_replied', { intent: intentData.intent, input: speechResult });
 
-    res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, agentReply, responseOfferMode));
+    res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, agentReply));
   } catch (error: any) {
     logger.error('Twilio Offer B agent turn error', { error: error.message });
 
@@ -673,7 +667,7 @@ function toWebSocketBaseUrl(baseUrl: string): string {
 function buildOfferBStreamingUrl(baseUrl: string, callId: string, companyId: string): string {
   return joinUrl(
     toWebSocketBaseUrl(baseUrl),
-    `/api/media-streams/twilio?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`
+    `/api/media-streams/twilio?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}&baseUrl=${encodeURIComponent(baseUrl)}`
   );
 }
 
@@ -697,25 +691,14 @@ function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string, statusC
   );
 }
 
-function buildOfferBWelcomeTwiml(baseUrl: string, company: any, callId: string, settings: any): string {
+function buildOfferBFollowupTwiml(baseUrl: string, callId: string, prompt: string): string {
   const actionUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-turn?callId=${encodeURIComponent(callId)}`);
-  const greeting = settings.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Comment puis-je vous aider aujourd’hui ?`;
-  const activeOfferMode = getActiveOfferMode(settings);
-  const promptUrl = joinUrl(
-    baseUrl,
-    `/api/webhooks/twilio/agent-audio?offerMode=${encodeURIComponent(activeOfferMode)}&text=${encodeURIComponent(greeting)}`
-  );
+  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?text=${encodeURIComponent(prompt)}`);
   return buildGatherTwiml(actionUrl, promptUrl);
 }
 
-function buildOfferBFollowupTwiml(baseUrl: string, callId: string, prompt: string, offerMode: 'B' | 'Bbis' = 'B'): string {
-  const actionUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-turn?callId=${encodeURIComponent(callId)}`);
-  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?offerMode=${encodeURIComponent(offerMode)}&text=${encodeURIComponent(prompt)}`);
-  return buildGatherTwiml(actionUrl, promptUrl);
-}
-
-function buildOfferBHangupTwiml(baseUrl: string, prompt: string, offerMode: 'B' | 'Bbis' = 'B'): string {
-  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?offerMode=${encodeURIComponent(offerMode)}&text=${encodeURIComponent(prompt)}`);
+function buildOfferBHangupTwiml(baseUrl: string, prompt: string): string {
+  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?text=${encodeURIComponent(prompt)}`);
   return buildTwiml(`<Play>${escapeXml(promptUrl)}</Play><Hangup />`);
 }
 
