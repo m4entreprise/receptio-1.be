@@ -15,6 +15,7 @@ interface OfferBSettings {
   appointmentIntegrationEnabled: boolean;
   smartRoutingEnabled: boolean;
   routingQuestion: string;
+  transferMessage: string;
 }
 
 interface Company {
@@ -46,6 +47,7 @@ const defaultOfferBSettings: OfferBSettings = {
   appointmentIntegrationEnabled: false,
   smartRoutingEnabled: false,
   routingQuestion: '',
+  transferMessage: '',
 };
 
 const emptyKnowledgeForm = {
@@ -238,21 +240,6 @@ export default function SettingsOfferB() {
           <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
             <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>Compte</p>
             <div className="mt-5 space-y-4">
-              {formData.settings.voicePipelineEnabled && (
-                <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
-                  <p className="text-sm text-[#344453]/50">Réglages avancés de l'agent vocal</p>
-                  <div className="mt-3 flex flex-col gap-3">
-                    <p className="text-sm text-[#141F28]">Modifie le prompt, la température et les modèles de l'agent IA vocal temps réel.</p>
-                    <Link
-                      to="/settings/agent-ia"
-                      className="inline-flex items-center justify-center rounded-full bg-[#344453] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2a3642]"
-                    >
-                      Ouvrir Paramètres de l'agent IA
-                    </Link>
-                  </div>
-                </div>
-              )}
-
               <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
                 <p className="text-sm text-[#344453]/50">Email de référence</p>
                 <p className="mt-1 break-all text-base font-semibold text-[#141F28]">{company?.email || 'Non renseigné'}</p>
@@ -295,6 +282,7 @@ export default function SettingsOfferB() {
               </div>
             )}
 
+            {/* Infos entreprise */}
             <div className="grid gap-5 lg:grid-cols-2">
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-[#344453]">
@@ -308,7 +296,6 @@ export default function SettingsOfferB() {
                   className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition focus:border-[#344453]/25 focus:bg-white"
                 />
               </div>
-
               <div>
                 <label htmlFor="phoneNumber" className="block text-sm font-medium text-[#344453]">
                   Numéro de téléphone Twilio
@@ -324,96 +311,72 @@ export default function SettingsOfferB() {
               </div>
             </div>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                <div className="flex items-start gap-3">
-                  <Bot className="mt-0.5 h-5 w-5 text-[#344453]" />
-                  <div className="min-w-0 flex-1">
-                    <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
-                      <span>Agent vocal temps réel activé</span>
-                      <input
-                        type="checkbox"
-                        checked={formData.settings.voicePipelineEnabled}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            voicePipelineEnabled: e.target.checked,
-                          },
-                        })}
-                        className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
-                      />
-                    </label>
-                    <p className="mt-2 text-sm leading-6 text-[#344453]/55">Active le réceptionniste IA temps réel (Deepgram STT/TTS) à la place du répondeur classique.</p>
-                  </div>
-                </div>
+            {/* Sélecteur de mode */}
+            <div className="rounded-[24px] border border-[#344453]/12 bg-[#F8F9FB] p-1.5">
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, settings: { ...formData.settings, voicePipelineEnabled: false } })}
+                  className={`flex items-center justify-center gap-2 rounded-[20px] px-4 py-3 text-sm font-semibold transition ${
+                    !formData.settings.voicePipelineEnabled
+                      ? 'bg-white text-[#141F28] shadow-sm'
+                      : 'text-[#344453]/50 hover:text-[#344453]'
+                  }`}
+                >
+                  <Bot className="h-4 w-4" />
+                  Répondeur classique
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, settings: { ...formData.settings, voicePipelineEnabled: true } })}
+                  className={`flex items-center justify-center gap-2 rounded-[20px] px-4 py-3 text-sm font-semibold transition ${
+                    formData.settings.voicePipelineEnabled
+                      ? 'bg-[#344453] text-white shadow-sm'
+                      : 'text-[#344453]/50 hover:text-[#344453]'
+                  }`}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Agent IA temps réel
+                </button>
               </div>
-
-              {formData.settings.voicePipelineEnabled && (
-                <div>
-                  <label htmlFor="humanTransferNumber" className="block text-sm font-medium text-[#344453]">
-                    Numéro de transfert humain
-                  </label>
-                  <input
-                    type="tel"
-                    id="humanTransferNumber"
-                    value={formData.settings.humanTransferNumber}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      settings: {
-                        ...formData.settings,
-                        humanTransferNumber: e.target.value,
-                      },
-                    })}
-                    placeholder="+32 4 000 00 00"
-                    className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25 focus:bg-white"
-                  />
-                </div>
-              )}
             </div>
 
-            {!formData.settings.voicePipelineEnabled ? (
+            {/* Mode répondeur classique */}
+            {!formData.settings.voicePipelineEnabled && (
               <div className="space-y-4">
-                <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#344453]/10 text-[#344453]">
-                      <Bot className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-[#141F28]">Message d'accueil répondeur</h3>
-                      <p className="text-xs text-[#344453]/50">Répondeur — lu par Twilio à chaque appel entrant</p>
-                    </div>
-                  </div>
+                <div>
+                  <label htmlFor="greetingText" className="block text-sm font-medium text-[#344453]">
+                    Message d'accueil
+                  </label>
                   <textarea
                     id="greetingText"
                     rows={3}
                     value={formData.settings.greetingText}
                     onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, greetingText: e.target.value } })}
                     placeholder={`Bonjour, vous êtes bien chez ${formData.name || 'votre entreprise'}. Merci de laisser votre message après le bip.`}
-                    className="mt-4 block w-full resize-none rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
+                    className="mt-2 block w-full resize-none rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25 focus:bg-white"
                   />
-                  <p className="mt-2 text-xs text-[#344453]/45">Laissez vide pour utiliser le message par défaut.</p>
+                  <p className="mt-1.5 text-xs text-[#344453]/45">Lu par Twilio à chaque appel entrant. Laissez vide pour le message par défaut.</p>
                 </div>
 
                 <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <PhoneForwarded className="mt-0.5 h-5 w-5 text-[#344453]" />
-                    <div className="min-w-0 flex-1">
-                      <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
-                        <span>Routage intelligent activé</span>
-                        <input
-                          type="checkbox"
-                          checked={formData.settings.smartRoutingEnabled}
-                          onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, smartRoutingEnabled: e.target.checked } })}
-                          className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
-                        />
-                      </label>
-                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">L'appelant dit son motif, il est mis en attente, et vous le transférez manuellement depuis le dashboard.</p>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <PhoneForwarded className="mt-0.5 h-5 w-5 shrink-0 text-[#344453]" />
+                      <div>
+                        <p className="text-sm font-medium text-[#141F28]">Routage intelligent</p>
+                        <p className="mt-1 text-sm leading-6 text-[#344453]/55">L'appelant dit son motif, il est mis en attente, et vous le transférez depuis le dashboard.</p>
+                      </div>
                     </div>
+                    <input
+                      type="checkbox"
+                      checked={formData.settings.smartRoutingEnabled}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, smartRoutingEnabled: e.target.checked } })}
+                      className="mt-1 h-4 w-4 shrink-0 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
+                    />
                   </div>
-
                   {formData.settings.smartRoutingEnabled && (
-                    <div className="mt-4">
+                    <div className="mt-4 border-t border-[#344453]/8 pt-4">
                       <label htmlFor="routingQuestion" className="block text-sm font-medium text-[#344453]">
                         Question posée à l'appelant
                       </label>
@@ -429,86 +392,143 @@ export default function SettingsOfferB() {
                   )}
                 </div>
               </div>
-            ) : (
-              <div className="grid gap-5 lg:grid-cols-2">
+            )}
+
+            {/* Mode agent IA temps réel */}
+            {formData.settings.voicePipelineEnabled && (
+              <div className="space-y-4">
+                {/* Message d'accueil agent */}
                 <div>
-                  <label htmlFor="maxAgentFailures" className="block text-sm font-medium text-[#344453]">
-                    Seuil de blocage avant transfert
-                  </label>
-                  <input
-                    type="number"
-                    id="maxAgentFailures"
-                    min={1}
-                    max={10}
-                    value={formData.settings.maxAgentFailures}
-                    onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, maxAgentFailures: Number(e.target.value || 1) } })}
-                    className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition focus:border-[#344453]/25 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="greetingText" className="block text-sm font-medium text-[#344453]">
-                    Message d'accueil agent vocal
+                  <label htmlFor="greetingTextAgent" className="block text-sm font-medium text-[#344453]">
+                    Message d'accueil de l'agent
                   </label>
                   <input
                     type="text"
-                    id="greetingText"
+                    id="greetingTextAgent"
                     value={formData.settings.greetingText}
                     onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, greetingText: e.target.value } })}
-                    placeholder="Bonjour, vous êtes bien chez ..."
+                    placeholder={`Bonjour, vous êtes bien chez ${formData.name || 'votre entreprise'}. Comment puis-je vous aider ?`}
                     className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25 focus:bg-white"
                   />
+                  <p className="mt-1.5 text-xs text-[#344453]/45">Première phrase prononcée par l'agent à chaque appel.</p>
                 </div>
-              </div>
-            )}
 
-            {formData.settings.voicePipelineEnabled && (
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <Bot className="mt-0.5 h-5 w-5 text-[#344453]" />
-                    <div className="min-w-0 flex-1">
-                      <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
-                        <span>Agent vocal activé</span>
-                        <input type="checkbox" checked={formData.settings.agentEnabled} onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, agentEnabled: e.target.checked } })} className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]" />
+                {/* Transfert humain */}
+                <div className="rounded-[24px] border border-[#344453]/12 bg-[#F8F9FB] p-4 sm:p-5">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-[#344453]">
+                    <PhoneForwarded className="h-4 w-4" />
+                    Transfert vers un humain
+                  </div>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <div>
+                      <label htmlFor="humanTransferNumber" className="block text-sm font-medium text-[#344453]">
+                        Numéro de transfert
                       </label>
-                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">Permet à l'agent IA de décrocher activement et de dialoguer avec l'appelant.</p>
+                      <input
+                        type="tel"
+                        id="humanTransferNumber"
+                        value={formData.settings.humanTransferNumber}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, humanTransferNumber: e.target.value } })}
+                        placeholder="+32 4 000 00 00"
+                        className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="maxAgentFailures" className="block text-sm font-medium text-[#344453]">
+                        Tentatives avant transfert auto
+                      </label>
+                      <input
+                        type="number"
+                        id="maxAgentFailures"
+                        min={1}
+                        max={10}
+                        value={formData.settings.maxAgentFailures}
+                        onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, maxAgentFailures: Number(e.target.value || 1) } })}
+                        className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition focus:border-[#344453]/25"
+                      />
                     </div>
                   </div>
-                </div>
-                <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <Database className="mt-0.5 h-5 w-5 text-[#344453]" />
-                    <div className="min-w-0 flex-1">
-                      <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
-                        <span>Base de connaissances activée</span>
-                        <input type="checkbox" checked={formData.settings.knowledgeBaseEnabled} onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, knowledgeBaseEnabled: e.target.checked } })} className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]" />
-                      </label>
-                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">Quand elle est active, l'agent peut s'appuyer sur les informations ci-dessous pour répondre sans halluciner.</p>
-                    </div>
+                  <div className="mt-4">
+                    <label htmlFor="transferMessage" className="block text-sm font-medium text-[#344453]">
+                      Message audio avant transfert
+                    </label>
+                    <input
+                      type="text"
+                      id="transferMessage"
+                      value={formData.settings.transferMessage}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, transferMessage: e.target.value } })}
+                      placeholder="Je vous mets en relation avec la personne compétente pour votre demande. Un instant s'il vous plaît."
+                      className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
+                    />
+                    <p className="mt-1.5 text-xs text-[#344453]/45">Prononcé par l'agent vocal (TTS premium) juste avant de passer l'appel.</p>
                   </div>
                 </div>
-                <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <PhoneForwarded className="mt-0.5 h-5 w-5 text-[#344453]" />
-                    <div className="min-w-0 flex-1">
-                      <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
-                        <span>Fallback vers messagerie</span>
-                        <input type="checkbox" checked={formData.settings.fallbackToVoicemail} onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, fallbackToVoicemail: e.target.checked } })} className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]" />
-                      </label>
-                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">Si l'agent temps réel échoue, l'appel pourra revenir au flux sûr de l'offre A.</p>
+
+                {/* Options avancées */}
+                <div className="grid gap-3 lg:grid-cols-3">
+                  <label className="flex cursor-pointer items-start justify-between gap-4 rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4">
+                    <div className="flex items-start gap-3">
+                      <Bot className="mt-0.5 h-4 w-4 shrink-0 text-[#344453]" />
+                      <div>
+                        <p className="text-sm font-medium text-[#141F28]">Agent vocal activé</p>
+                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">L'agent décroche et dialogue activement.</p>
+                      </div>
                     </div>
-                  </div>
+                    <input
+                      type="checkbox"
+                      checked={formData.settings.agentEnabled}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, agentEnabled: e.target.checked } })}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
+                    />
+                  </label>
+
+                  <label className="flex cursor-pointer items-start justify-between gap-4 rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4">
+                    <div className="flex items-start gap-3">
+                      <Database className="mt-0.5 h-4 w-4 shrink-0 text-[#344453]" />
+                      <div>
+                        <p className="text-sm font-medium text-[#141F28]">Base de connaissances</p>
+                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">L'agent s'appuie sur vos infos métier.</p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formData.settings.knowledgeBaseEnabled}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, knowledgeBaseEnabled: e.target.checked } })}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
+                    />
+                  </label>
+
+                  <label className="flex cursor-pointer items-start justify-between gap-4 rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4">
+                    <div className="flex items-start gap-3">
+                      <PhoneForwarded className="mt-0.5 h-4 w-4 shrink-0 text-[#344453]" />
+                      <div>
+                        <p className="text-sm font-medium text-[#141F28]">Fallback messagerie</p>
+                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">Revient au répondeur si l'agent échoue.</p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formData.settings.fallbackToVoicemail}
+                      onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, fallbackToVoicemail: e.target.checked } })}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]"
+                    />
+                  </label>
                 </div>
+
+                {/* Lien réglages avancés agent */}
                 <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <Sparkles className="mt-0.5 h-5 w-5 text-[#344453]" />
-                    <div className="min-w-0 flex-1">
-                      <label className="flex items-center justify-between gap-4 text-sm font-medium text-[#141F28]">
-                        <span>Réservation prévue plus tard</span>
-                        <input type="checkbox" checked={formData.settings.appointmentIntegrationEnabled} onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, appointmentIntegrationEnabled: e.target.checked } })} className="h-4 w-4 rounded border-[#344453]/20 text-[#344453] focus:ring-[#344453]" />
-                      </label>
-                      <p className="mt-2 text-sm leading-6 text-[#344453]/55">Ce flag réserve le terrain pour les futures intégrations agenda sans activer encore la prise de rendez-vous.</p>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-[#141F28]">Réglages avancés de l'agent</p>
+                      <p className="mt-1 text-sm text-[#344453]/55">Prompt système, température, modèles STT/TTS et seuils de fluidité.</p>
                     </div>
+                    <Link
+                      to="/settings/agent-ia"
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-[#344453] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2a3642]"
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      Ouvrir
+                    </Link>
                   </div>
                 </div>
               </div>

@@ -46,6 +46,7 @@ export interface OfferBSettings {
   appointmentIntegrationEnabled?: boolean;
   smartRoutingEnabled?: boolean;
   routingQuestion?: string;
+  transferMessage?: string;
   bbisAgent?: BbisAgentSettings;
 }
 

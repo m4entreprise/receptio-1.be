@@ -32,6 +32,7 @@ const offerBSettingsSchema = z.object({
   greetingText: z.string().optional(),
   knowledgeBaseEnabled: z.boolean().optional(),
   appointmentIntegrationEnabled: z.boolean().optional(),
+  transferMessage: z.string().max(500).optional(),
   bbisAgent: bbisAgentSettingsSchema.optional(),
 });
 

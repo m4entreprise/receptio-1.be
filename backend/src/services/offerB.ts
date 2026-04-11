@@ -40,6 +40,7 @@ const defaultOfferBSettings: Required<OfferBSettings> = {
   appointmentIntegrationEnabled: false,
   smartRoutingEnabled: false,
   routingQuestion: '',
+  transferMessage: '',
   bbisAgent: {
     systemPrompt: '',
     temperature: 0.4,

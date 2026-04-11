@@ -51,6 +51,7 @@ interface StreamSessionState {
   initialized: boolean;
   greetingText: string;
   humanTransferNumber: string;
+  transferMessage: string;
   knowledgeContext: string;
   lastIntent: string;
   pendingAudioChunks: Buffer[];
@@ -414,6 +415,7 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     initialized: false,
     greetingText: '',
     humanTransferNumber: '',
+    transferMessage: '',
     knowledgeContext: '',
     lastIntent: 'autre',
     pendingAudioChunks: [],
@@ -698,6 +700,7 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
   state.fallbackToVoicemail = offerBSettings.fallbackToVoicemail;
   state.greetingText = offerBSettings.greetingText || `Bonjour, vous êtes bien chez ${callContext.companyName}. Comment puis-je vous aider aujourd’hui ?`;
   state.humanTransferNumber = offerBSettings.humanTransferNumber;
+  state.transferMessage = offerBSettings.transferMessage?.trim() || 'Je vous mets en relation avec la personne compétente pour votre demande. Un instant s\'il vous plaît.';
   state.knowledgeContext = knowledgeContext;
   state.initialized = true;
 }
@@ -809,6 +812,12 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         input: callerText,
         transferNumber: state.humanTransferNumber,
         source: 'streaming_user_request',
+      });
+      await speakAssistantText(twilioSocket, state, state.transferMessage, {
+        actionType: 'transfer_announcement',
+        closeAfterPlayback: false,
+        persistTranscript: false,
+        source: 'transfer_premium_tts',
       });
       await redirectTwilioCall(state.callSid, buildTransferTwiml(state.humanTransferNumber));
       await finalizeStreamingCall(state, 'human_transfer_requested');
@@ -934,6 +943,12 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         input: callerText,
         transferNumber: state.humanTransferNumber,
         source: 'streaming_agent_decision',
+      });
+      await speakAssistantText(twilioSocket, state, state.transferMessage, {
+        actionType: 'transfer_announcement',
+        closeAfterPlayback: false,
+        persistTranscript: false,
+        source: 'transfer_premium_tts',
       });
       await redirectTwilioCall(state.callSid, buildTransferTwiml(state.humanTransferNumber));
       await finalizeStreamingCall(state, 'agent_transfer_requested');
