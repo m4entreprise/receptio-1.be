@@ -825,9 +825,14 @@ function buildDispatchTransferTwiml(params: BuildDispatchTransferTwimlParams): s
     `/api/webhooks/twilio/dispatch-fallback?companyId=${encodeURIComponent(companyId)}&callId=${encodeURIComponent(callId)}${fallbackQs}`
   );
 
+  const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+  const wsBaseUrl = toWebSocketBaseUrl(baseUrl);
+  const streamUrl = joinUrl(wsBaseUrl, `/api/media-streams/outbound?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
+
   return buildTwiml(
     `<Say language="fr-FR">${escapeXml(announcement)}</Say>` +
-    `<Dial timeout="30" answerOnBridge="true" action="${escapeXml(dialActionUrl)}" method="POST">${numberTags}</Dial>`
+    `<Start><Stream url="${escapeXml(streamUrl)}" track="both_tracks"><Parameter name="callId" value="${escapeXml(callId)}" /><Parameter name="companyId" value="${escapeXml(companyId)}" /></Stream></Start>` +
+    `<Dial timeout="30" answerOnBridge="true" action="${escapeXml(dialActionUrl)}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST">${numberTags}</Dial>`
   );
 }
 
@@ -850,6 +855,9 @@ async function createOrUpdateTwilioCall(payload: any, companyId: string): Promis
     return existingCall.rows[0].id;
   }
 
+  const rawFrom = String(payload.From || '').trim();
+  const callerNumber = rawFrom && !/^(anonymous|private|unknown|restricted)$/i.test(rawFrom) ? rawFrom : null;
+
   const result = await query(
     `INSERT INTO calls (company_id, call_sid, caller_number, direction, status, metadata)
      VALUES ($1, $2, $3, $4, $5, $6)
@@ -857,10 +865,10 @@ async function createOrUpdateTwilioCall(payload: any, companyId: string): Promis
     [
       companyId,
       payload.CallSid,
-      payload.From || null,
+      callerNumber,
       'inbound',
       payload.CallStatus || 'initiated',
-      { to: payload.To || null, provider: 'twilio' },
+      { to: payload.To || null, provider: 'twilio', callerPrivate: !callerNumber },
     ]
   );
 
