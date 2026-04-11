@@ -286,6 +286,42 @@ CREATE TABLE IF NOT EXISTS staff_group_members (
 CREATE INDEX IF NOT EXISTS idx_staff_group_members_group_id ON staff_group_members(group_id);
 CREATE INDEX IF NOT EXISTS idx_staff_group_members_staff_id ON staff_group_members(staff_id);
 
+-- Dispatch rules: call routing configuration per company
+CREATE TABLE IF NOT EXISTS dispatch_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    priority INTEGER DEFAULT 0,
+    enabled BOOLEAN DEFAULT true,
+    condition_type VARCHAR(50) DEFAULT 'always',
+    conditions JSONB DEFAULT '{}',
+    target_type VARCHAR(50) DEFAULT 'group',
+    target_group_id UUID REFERENCES staff_groups(id) ON DELETE SET NULL,
+    target_staff_id UUID REFERENCES staff(id) ON DELETE SET NULL,
+    distribution_strategy VARCHAR(50) DEFAULT 'sequential',
+    agent_order JSONB DEFAULT '[]',
+    fallback_type VARCHAR(50) DEFAULT 'voicemail',
+    fallback_group_id UUID REFERENCES staff_groups(id) ON DELETE SET NULL,
+    fallback_staff_id UUID REFERENCES staff(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dispatch_rules_company_id ON dispatch_rules(company_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_dispatch_rules_updated_at'
+          AND tgrelid = 'dispatch_rules'::regclass
+    ) THEN
+        CREATE TRIGGER update_dispatch_rules_updated_at BEFORE UPDATE ON dispatch_rules
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
+
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES
 ('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}')

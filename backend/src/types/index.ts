@@ -156,6 +156,27 @@ export interface StaffGroup {
   updatedAt: Date;
 }
 
+export interface DispatchRule {
+  id: string;
+  companyId: string;
+  name: string;
+  description?: string;
+  priority: number;
+  enabled: boolean;
+  conditionType: 'always' | 'intent';
+  conditions: Record<string, any>;
+  targetType: 'group' | 'agent';
+  targetGroupId?: string;
+  targetStaffId?: string;
+  distributionStrategy: 'sequential' | 'random' | 'simultaneous';
+  agentOrder: string[];
+  fallbackType: 'voicemail' | 'none' | 'group' | 'agent';
+  fallbackGroupId?: string;
+  fallbackStaffId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface BusinessRule {
   id: string;
   companyId: string;
