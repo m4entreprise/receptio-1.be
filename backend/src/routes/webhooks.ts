@@ -6,6 +6,7 @@ import { textToSpeech as mistralTextToSpeech } from '../services/mistral';
 import { detectIntent, generateResponse, summarizeCall, transcribeAudio } from '../services/openai';
 import { transcribeAudioUrlWithDiarization } from '../services/mistral';
 import { buildKnowledgeBaseContext, defaultEscalationPolicy, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
+import { resolveDispatchTarget } from '../services/dispatchService';
 import { shouldUseOfferBStreamingPipeline } from '../services/twilioMediaStreams';
 import logger from '../utils/logger';
 
@@ -208,6 +209,32 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
     }
   }
 
+  // Try to automatically dispatch the call via configured rules
+  const baseUrl = getBaseUrl(req);
+  const dispatchTarget = await resolveDispatchTarget(companyId, speechResult || undefined);
+
+  if (dispatchTarget && callId) {
+    await query(
+      `UPDATE calls SET queue_status = 'dispatched', metadata = metadata || $1 WHERE id = $2`,
+      [JSON.stringify({ dispatchRuleId: dispatchTarget.ruleId, dispatchRuleName: dispatchTarget.ruleName }), callId]
+    ).catch((e: any) => logger.warn('dispatch metadata update failed', { error: e.message }));
+
+    res.type('text/xml').send(buildDispatchTransferTwiml({
+      numbers: dispatchTarget.numbers,
+      simultaneous: dispatchTarget.strategy === 'simultaneous',
+      announcement: speechResult
+        ? 'Merci. Je vous mets en relation avec le bon interlocuteur.'
+        : 'Je vous mets en relation avec un agent.',
+      fallbackType: dispatchTarget.fallbackType,
+      fallbackNumber: dispatchTarget.fallbackNumber,
+      baseUrl,
+      companyId,
+      callId,
+    }));
+    return;
+  }
+
+  // No matching dispatch rule: hold message (manual transfer from dashboard)
   res.type('text/xml').send(buildTwiml(
     `<Say language="fr-FR">Merci. Veuillez patienter, un agent va vous prendre en charge.</Say>` +
     `<Pause length="30"/><Say language="fr-FR">Nous vous remercions de votre patience.</Say><Pause length="30"/><Hangup />`
@@ -284,25 +311,31 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
         lastAction: escalation.shouldTransfer ? 'transfer_requested_after_silence' : 'reprompt_after_silence',
       });
 
-      if (escalation.shouldTransfer && offerBSettings.humanTransferNumber) {
-        await registerOfferBAction(call.id, 'transfer_to_human', {
-          reason: escalation.reason,
-          transferNumber: offerBSettings.humanTransferNumber,
-        });
-        res.type('text/xml').send(buildTransferTwiml(offerBSettings.humanTransferNumber));
-        return;
-      }
+      if (escalation.shouldTransfer) {
+        const dispatchTarget = await resolveDispatchTarget(company.id, undefined);
+        const transferNumber = dispatchTarget?.numbers[0] || offerBSettings.humanTransferNumber;
 
-      if (escalation.shouldTransfer && offerBSettings.fallbackToVoicemail) {
-        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
-        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
-        await registerOfferBAction(call.id, 'fallback_to_voicemail', { reason: escalation.reason });
-        res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
-        return;
+        if (transferNumber) {
+          await registerOfferBAction(call.id, 'transfer_to_human', {
+            reason: escalation.reason,
+            transferNumber,
+            dispatchRuleId: dispatchTarget?.ruleId,
+          });
+          res.type('text/xml').send(buildTransferTwiml(transferNumber));
+          return;
+        }
+
+        if (offerBSettings.fallbackToVoicemail) {
+          const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
+          const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+          await registerOfferBAction(call.id, 'fallback_to_voicemail', { reason: escalation.reason });
+          res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+          return;
+        }
       }
 
       res.type('text/xml').send(
-        buildOfferBFollowupTwiml(baseUrl, call.id, 'Je n’ai rien entendu. Pouvez-vous répéter votre demande en une phrase ?')
+        buildOfferBFollowupTwiml(baseUrl, call.id, "Je n'ai rien entendu. Pouvez-vous répéter votre demande en une phrase ?")
       );
       return;
     }
@@ -387,14 +420,20 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
         return;
       }
 
-      if (escalation.shouldTransfer && offerBSettings.humanTransferNumber) {
-        await registerOfferBAction(call.id, 'transfer_to_human', {
-          reason: escalation.reason,
-          transferNumber: offerBSettings.humanTransferNumber,
-          intent: intentData.intent,
-        });
-        res.type('text/xml').send(buildTransferTwiml(offerBSettings.humanTransferNumber));
-        return;
+      if (escalation.shouldTransfer) {
+        const dispatchTarget = await resolveDispatchTarget(company.id, speechResult);
+        const transferNumber = dispatchTarget?.numbers[0] || offerBSettings.humanTransferNumber;
+
+        if (transferNumber) {
+          await registerOfferBAction(call.id, 'transfer_to_human', {
+            reason: escalation.reason,
+            transferNumber,
+            intent: intentData.intent,
+            dispatchRuleId: dispatchTarget?.ruleId,
+          });
+          res.type('text/xml').send(buildTransferTwiml(transferNumber));
+          return;
+        }
       }
 
       if (offerBSettings.fallbackToVoicemail) {
@@ -571,6 +610,51 @@ router.all('/twilio/transfer', async (req: Request, res: Response) => {
   res.type('text/xml').send(twiml);
 });
 
+// Dispatch fallback — called by Twilio when a dispatched <Dial> ends
+router.all('/twilio/dispatch-fallback', async (req: Request, res: Response) => {
+  const companyId = String(req.query.companyId || '');
+  const callId = String(req.query.callId || '');
+  const fallback = String(req.query.fallback || 'voicemail');
+  const fallbackNumber = String(req.query.number || '');
+  const dialCallStatus = String(req.body?.DialCallStatus || '');
+  const baseUrl = getBaseUrl(req);
+
+  logger.info('dispatch-fallback', { companyId, callId, fallback, dialCallStatus });
+
+  // If the agent answered and the call completed normally, just hang up
+  if (dialCallStatus === 'completed') {
+    if (callId) {
+      await query(
+        `UPDATE calls SET status = 'transferred', queue_status = 'dispatched', ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $1`,
+        [callId]
+      ).catch(() => {});
+    }
+    res.type('text/xml').send(buildTwiml('<Hangup />'));
+    return;
+  }
+
+  // No answer / busy / failed — apply the configured fallback
+  if (fallback === 'transfer' && fallbackNumber) {
+    res.type('text/xml').send(buildTwiml(
+      `<Say language="fr-FR">Je vous transfère vers un autre collaborateur.</Say>` +
+      `<Dial timeout="30">${escapeXml(fallbackNumber)}</Dial>`
+    ));
+    return;
+  }
+
+  if (fallback === 'none') {
+    res.type('text/xml').send(buildTwiml(
+      `<Say language="fr-FR">Nos équipes sont actuellement indisponibles. Merci de rappeler ultérieurement.</Say><Hangup />`
+    ));
+    return;
+  }
+
+  // Default fallback: voicemail
+  const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${encodeURIComponent(companyId)}`);
+  const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+  res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
+});
+
 // Generic inbound call status callback — fired by Twilio on every status change
 router.post('/twilio/voice-status', async (req: Request, res: Response) => {
   try {
@@ -712,6 +796,41 @@ function buildTransferTwiml(targetNumber: string): string {
   return buildTwiml(`<Say language="fr-FR" voice="alice">Je vous transfère vers un collaborateur.</Say><Dial>${escapeXml(targetNumber)}</Dial>`);
 }
 
+interface BuildDispatchTransferTwimlParams {
+  numbers: string[];
+  simultaneous: boolean;
+  announcement: string;
+  fallbackType: string;
+  fallbackNumber?: string;
+  baseUrl: string;
+  companyId: string;
+  callId: string;
+}
+
+function buildDispatchTransferTwiml(params: BuildDispatchTransferTwimlParams): string {
+  const { numbers, simultaneous: _simultaneous, announcement, fallbackType, fallbackNumber, baseUrl, companyId, callId } = params;
+
+  const numberTags = numbers.map(n => `<Number>${escapeXml(n)}</Number>`).join('');
+
+  let fallbackParam = 'voicemail';
+  if (fallbackType === 'none') fallbackParam = 'none';
+  else if ((fallbackType === 'group' || fallbackType === 'agent') && fallbackNumber) fallbackParam = 'transfer';
+
+  const fallbackQs = fallbackParam === 'transfer' && fallbackNumber
+    ? `&fallback=transfer&number=${encodeURIComponent(fallbackNumber)}`
+    : `&fallback=${fallbackParam}`;
+
+  const dialActionUrl = joinUrl(
+    baseUrl,
+    `/api/webhooks/twilio/dispatch-fallback?companyId=${encodeURIComponent(companyId)}&callId=${encodeURIComponent(callId)}${fallbackQs}`
+  );
+
+  return buildTwiml(
+    `<Say language="fr-FR">${escapeXml(announcement)}</Say>` +
+    `<Dial timeout="30" answerOnBridge="true" action="${escapeXml(dialActionUrl)}" method="POST">${numberTags}</Dial>`
+  );
+}
+
 async function findCompanyByPhoneNumber(phoneNumber: string) {
   const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
   const result = await query(
@@ -836,7 +955,7 @@ async function upsertOfferBSummary(callId: string, callerInput: string, intent: 
     await query(
       `INSERT INTO call_summaries (call_id, summary, intent, actions)
        VALUES ($1, $2, $3, $4)`,
-      [callId, summaryText, intent, JSON.stringify([{ type: 'agent_replied', description: 'Réponse temps réel générée par l’agent.' }])]
+      [callId, summaryText, intent, JSON.stringify([{ type: 'agent_replied', description: "Réponse temps réel générée par l'agent." }])]
     );
     return;
   }
@@ -857,11 +976,11 @@ async function registerOfferBAction(callId: string, eventType: string, data: Rec
   );
 
   const actionDescriptions: Record<string, string> = {
-    transfer_to_human: 'Transfert vers un humain demandé ou décidé par l’agent.',
-    fallback_to_voicemail: 'Retour automatique vers la messagerie de l’offre A.',
-    agent_replied: 'Réponse temps réel fournie par le réceptionniste IA.',
-    agent_needs_clarification: 'L’agent a demandé une reformulation au lieu d’escalader immédiatement.',
-    agent_closed_call: 'L’agent a conclu l’appel après une formule de clôture.',
+    transfer_to_human: "Transfert vers un humain demandé ou décidé par l'agent.",
+    fallback_to_voicemail: "Retour automatique vers la messagerie de l'offre A.",
+    agent_replied: "Réponse temps réel fournie par le réceptionniste IA.",
+    agent_needs_clarification: "L'agent a demandé une reformulation au lieu d'escalader immédiatement.",
+    agent_closed_call: "L'agent a conclu l'appel après une formule de clôture.",
   };
 
   const summaryResult = await query(
@@ -899,10 +1018,10 @@ async function generateOfferBReply(params: {
     `Tu es le réceptionniste téléphonique de ${params.companyName}.`,
     'Réponds en français, avec deux phrases maximum, ton professionnel et utile.',
     'Si le client demande explicitement un humain, un rappel ou un transfert, réponds exactement __TRANSFER__.',
-    'Si l’information manque, n’invente pas et ne transfère pas automatiquement : demande une précision en une phrase courte.',
-    'N’invente pas : utilise uniquement les informations métier fournies si elles existent.',
-    params.knowledgeContext ? `Informations métier disponibles:\n${params.knowledgeContext}` : 'Aucune information métier fiable n’est disponible.',
-    params.humanTransferNumber ? `Un numéro humain est configuré : ${params.humanTransferNumber}.` : 'Aucun numéro humain n’est configuré.',
+    "Si l'information manque, n'invente pas et ne transfère pas automatiquement : demande une précision en une phrase courte.",
+    "N'invente pas : utilise uniquement les informations métier fournies si elles existent.",
+    params.knowledgeContext ? `Informations métier disponibles:\n${params.knowledgeContext}` : "Aucune information métier fiable n'est disponible.",
+    params.humanTransferNumber ? `Un numéro humain est configuré : ${params.humanTransferNumber}.` : "Aucun numéro humain n'est configuré.",
   ].join('\n\n');
 
   const response = await generateResponse(
