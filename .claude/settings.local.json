@@ -8,5 +8,6 @@
       "Bash(xargs ls:*)",
       "Bash(wc -l /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/services/*.ts)"
     ]
-  }
+  },
+  "outputStyle": "default"
 }
