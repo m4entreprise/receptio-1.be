@@ -531,63 +531,118 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
       [call.id, 'twilio.recording.completed', payload]
     );
 
-    const transcription = await transcribeAudio(recordingUrl, 'fr');
-
-    const existingTranscription = await query(
-      'SELECT id, text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
-      [call.id]
-    );
-
-    const fullText = existingTranscription.rows.length > 0
-      ? `[Motif initial] ${existingTranscription.rows[0].text}\n\n[Conversation avec l'agent]\n${transcription.text}`
-      : transcription.text;
-
-    if (existingTranscription.rows.length > 0) {
-      await query(
-        `UPDATE transcriptions SET text = $1 WHERE id = $2`,
-        [fullText, existingTranscription.rows[0].id]
-      );
-    } else {
-      await query(
-        `INSERT INTO transcriptions (call_id, text, language, confidence)
-         VALUES ($1, $2, $3, $4)`,
-        [call.id, fullText, transcription.language, transcription.confidence]
-      );
-    }
-
-    const [summary, intentData] = await Promise.all([
-      summarizeCall(fullText),
-      detectIntent(fullText),
-    ]);
-
-    const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [call.id]);
-    if (existingSummary.rows.length > 0) {
-      await query(
-        `UPDATE call_summaries SET summary = $1, intent = $2 WHERE call_id = $3`,
-        [summary, intentData.intent, call.id]
-      );
-    } else {
-      await query(
-        `INSERT INTO call_summaries (call_id, summary, intent, actions)
-         VALUES ($1, $2, $3, $4)`,
-        [call.id, summary, intentData.intent, JSON.stringify([])]
-      );
-    }
-
-    if (call.company_email) {
-      try {
-        await sendTranscriptionEmail(call.company_email, {
-          callerNumber: call.caller_number || 'Inconnu',
-          transcription: fullText,
-          duration: recordingDuration,
-          createdAt: call.created_at,
-        });
-      } catch (error: any) {
-        logger.error('Twilio transcription email error', { error: error.message, callId: call.id });
-      }
-    }
-
+    // Respond immediately — transcription runs async
     res.status(200).send('ok');
+
+    setImmediate(async () => {
+      try {
+        const existingT = await query(
+          'SELECT id, text, segments FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1',
+          [call.id]
+        );
+
+        type Segment = { role: 'agent' | 'client'; text: string; ts?: number };
+        let segments: Segment[] | null = null;
+        let fullText = '';
+        let lang = 'fr';
+        let confidence = 0.9;
+        const motifInitial = existingT.rows.length > 0 ? (existingT.rows[0].text || '') : '';
+        let hasExistingSegments = false;
+
+        // 1. Segments déjà en DB (flush WebSocket)
+        if (existingT.rows.length > 0 && existingT.rows[0].segments) {
+          try {
+            const raw = existingT.rows[0].segments;
+            const parsed: Segment[] = Array.isArray(raw) ? raw : JSON.parse(raw);
+            if (parsed.length > 0) {
+              segments = parsed;
+              fullText = existingT.rows[0].text || '';
+              hasExistingSegments = true;
+              logger.info('recording-complete: using existing WebSocket segments', { callId: call.id, count: segments.length });
+            }
+          } catch { /* ignore */ }
+        }
+
+        // 2. live_transcript JSON (stream audio en cours / flush récent)
+        if (!hasExistingSegments) {
+          const callRow = await query('SELECT live_transcript FROM calls WHERE id = $1', [call.id]);
+          const liveRaw = callRow.rows[0]?.live_transcript;
+          if (liveRaw) {
+            try {
+              const parsed: Segment[] = JSON.parse(liveRaw);
+              if (Array.isArray(parsed) && parsed.length > 0 && 'role' in parsed[0]) {
+                segments = parsed;
+                const convText = parsed.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n');
+                fullText = motifInitial ? `[Motif initial] ${motifInitial}\n\n[Conversation avec l'agent]\n${convText}` : convText;
+                logger.info('recording-complete: using live_transcript segments', { callId: call.id, count: segments.length });
+              }
+            } catch { /* ignore */ }
+          }
+        }
+
+        // 3. Diarisation de l'enregistrement audio (fallback)
+        if (!segments) {
+          logger.info('recording-complete: running diarized transcription', { callId: call.id });
+          const diarized = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent');
+          segments = diarized.segments ?? null;
+          lang = diarized.language;
+          confidence = diarized.confidence;
+          const convText = segments
+            ? segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
+            : diarized.text;
+          fullText = motifInitial ? `[Motif initial] ${motifInitial}\n\n[Conversation avec l'agent]\n${convText}` : convText;
+        }
+
+        if (!hasExistingSegments) {
+          if (existingT.rows.length === 0) {
+            await query(
+              `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
+              [call.id, fullText, lang, confidence, segments ? JSON.stringify(segments) : null]
+            );
+          } else {
+            if (segments) {
+              await query(
+                'UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE id = $5',
+                [fullText, lang, confidence, JSON.stringify(segments), existingT.rows[0].id]
+              );
+            } else {
+              await query(
+                'UPDATE transcriptions SET text = $1, language = $2, confidence = $3 WHERE id = $4',
+                [fullText, lang, confidence, existingT.rows[0].id]
+              );
+            }
+          }
+        }
+
+        const [summary, intentData] = await Promise.all([
+          summarizeCall(fullText),
+          detectIntent(fullText),
+        ]);
+
+        const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [call.id]);
+        if (existingSummary.rows.length > 0) {
+          await query('UPDATE call_summaries SET summary = $1, intent = $2 WHERE call_id = $3', [summary, intentData.intent, call.id]);
+        } else {
+          await query(
+            'INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)',
+            [call.id, summary, intentData.intent, JSON.stringify([])]
+          );
+        }
+
+        if (call.company_email) {
+          await sendTranscriptionEmail(call.company_email, {
+            callerNumber: call.caller_number || 'Inconnu',
+            transcription: fullText,
+            duration: recordingDuration,
+            createdAt: call.created_at,
+          }).catch((e: any) => logger.error('Twilio transcription email error', { error: e.message, callId: call.id }));
+        }
+
+        logger.info('recording-complete: transcription + summary done', { callId: call.id });
+      } catch (err: any) {
+        logger.error('recording-complete async processing error', { callId: call.id, error: err.message });
+      }
+    });
   } catch (error: any) {
     logger.error('Twilio recording webhook error', { error: error.message });
     res.status(200).send('ok');
