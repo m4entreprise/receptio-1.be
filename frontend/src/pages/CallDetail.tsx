@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
 import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, PhoneIncoming, ChevronDown, ClipboardCheck } from 'lucide-react';
 import axios from 'axios';
@@ -701,7 +701,7 @@ export default function CallDetail() {
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
               <ClipboardCheck className="h-5 w-5" />
             </div>
-            <div>
+            <div className="flex-1">
               <h2 className="text-base font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>
                 Analyse qualité (QA)
               </h2>
@@ -709,6 +709,14 @@ export default function CallDetail() {
                 Évaluation de l'appel par Mistral selon vos critères configurés.
               </p>
             </div>
+            {id && isValidCallId && qaResults.length > 0 && (
+              <Link
+                to={`/calls/${id}/qa`}
+                className="inline-flex items-center rounded-full border border-[#344453]/15 bg-[#344453]/5 px-4 py-2 text-sm font-medium text-[#344453] transition hover:bg-[#344453]/10"
+              >
+                Ouvrir le rapport complet
+              </Link>
+            )}
           </div>
 
           <div className="px-5 py-5 sm:px-6 space-y-5">
@@ -771,7 +779,7 @@ export default function CallDetail() {
                   Analyses précédentes
                 </p>
                 {qaResults.map(r => (
-                  <div key={r.id} className="flex items-center gap-4 rounded-xl border border-[#344453]/10 px-4 py-3">
+                  <Link key={r.id} to={`/calls/${id}/qa`} className="flex items-center gap-4 rounded-xl border border-[#344453]/10 px-4 py-3 transition hover:border-[#344453]/20 hover:bg-[#344453]/[0.02]">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[#141F28] truncate">{r.templateName}</p>
                       <p className="text-xs text-[#344453]/45 mt-0.5">
@@ -794,7 +802,7 @@ export default function CallDetail() {
                     }`}>
                       {r.globalScore}/100
                     </span>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
-import { Link } from 'react-router-dom';
-import { Phone, PhoneIncoming, PhoneOutgoing, Search, Filter, ArrowRight, CalendarClock, Sparkles, X } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Phone, PhoneIncoming, PhoneOutgoing, Search, Filter, ArrowRight, CalendarClock, Sparkles } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import Layout from '../components/Layout';
-import CallQADetail from '../components/qa/CallQADetail';
 
 interface CallItem {
   id: string;
@@ -20,11 +19,11 @@ interface CallItem {
 }
 
 export default function Calls() {
+  const navigate = useNavigate();
   const [calls, setCalls] = useState<CallItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCalls();
@@ -203,7 +202,7 @@ export default function Calls() {
                 {filteredCalls.map((call) => (
                   <div
                     key={call.id}
-                    onClick={() => setSelectedCallId(call.id)}
+                    onClick={() => navigate(`/calls/${call.id}`)}
                     className="cursor-pointer rounded-[24px] border border-[#344453]/8 bg-[#F8F9FB] p-4 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_36px_rgba(52,68,83,0.10)] sm:p-5"
                   >
                     <div className="flex flex-col gap-4">
@@ -266,15 +265,15 @@ export default function Calls() {
 
                       <div className="flex items-center justify-between gap-3">
                         <div className="inline-flex items-center gap-2 text-sm font-medium text-[#344453]">
-                          Ouvrir le débrief QA
+                          Ouvrir la fiche d'appel
                           <ArrowRight className="h-4 w-4" />
                         </div>
                         <Link
-                          to={`/calls/${call.id}`}
+                          to={`/calls/${call.id}/qa`}
                           onClick={(event) => event.stopPropagation()}
                           className="text-sm font-medium text-[#C7601D] hover:underline"
                         >
-                          Voir la fiche complète
+                          Voir le rapport QA
                         </Link>
                       </div>
                     </div>
@@ -284,25 +283,6 @@ export default function Calls() {
             )}
           </div>
         </section>
-
-        {selectedCallId && (
-          <div className="fixed inset-0 z-50 bg-[#141F28]/25 backdrop-blur-[2px]" onClick={() => setSelectedCallId(null)}>
-            <div className="absolute inset-y-0 right-0 h-full w-full max-w-2xl overflow-y-auto border-l border-[#344453]/10 bg-[#F8F9FB] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#344453]/10 bg-[#F8F9FB]/95 px-5 py-4 backdrop-blur-xl sm:px-6">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>Qualité IA</p>
-                  <h2 className="mt-1 text-lg font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Débriefing d'appel</h2>
-                </div>
-                <button onClick={() => setSelectedCallId(null)} className="rounded-full p-2 text-[#344453]/50 hover:bg-[#344453]/8 hover:text-[#344453] transition">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="p-5 sm:p-6">
-                <CallQADetail callId={selectedCallId} emptyActionHref={`/calls/${selectedCallId}`} />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </Layout>
   );

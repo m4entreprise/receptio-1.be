@@ -1049,10 +1049,10 @@ export default function Analytics() {
                       <tbody className="divide-y divide-[#344453]/5">
                         {callsToReview.map((r) => (
                           <tr key={`review-${r.id}`} className="hover:bg-[#344453]/[0.02] transition">
-                            <td className="px-4 py-3"><Link to={`/calls/${r.callId}`} className="font-mono text-xs text-[#344453]/60 hover:text-[#344453]">{r.callId.slice(0, 8)}…</Link></td>
+                            <td className="px-4 py-3"><Link to={`/calls/${r.callId}/qa`} className="font-mono text-xs text-[#344453]/60 hover:text-[#344453]">{r.callId.slice(0, 8)}…</Link></td>
                             <td className="px-4 py-3 text-[#344453]/70">{r.agentFirstName && r.agentLastName ? `${r.agentFirstName} ${r.agentLastName}` : '—'}</td>
                             <td className="px-4 py-3 text-[#141F28] font-semibold">{r.globalScore}/100</td>
-                            <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{r.flags.map((flag) => <span key={`${r.id}-${flag}`} className="rounded-full bg-[#D94052]/8 px-2 py-0.5 text-[10px] text-[#D94052]">{flag}</span>)}</div></td>
+                            <td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">{r.flags.map((flag) => <span key={`${r.id}-${flag}`} className="rounded-full bg-[#D94052]/8 px-2 py-0.5 text-[10px] text-[#D94052]">{flag}</span>)}<Link to={`/calls/${r.callId}/qa`} className="text-xs font-medium text-[#C7601D] hover:underline">Voir le rapport</Link></div></td>
                           </tr>
                         ))}
                         {callsToReview.length === 0 && (
@@ -1078,13 +1078,14 @@ export default function Analytics() {
                           <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Score</th>
                           <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Flags</th>
                           <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Date</th>
+                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#344453]/5">
                         {qaResults.slice(0, 20).map((r) => (
                           <tr key={r.id} className="hover:bg-[#344453]/[0.02] transition">
                             <td className="px-4 py-3">
-                              <Link to={`/calls/${r.callId}`} className="font-mono text-xs text-[#344453]/60 hover:text-[#344453] transition">
+                              <Link to={`/calls/${r.callId}/qa`} className="font-mono text-xs text-[#344453]/60 hover:text-[#344453] transition">
                                 {r.callId.slice(0, 8)}…
                               </Link>
                             </td>
@@ -1123,8 +1124,13 @@ export default function Analytics() {
                             </td>
                             <td className="px-4 py-3 text-xs text-[#344453]/45">
                               {r.processedAt
-                                ? format(parseISO(r.processedAt), 'dd/MM HH:mm', { locale: fr })
+                                ? format(parseISO(r.processedAt), 'dd/MM/yyyy HH:mm', { locale: fr })
                                 : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Link to={`/calls/${r.callId}/qa`} className="text-xs font-medium text-[#C7601D] hover:underline">
+                                Ouvrir
+                              </Link>
                             </td>
                           </tr>
                         ))}
