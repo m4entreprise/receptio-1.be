@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
 import { Link } from 'react-router-dom';
-import { Phone, Search, Filter, ArrowRight, CalendarClock, Sparkles } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneOutgoing, Search, Filter, ArrowRight, CalendarClock, Sparkles } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -15,6 +15,7 @@ interface CallItem {
   created_at: string;
   duration?: number;
   status: string;
+  direction?: string | null;
 }
 
 export default function Calls() {
@@ -206,8 +207,11 @@ export default function Calls() {
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex min-w-0 items-start gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#344453] text-white">
-                            <Phone className="h-4 w-4" />
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white ${call.direction === 'outbound' ? 'bg-[#C7601D]' : 'bg-[#344453]'}`}>
+                            {call.direction === 'outbound'
+                              ? <PhoneOutgoing className="h-4 w-4" />
+                              : <PhoneIncoming className="h-4 w-4" />
+                            }
                           </div>
 
                           <div className="min-w-0">
@@ -215,6 +219,10 @@ export default function Calls() {
                               <p className="truncate text-sm font-semibold text-[#141F28] sm:text-base">
                                 {call.caller_number || 'Numéro inconnu'}
                               </p>
+                              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${call.direction === 'outbound' ? 'bg-[#C7601D]/10 text-[#C7601D]' : 'bg-[#344453]/8 text-[#344453]/70'}`}>
+                                {call.direction === 'outbound' ? <PhoneOutgoing className="h-3 w-3" /> : <PhoneIncoming className="h-3 w-3" />}
+                                {call.direction === 'outbound' ? 'Sortant' : 'Entrant'}
+                              </span>
                               {call.transcription_text && (
                                 <span className="inline-flex items-center rounded-full bg-[#2D9D78]/12 px-3 py-1 text-xs font-medium text-[#2D9D78]">
                                   Transcrit

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
-import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, ChevronDown } from 'lucide-react';
+import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, PhoneIncoming, ChevronDown } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -22,16 +22,53 @@ interface CallDetailItem {
   summary?: string | null;
   intent?: string | null;
   transcription_text?: string | null;
+  transcription_segments?: Array<{ role: 'client' | 'agent'; text: string; ts?: number }> | null;
+  live_transcript?: string | null;
   language?: string | null;
   confidence?: number | null;
   recording_url?: string | null;
   actions?: CallAction[];
+  direction?: string | null;
 }
+
+type TranscriptSegment = { role: 'client' | 'agent'; text: string; ts?: number };
+
+function parseTranscriptSegments(raw: string | null | undefined): TranscriptSegment[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0 && 'role' in parsed[0]) return parsed as TranscriptSegment[];
+  } catch { /* plain text */ }
+  return null;
+}
+
+// Parse text format like "Client: ...\n\nAgent: ..." into segments
+function parseTranscriptTextWithPrefixes(text: string | null | undefined): TranscriptSegment[] | null {
+  if (!text || !text.trim()) return null;
+
+  const lines = text.split(/\n+/).filter(l => l.trim());
+  const segments: TranscriptSegment[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Match "Client:" or "Agent:" at the start
+    const match = trimmed.match(/^(Client|Agent)\s*:\s*(.+)$/i);
+    if (match) {
+      const role = match[1].toLowerCase() === 'agent' ? 'agent' : 'client';
+      segments.push({ role, text: match[2].trim() });
+    }
+  }
+
+  return segments.length > 0 ? segments : null;
+}
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function CallDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isValidCallId = !!id && uuidPattern.test(id);
   const [call, setCall] = useState<CallDetailItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
@@ -71,14 +108,20 @@ export default function CallDetail() {
   };
 
   useEffect(() => {
+    if (!isValidCallId) {
+      setCall(null);
+      setLoading(false);
+      return;
+    }
+
     fetchCallDetail();
-  }, [id]);
+  }, [id, isValidCallId]);
 
   useEffect(() => {
     let objectUrl: string | null = null;
 
     const fetchRecording = async () => {
-      if (!call?.recording_url || !id) {
+      if (!call?.recording_url || !id || !isValidCallId) {
         setRecordingBlobUrl(null);
         setRecordingLoading(false);
         setIsPlaying(false);
@@ -116,7 +159,7 @@ export default function CallDetail() {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [call?.recording_url, id]);
+  }, [call?.recording_url, id, isValidCallId]);
 
   const handleTogglePlayback = async () => {
     if (!audioRef.current) {
@@ -157,6 +200,12 @@ export default function CallDetail() {
   };
 
   const fetchCallDetail = async () => {
+    if (!id || !isValidCallId) {
+      setCall(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await axios.get(`/api/calls/${id}`);
       setCall(response.data.call as CallDetailItem);
@@ -168,6 +217,7 @@ export default function CallDetail() {
   };
 
   const handleDelete = async () => {
+    if (!id || !isValidCallId) return;
     if (!confirm('Êtes-vous sûr de vouloir supprimer cet appel ?')) return;
     
     setDeleting(true);
@@ -221,7 +271,7 @@ export default function CallDetail() {
                   Retour aux appels
                 </button>
 
-                <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: "var(--font-mono)" }}>
+                <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: "var(--font-mono)" }}>
                   <Sparkles className="h-3.5 w-3.5" />
                   Détail d'appel
                 </div>
@@ -331,6 +381,14 @@ export default function CallDetail() {
               </div>
 
               <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
+                <p className="text-sm text-[#344453]/50">Direction</p>
+                <span className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${call.direction === 'outbound' ? 'bg-[#C7601D]/12 text-[#C7601D]' : 'bg-[#344453]/10 text-[#344453]'}`}>
+                  {call.direction === 'outbound' ? <PhoneOutgoing className="h-3.5 w-3.5" /> : <PhoneIncoming className="h-3.5 w-3.5" />}
+                  {call.direction === 'outbound' ? 'Sortant' : 'Entrant'}
+                </span>
+              </div>
+
+              <div className="rounded-2xl bg-[#344453]/6 px-4 py-4">
                 <p className="text-sm text-[#344453]/50">Durée</p>
                 <p className="mt-2 text-base font-semibold text-[#141F28]" style={{ fontFamily: "var(--font-mono)" }}>
                   {call.duration ? `${call.duration} secondes` : 'Indisponible'}
@@ -425,16 +483,45 @@ export default function CallDetail() {
               </div>
             )}
 
-            {call.transcription_text && (
-              <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
-                <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Transcription</h2>
-                <div className="mt-4 rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-4 sm:p-5">
-                  <p className="whitespace-pre-wrap text-sm leading-7 text-[#344453]/65">
-                    {call.transcription_text}
-                  </p>
+            {(() => {
+              // Priority: 1) transcription_segments (DB), 2) live_transcript (JSON), 3) transcription_text with prefixes
+              const segments = call.transcription_segments
+                || parseTranscriptSegments(call.live_transcript)
+                || parseTranscriptTextWithPrefixes(call.transcription_text);
+              const plainText = call.transcription_text;
+              if (!segments && !plainText) return null;
+              return (
+                <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+                  <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Transcription</h2>
+                  <div className="mt-4">
+                    {segments ? (
+                      <div className="space-y-2">
+                        {segments.map((seg, i) => (
+                          <div key={i} className={`flex gap-2 ${seg.role === 'agent' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-6 ${
+                              seg.role === 'agent'
+                                ? 'bg-[#344453] text-white rounded-br-md'
+                                : 'bg-[#F8F9FB] text-[#344453]/80 rounded-bl-md border border-[#344453]/8'
+                            }`}>
+                              <p className={`mb-0.5 text-[10px] font-semibold uppercase tracking-widest ${
+                                seg.role === 'agent' ? 'text-white/50' : 'text-[#344453]/40'
+                              }`}>
+                                {seg.role === 'agent' ? 'Agent' : 'Client'}
+                              </p>
+                              {seg.text}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-4 sm:p-5">
+                        <p className="whitespace-pre-wrap text-sm leading-7 text-[#344453]/65">{plainText}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {call.recording_url && (
               <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">

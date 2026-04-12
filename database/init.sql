@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS transcriptions (
     text TEXT NOT NULL,
     language VARCHAR(10) DEFAULT 'fr',
     confidence DECIMAL(3,2),
+    segments JSONB DEFAULT NULL, -- Structured transcript with speaker roles: [{role: 'agent'|'client', text, ts}]
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -235,6 +236,91 @@ ALTER TABLE calls ADD COLUMN IF NOT EXISTS queue_reason TEXT DEFAULT NULL;
 ALTER TABLE calls ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_calls_queue_status ON calls(company_id, queue_status) WHERE queue_status IS NOT NULL;
+
+-- Outbound calls: extra columns on calls table
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS initiated_by_staff_id UUID REFERENCES staff(id) ON DELETE SET NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS destination_number VARCHAR(50) DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS live_transcript TEXT DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS live_summary TEXT DEFAULT NULL;
+ALTER TABLE calls ADD COLUMN IF NOT EXISTS outbound_call_sid VARCHAR(255) DEFAULT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_calls_direction ON calls(company_id, direction);
+CREATE INDEX IF NOT EXISTS idx_calls_initiated_by ON calls(initiated_by_staff_id) WHERE initiated_by_staff_id IS NOT NULL;
+
+-- Staff groups: logical groupings for dispatch/call routing
+CREATE TABLE IF NOT EXISTS staff_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    role VARCHAR(255),
+    schedule JSONB DEFAULT '{"monday":{"enabled":true,"open":"08:00","close":"18:00"},"tuesday":{"enabled":true,"open":"08:00","close":"18:00"},"wednesday":{"enabled":true,"open":"08:00","close":"18:00"},"thursday":{"enabled":true,"open":"08:00","close":"18:00"},"friday":{"enabled":true,"open":"08:00","close":"18:00"},"saturday":{"enabled":false,"open":"08:00","close":"18:00"},"sunday":{"enabled":false,"open":"08:00","close":"18:00"}}',
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_groups_company_id ON staff_groups(company_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_staff_groups_updated_at'
+          AND tgrelid = 'staff_groups'::regclass
+    ) THEN
+        CREATE TRIGGER update_staff_groups_updated_at BEFORE UPDATE ON staff_groups
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
+
+-- Junction table: which staff members belong to which group
+CREATE TABLE IF NOT EXISTS staff_group_members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    group_id UUID REFERENCES staff_groups(id) ON DELETE CASCADE,
+    staff_id UUID REFERENCES staff(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(group_id, staff_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_group_members_group_id ON staff_group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_staff_group_members_staff_id ON staff_group_members(staff_id);
+
+-- Dispatch rules: call routing configuration per company
+CREATE TABLE IF NOT EXISTS dispatch_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    priority INTEGER DEFAULT 0,
+    enabled BOOLEAN DEFAULT true,
+    condition_type VARCHAR(50) DEFAULT 'always',
+    conditions JSONB DEFAULT '{}',
+    target_type VARCHAR(50) DEFAULT 'group',
+    target_group_id UUID REFERENCES staff_groups(id) ON DELETE SET NULL,
+    target_staff_id UUID REFERENCES staff(id) ON DELETE SET NULL,
+    distribution_strategy VARCHAR(50) DEFAULT 'sequential',
+    agent_order JSONB DEFAULT '[]',
+    fallback_type VARCHAR(50) DEFAULT 'voicemail',
+    fallback_group_id UUID REFERENCES staff_groups(id) ON DELETE SET NULL,
+    fallback_staff_id UUID REFERENCES staff(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dispatch_rules_company_id ON dispatch_rules(company_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_dispatch_rules_updated_at'
+          AND tgrelid = 'dispatch_rules'::regclass
+    ) THEN
+        CREATE TRIGGER update_dispatch_rules_updated_at BEFORE UPDATE ON dispatch_rules
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END $$;
 
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES

@@ -41,15 +41,15 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
     );
 
     const transcript = response.data.results?.channels[0]?.alternatives[0];
-    
+
     if (!transcript) {
       throw new Error('No transcription result');
     }
 
-    logger.info('Audio transcribed', { 
-      audioUrl, 
+    logger.info('Audio transcribed', {
+      audioUrl,
       confidence: transcript.confidence,
-      wordCount: transcript.words?.length 
+      wordCount: transcript.words?.length
     });
 
     return {
@@ -58,9 +58,9 @@ export async function transcribeAudio(audioUrl: string, language: string = 'fr')
       language,
     };
   } catch (error: any) {
-    logger.error('Deepgram transcription error', { 
+    logger.error('Deepgram transcription error', {
       error: error.message,
-      audioUrl 
+      audioUrl
     });
     throw error;
   }

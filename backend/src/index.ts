@@ -18,6 +18,9 @@ import knowledgeBaseRoutes from './routes/knowledgeBase';
 import monitoringRoutes from './routes/monitoring';
 import webhooksRoutes from './routes/webhooks';
 import staffRoutes from './routes/staff';
+import staffGroupsRoutes from './routes/staffGroups';
+import outboundCallsRoutes from './routes/outboundCalls';
+import dispatchRulesRoutes from './routes/dispatchRules';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -54,6 +57,9 @@ app.use('/api/knowledge-base', knowledgeBaseRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/webhooks', webhooksRoutes);
 app.use('/api/staff', staffRoutes);
+app.use('/api/staff-groups', staffGroupsRoutes);
+app.use('/api/outbound-calls', outboundCallsRoutes);
+app.use('/api/dispatch-rules', dispatchRulesRoutes);
 
 app.use(errorHandler);
 

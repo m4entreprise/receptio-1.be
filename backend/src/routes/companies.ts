@@ -24,7 +24,7 @@ const bbisAgentSettingsSchema = z.object({
 });
 
 const offerBSettingsSchema = z.object({
-  offerMode: z.enum(['A', 'B', 'Bbis']).optional(),
+  voicePipelineEnabled: z.boolean().optional(),
   agentEnabled: z.boolean().optional(),
   humanTransferNumber: z.string().optional(),
   fallbackToVoicemail: z.boolean().optional(),
@@ -32,6 +32,7 @@ const offerBSettingsSchema = z.object({
   greetingText: z.string().optional(),
   knowledgeBaseEnabled: z.boolean().optional(),
   appointmentIntegrationEnabled: z.boolean().optional(),
+  transferMessage: z.string().max(500).optional(),
   bbisAgent: bbisAgentSettingsSchema.optional(),
 });
 
