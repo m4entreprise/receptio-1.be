@@ -388,7 +388,8 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
   const requestUrl = new URL(request.url || '/', 'http://localhost');
   const callId = String(requestUrl.searchParams.get('callId') || '');
   const companyId = String(requestUrl.searchParams.get('companyId') || '');
-  const baseUrl = String(requestUrl.searchParams.get('baseUrl') || '');
+  const baseUrl = String(requestUrl.searchParams.get('baseUrl') || '') || process.env.PUBLIC_WEBHOOK_URL || '';
+  logger.info('WebSocket connection established', { callId, companyId, baseUrl, rawUrl: request.url, envUrl: process.env.PUBLIC_WEBHOOK_URL });
 
   const state: StreamSessionState = {
     baseUrl,
@@ -483,8 +484,13 @@ async function handleTwilioMessage(
 
       // Start Twilio call recording for streaming calls
       const resolvedCallSid = startEvent.start?.callSid;
-      if (resolvedCallSid && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-        void startTwilioRecording(resolvedCallSid, state.baseUrl, resolvedCallId);
+      const customBaseUrl = startEvent.start?.customParameters?.baseUrl;
+      const effectiveBaseUrl = state.baseUrl || customBaseUrl || '';
+      logger.info('Recording start check', { resolvedCallSid, baseUrl: state.baseUrl, customBaseUrl, effectiveBaseUrl });
+      if (resolvedCallSid && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && effectiveBaseUrl) {
+        void startTwilioRecording(resolvedCallSid, effectiveBaseUrl, resolvedCallId);
+      } else {
+        logger.warn('Recording skipped - missing data', { resolvedCallSid, hasBaseUrl: !!effectiveBaseUrl, hasTwilioCreds: !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) });
       }
 
       if (!state.initialized) {
@@ -1793,10 +1799,16 @@ async function startTwilioRecording(callSid: string, baseUrl: string, callId: st
     return;
   }
 
+  if (!baseUrl) {
+    logger.warn('Twilio recording skipped: empty baseUrl', { callSid, callId });
+    return;
+  }
+
   try {
     // Convert wss:// to https:// for the callback URL (Twilio requires http/https, not ws/wss)
     const httpsBaseUrl = baseUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
     const recordingCallbackUrl = `${httpsBaseUrl.replace(/\/$/, '')}/api/webhooks/twilio/streaming-recording?callId=${encodeURIComponent(callId)}`;
+    logger.info('Starting Twilio recording with callback', { callSid, callId, recordingCallbackUrl });
     const client = Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
     const recording = await client.calls(callSid).recordings.create({
