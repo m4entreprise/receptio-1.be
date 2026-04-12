@@ -129,7 +129,7 @@ Outil de **micro-management par l'IA** permettant aux managers de reviewer la qu
 │                    WORKFLOW CALLQA                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│   Appel entrant avec agent      Appel sortant              │
+│   Appel entrant avec agent      Appel sortant               │
 │         │                              │                    │
 │         └──────────────┬───────────────┘                    │
 │                        ▼                                    │
@@ -142,11 +142,11 @@ Outil de **micro-management par l'IA** permettant aux managers de reviewer la qu
 │         ┌─────────────┴─────────────┐                       │
 │         │                           │                       │
 │         ▼                           ▼                       │
-│  ┌──────────────┐           ┌──────────────┐               │
-│  │ Batch        │           │ On-demand    │               │
-│  │ hebdomadaire │           │ reviewer     │               │
-│  │ (auto)       │           │ (manuel)     │               │
-│  └──────┬───────┘           └──────┬───────┘               │
+│  ┌──────────────┐           ┌──────────────┐                │
+│  │ Batch        │           │ On-demand    │                │
+│  │ hebdomadaire │           │ reviewer     │                │
+│  │ (auto)       │           │ (manuel)     │                │
+│  └──────┬───────┘           └──────┬───────┘                │
 │         │                           │                       │
 │         └─────────────┬─────────────┘                       │
 │                       ▼                                     │
