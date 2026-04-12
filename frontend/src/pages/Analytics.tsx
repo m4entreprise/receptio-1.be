@@ -459,7 +459,20 @@ export default function Analytics() {
       const { data } = await axios.get(`/api/qa/results?period=${p}&limit=200`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
-      setQaResults(data.results || []);
+      // L'API retourne du snake_case — on normalise en camelCase
+      const normalized = (data.results || []).map((r: Record<string, unknown>) => ({
+        id: r.id,
+        callId: r.call_id,
+        templateId: r.template_id,
+        templateVersion: r.template_version,
+        templateName: r.template_name,
+        globalScore: Number(r.global_score ?? 0),
+        flags: Array.isArray(r.flags) ? r.flags : [],
+        processedAt: r.processed_at as string,
+        agentFirstName: r.agent_first_name as string | null,
+        agentLastName: r.agent_last_name as string | null,
+      }));
+      setQaResults(normalized);
     } catch {
       setQaResults([]);
     } finally {
@@ -674,28 +687,33 @@ export default function Analytics() {
 
               {/* Répartition intent */}
               <ChartCard title="Répartition par intent">
-                {kpiData.charts.intentDistribution.length === 0 ? (
+                {kpiData.charts.intentDistribution.length === 0 ||
+                kpiData.charts.intentDistribution.every(d => Number(d.count) === 0) ? (
                   <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
                 ) : (
                   <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
                       <Pie
-                        data={kpiData.charts.intentDistribution}
+                        data={kpiData.charts.intentDistribution.map(d => ({
+                          ...d,
+                          intent: d.intent || 'autre',
+                          count: Number(d.count) || 0,
+                        }))}
                         dataKey="count"
                         nameKey="intent"
                         cx="50%"
                         cy="50%"
                         outerRadius={80}
-                        label={({ intent, percent }) =>
-                          `${intent} (${(percent * 100).toFixed(0)}%)`
+                        label={({ intent, percent }: { intent: string; percent: number }) =>
+                          percent > 0.04 ? `${intent} (${(percent * 100).toFixed(0)}%)` : ''
                         }
                         labelLine={false}
                       >
                         {kpiData.charts.intentDistribution.map((entry) => (
-                          <Cell key={entry.intent} fill={getIntentColor(entry.intent)} />
+                          <Cell key={entry.intent || 'autre'} fill={getIntentColor(entry.intent || 'autre')} />
                         ))}
                       </Pie>
-                      <Tooltip />
+                      <Tooltip formatter={(value: number, name: string) => [value, name]} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
