@@ -1794,7 +1794,9 @@ async function startTwilioRecording(callSid: string, baseUrl: string, callId: st
   }
 
   try {
-    const recordingCallbackUrl = `${baseUrl.replace(/\/$/, '')}/api/webhooks/twilio/streaming-recording?callId=${encodeURIComponent(callId)}`;
+    // Convert wss:// to https:// for the callback URL (Twilio requires http/https, not ws/wss)
+    const httpsBaseUrl = baseUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+    const recordingCallbackUrl = `${httpsBaseUrl.replace(/\/$/, '')}/api/webhooks/twilio/streaming-recording?callId=${encodeURIComponent(callId)}`;
     const client = Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
     const recording = await client.calls(callSid).recordings.create({
