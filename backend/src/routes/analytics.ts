@@ -28,6 +28,51 @@ function getPeriodBounds(period: Period): { from: Date; to: Date; groupBy: 'hour
   return { from, to, groupBy: 'day' };
 }
 
+function parseJsonField<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return value as T;
+}
+
+function normalizeScores(raw: unknown): Array<{ critere_id: string; note: number; max: number }> {
+  const parsed = parseJsonField<unknown>(raw, []);
+  if (Array.isArray(parsed)) {
+    const normalized: Array<{ critere_id: string; note: number; max: number }> = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== 'object') continue;
+      const score = entry as Record<string, unknown>;
+      if (typeof score.critere_id !== 'string') continue;
+      normalized.push({
+        critere_id: score.critere_id,
+        note: Number(score.note ?? 0),
+        max: Number(score.max ?? 0),
+      });
+    }
+    return normalized;
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    return Object.entries(parsed as Record<string, unknown>).map(([critereId, value]) => ({
+      critere_id: critereId,
+      note: typeof value === 'boolean' ? (value ? 1 : 0) : typeof value === 'number' ? value : 0,
+      max: typeof value === 'boolean' ? 1 : typeof value === 'number' ? 5 : 1,
+    }));
+  }
+
+  return [];
+}
+
+function normalizeFlags(raw: unknown): string[] {
+  const parsed = parseJsonField<unknown[]>(raw, []);
+  return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
 // GET /api/analytics/kpis?period=today|7d|30d
 router.get('/kpis', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
@@ -188,6 +233,164 @@ router.get('/kpis', authenticateToken, async (req: AuthRequest, res: Response, n
           count:  Number(r.count),
         })),
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/analytics/qa/weak-criteria?templateId=&period=7d|30d
+router.get('/qa/weak-criteria', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const rawPeriod = typeof req.query.period === 'string' ? req.query.period : '30d';
+    const period: Period = ['today', '7d', '30d'].includes(rawPeriod) ? (rawPeriod as Period) : '30d';
+    const templateId = typeof req.query.templateId === 'string' && req.query.templateId.trim() ? req.query.templateId : null;
+    const { from, to } = getPeriodBounds(period);
+
+    const params: unknown[] = [companyId, from.toISOString(), to.toISOString()];
+    let extraWhere = '';
+    if (templateId) {
+      params.push(templateId);
+      extraWhere = ` AND car.template_id = $${params.length}`;
+    }
+
+    const result = await query(
+      `SELECT car.scores, car.template_id
+       FROM call_analysis_results car
+       JOIN calls c ON c.id = car.call_id
+       WHERE c.company_id = $1
+         AND car.processed_at >= $2
+         AND car.processed_at <= $3${extraWhere}`,
+      params
+    );
+
+    const aggregates = new Map<string, { totalNote: number; totalMax: number; count: number }>();
+    const templateIds = new Set<string>();
+    for (const row of result.rows as Record<string, unknown>[]) {
+      if (typeof row.template_id === 'string') templateIds.add(row.template_id);
+      for (const score of normalizeScores(row.scores)) {
+        const current = aggregates.get(score.critere_id) || { totalNote: 0, totalMax: 0, count: 0 };
+        current.totalNote += score.note;
+        current.totalMax += score.max;
+        current.count += 1;
+        aggregates.set(score.critere_id, current);
+      }
+    }
+
+    const criteriaLookup = aggregates.size > 0
+      ? await query(
+        `SELECT id, label, weight FROM analysis_criteria WHERE id = ANY($1::uuid[])`,
+        [Array.from(aggregates.keys())]
+      )
+      : { rows: [] };
+
+    const criteriaMeta = new Map((criteriaLookup.rows as Record<string, unknown>[]).map((row) => [String(row.id), row]));
+    const response = Array.from(aggregates.entries())
+      .map(([criterionId, stats]) => {
+        const avg = stats.count > 0 ? stats.totalNote / stats.count : 0;
+        const avgMax = stats.count > 0 ? stats.totalMax / stats.count : 0;
+        const meta = criteriaMeta.get(criterionId);
+        return {
+          critere_id: criterionId,
+          label: String(meta?.label || criterionId),
+          avg: Number(avg.toFixed(2)),
+          avg_max: Number(avgMax.toFixed(2)),
+          stddev: 0,
+          weight: Number(meta?.weight || 0),
+        };
+      })
+      .sort((a, b) => (a.avg_max > 0 ? a.avg / a.avg_max : 1) - (b.avg_max > 0 ? b.avg / b.avg_max : 1));
+
+    res.json({ period, templateId, criteria: response });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/analytics/qa/flags/trend?period=7d|30d&flagType=
+router.get('/qa/flags/trend', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const rawPeriod = typeof req.query.period === 'string' ? req.query.period : '30d';
+    const period: Period = ['today', '7d', '30d'].includes(rawPeriod) ? (rawPeriod as Period) : '30d';
+    const flagType = typeof req.query.flagType === 'string' ? req.query.flagType : '';
+    const { from, to } = getPeriodBounds(period);
+
+    const result = await query(
+      `SELECT car.flags, car.processed_at
+       FROM call_analysis_results car
+       JOIN calls c ON c.id = car.call_id
+       WHERE c.company_id = $1
+         AND car.processed_at >= $2
+         AND car.processed_at <= $3
+       ORDER BY car.processed_at ASC`,
+      [companyId, from.toISOString(), to.toISOString()]
+    );
+
+    const trendMap = new Map<string, number>();
+    for (const row of result.rows as Record<string, unknown>[]) {
+      const date = String(row.processed_at).slice(0, 10);
+      const flags = normalizeFlags(row.flags);
+      if (!flagType || flags.includes(flagType)) {
+        trendMap.set(date, (trendMap.get(date) || 0) + (!flagType ? flags.length : 1));
+      }
+    }
+
+    res.json({
+      period,
+      flagType,
+      trend: Array.from(trendMap.entries())
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/analytics/qa/score-distribution?templateId=&period=
+router.get('/qa/score-distribution', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const rawPeriod = typeof req.query.period === 'string' ? req.query.period : '30d';
+    const period: Period = ['today', '7d', '30d'].includes(rawPeriod) ? (rawPeriod as Period) : '30d';
+    const templateId = typeof req.query.templateId === 'string' && req.query.templateId.trim() ? req.query.templateId : null;
+    const { from, to } = getPeriodBounds(period);
+
+    const params: unknown[] = [companyId, from.toISOString(), to.toISOString()];
+    let extraWhere = '';
+    if (templateId) {
+      params.push(templateId);
+      extraWhere = ` AND car.template_id = $${params.length}`;
+    }
+
+    const result = await query(
+      `SELECT car.global_score
+       FROM call_analysis_results car
+       JOIN calls c ON c.id = car.call_id
+       WHERE c.company_id = $1
+         AND car.processed_at >= $2
+         AND car.processed_at <= $3${extraWhere}`,
+      params
+    );
+
+    const buckets = new Map<string, number>();
+    for (let start = 0; start < 100; start += 10) {
+      buckets.set(`${start}-${start + 10}`, 0);
+    }
+    buckets.set('100-100', 0);
+
+    for (const row of result.rows as Record<string, unknown>[]) {
+      const score = Math.max(0, Math.min(100, Number(row.global_score || 0)));
+      const bucket = score === 100 ? '100-100' : `${Math.floor(score / 10) * 10}-${Math.floor(score / 10) * 10 + 10}`;
+      buckets.set(bucket, (buckets.get(bucket) || 0) + 1);
+    }
+
+    res.json({
+      period,
+      templateId,
+      distribution: Array.from(buckets.entries()).map(([bucket, count]) => ({ bucket, count })),
     });
   } catch (error) {
     next(error);

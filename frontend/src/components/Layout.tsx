@@ -1,6 +1,7 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Phone, LayoutDashboard, Settings, LogOut, Gauge, Users, PhoneOutgoing, BarChart2 } from 'lucide-react';
+import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LayoutProps {
@@ -12,6 +13,30 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const userLabel = user?.email ?? 'Compte connecté';
+  const [unacknowledgedAlertCount, setUnacknowledgedAlertCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const loadAlerts = async () => {
+      try {
+        const { data } = await axios.get('/api/qa/alerts?acknowledged=false', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        if (!active) return;
+        setUnacknowledgedAlertCount(Number(data.unacknowledgedCount || (data.alerts || []).length || 0));
+      } catch {
+        if (!active) return;
+        setUnacknowledgedAlertCount(0);
+      }
+    };
+
+    void loadAlerts();
+    const intervalId = window.setInterval(() => { void loadAlerts(); }, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -24,7 +49,7 @@ export default function Layout({ children }: LayoutProps) {
     { path: '/outbound', icon: PhoneOutgoing, label: 'Sortant' },
     { path: '/staff', icon: Users, label: 'Équipe' },
     { path: '/monitoring/bbis', icon: Gauge, label: 'Monitoring' },
-    { path: '/analytics', icon: BarChart2, label: 'Analytics' },
+    { path: '/analytics', icon: BarChart2, label: 'Analytics', badge: unacknowledgedAlertCount },
     { path: '/settings', icon: Settings, label: 'Paramètres' },
   ];
 
@@ -77,7 +102,12 @@ export default function Layout({ children }: LayoutProps) {
                       }`}
                     >
                       <Icon className="h-4 w-4" />
-                      {item.label}
+                      <span>{item.label}</span>
+                      {(item as { badge?: number }).badge && (item as { badge?: number }).badge! > 0 && (
+                        <span className={`inline-flex min-w-[20px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${isActive ? 'bg-white/15 text-white' : 'bg-[#D94052] text-white'}`}>
+                          {(item as { badge?: number }).badge}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -109,7 +139,14 @@ export default function Layout({ children }: LayoutProps) {
                     : 'text-[#344453]/60 hover:bg-[#344453]/[0.06]'
                 }`}
               >
-                <Icon className="h-4 w-4" />
+                <div className="relative">
+                  <Icon className="h-4 w-4" />
+                  {(item as { badge?: number }).badge && (item as { badge?: number }).badge! > 0 && (
+                    <span className="absolute -right-2 -top-2 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[#D94052] px-1 py-0.5 text-[9px] font-semibold text-white">
+                      {(item as { badge?: number }).badge}
+                    </span>
+                  )}
+                </div>
                 <span>{item.label}</span>
               </Link>
             );

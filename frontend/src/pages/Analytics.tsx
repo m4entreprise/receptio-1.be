@@ -86,6 +86,25 @@ interface QAResult {
   agentLastName: string | null;
 }
 
+interface ScoreDistributionPoint {
+  bucket: string;
+  count: number;
+}
+
+interface WeakCriterionPoint {
+  critere_id: string;
+  label: string;
+  avg: number;
+  avg_max: number;
+  stddev: number;
+  weight: number;
+}
+
+interface FlagTrendPoint {
+  date: string;
+  count: number;
+}
+
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const INTENT_COLORS: Record<string, string> = {
@@ -433,6 +452,11 @@ export default function Analytics() {
   const [tab, setTab] = useState<Tab>('overview');
   const [kpiData, setKpiData] = useState<KpiData | null>(null);
   const [qaResults, setQaResults] = useState<QAResult[]>([]);
+  const [scoreDistribution, setScoreDistribution] = useState<ScoreDistributionPoint[]>([]);
+  const [weakCriteria, setWeakCriteria] = useState<WeakCriterionPoint[]>([]);
+  const [flagTrend, setFlagTrend] = useState<FlagTrendPoint[]>([]);
+  const [selectedFlagType, setSelectedFlagType] = useState('');
+  const [reviewThreshold, setReviewThreshold] = useState(40);
   const [loading, setLoading] = useState(false);
   const [qaLoading, setQaLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -480,6 +504,38 @@ export default function Analytics() {
     }
   }, []);
 
+  const loadQaAdvanced = useCallback(async (p: Period, nextFlagType?: string) => {
+    try {
+      const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+      const [distributionRes, weakCriteriaRes, flagTrendRes] = await Promise.all([
+        axios.get(`/api/analytics/qa/score-distribution?period=${p}`, { headers }),
+        axios.get(`/api/analytics/qa/weak-criteria?period=${p}`, { headers }),
+        axios.get(`/api/analytics/qa/flags/trend?period=${p}${nextFlagType ? `&flagType=${encodeURIComponent(nextFlagType)}` : ''}`, { headers }),
+      ]);
+
+      setScoreDistribution((distributionRes.data.distribution || []).map((entry: Record<string, unknown>) => ({
+        bucket: String(entry.bucket || ''),
+        count: Number(entry.count || 0),
+      })));
+      setWeakCriteria((weakCriteriaRes.data.criteria || []).map((entry: Record<string, unknown>) => ({
+        critere_id: String(entry.critere_id || ''),
+        label: String(entry.label || ''),
+        avg: Number(entry.avg || 0),
+        avg_max: Number(entry.avg_max || 0),
+        stddev: Number(entry.stddev || 0),
+        weight: Number(entry.weight || 0),
+      })));
+      setFlagTrend((flagTrendRes.data.trend || []).map((entry: Record<string, unknown>) => ({
+        date: String(entry.date || ''),
+        count: Number(entry.count || 0),
+      })));
+    } catch {
+      setScoreDistribution([]);
+      setWeakCriteria([]);
+      setFlagTrend([]);
+    }
+  }, []);
+
   useEffect(() => {
     loadKpis(period);
     loadQaResults(period);
@@ -523,6 +579,8 @@ export default function Analytics() {
       .slice(0, 10);
   })();
 
+  const effectiveSelectedFlagType = selectedFlagType || flagFrequency[0]?.flag || '';
+
   const scoreTrend = (() => {
     const map = new Map<string, number[]>();
     for (const r of qaResults) {
@@ -538,6 +596,15 @@ export default function Analytics() {
       }))
       .sort((a, b) => a.slot.localeCompare(b.slot));
   })();
+
+  const callsToReview = qaResults
+    .filter((result: QAResult) => result.globalScore < reviewThreshold || result.flags.some((flag: string) => ['prospect_chaud', 'promesse_non_tenue', 'transfert_rate'].includes(flag)))
+    .sort((a: QAResult, b: QAResult) => a.globalScore - b.globalScore)
+    .slice(0, 20);
+
+  useEffect(() => {
+    void loadQaAdvanced(period, effectiveSelectedFlagType);
+  }, [period, effectiveSelectedFlagType, loadQaAdvanced]);
 
   const periodLabel: Record<Period, string> = {
     today: "Aujourd'hui",
@@ -888,6 +955,115 @@ export default function Analytics() {
                     </ChartCard>
                   </div>
                 )}
+
+                <ChartCard title="Distribution des scores">
+                  {scoreDistribution.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={scoreDistribution}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
+                        <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <Tooltip />
+                        <Bar dataKey="count" name="Appels" fill="#344453" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </ChartCard>
+
+                <ChartCard title="Critères les plus faibles">
+                  {weakCriteria.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {weakCriteria.slice(0, 8).map((criterion) => (
+                        <div key={criterion.critere_id} className="rounded-2xl border border-[#344453]/10 bg-[#F8F9FB] px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-[#141F28]">{criterion.label}</p>
+                              <p className="mt-1 text-xs text-[#344453]/45">Poids {criterion.weight}%</p>
+                            </div>
+                            <p className="text-sm font-semibold text-[#141F28]">{criterion.avg}/{criterion.avg_max}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ChartCard>
+
+                <div className="lg:col-span-2">
+                  <ChartCard title="Évolution d'un flag">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <select
+                        value={effectiveSelectedFlagType}
+                        onChange={(event) => setSelectedFlagType(event.target.value)}
+                        className="rounded-xl border border-[#344453]/15 bg-[#F8F9FB] px-3 py-2 text-sm text-[#141F28] outline-none"
+                      >
+                        {flagFrequency.map((entry) => (
+                          <option key={entry.flag} value={entry.flag}>{entry.flag}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {flagTrend.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart data={flagTrend}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
+                          <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="count" stroke="#D94052" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </ChartCard>
+                </div>
+
+                <div className="lg:col-span-2">
+                  <SectionTitle>Appels à relire</SectionTitle>
+                  <div className="mb-3 flex items-center gap-3">
+                    <label className="text-sm text-[#344453]/60">
+                      Seuil score
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={reviewThreshold}
+                      onChange={(event) => setReviewThreshold(Number(event.target.value))}
+                      className="w-24 rounded-xl border border-[#344453]/15 bg-white px-3 py-2 text-sm text-[#141F28] outline-none"
+                    />
+                  </div>
+                  <div className="overflow-hidden rounded-[20px] border border-[#344453]/10 bg-white shadow-sm">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-[#344453]/8 text-left">
+                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Appel</th>
+                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Agent</th>
+                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Score</th>
+                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Flags</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#344453]/5">
+                        {callsToReview.map((r) => (
+                          <tr key={`review-${r.id}`} className="hover:bg-[#344453]/[0.02] transition">
+                            <td className="px-4 py-3"><Link to={`/calls/${r.callId}`} className="font-mono text-xs text-[#344453]/60 hover:text-[#344453]">{r.callId.slice(0, 8)}…</Link></td>
+                            <td className="px-4 py-3 text-[#344453]/70">{r.agentFirstName && r.agentLastName ? `${r.agentFirstName} ${r.agentLastName}` : '—'}</td>
+                            <td className="px-4 py-3 text-[#141F28] font-semibold">{r.globalScore}/100</td>
+                            <td className="px-4 py-3"><div className="flex flex-wrap gap-1">{r.flags.map((flag) => <span key={`${r.id}-${flag}`} className="rounded-full bg-[#D94052]/8 px-2 py-0.5 text-[10px] text-[#D94052]">{flag}</span>)}</div></td>
+                          </tr>
+                        ))}
+                        {callsToReview.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="px-4 py-8 text-center text-sm text-[#344453]/45">Aucun appel sous le seuil ou avec flag critique.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
 
                 {/* Tableau des dernières analyses */}
                 <div className="lg:col-span-2">

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { Plus, Trash2, Edit2, ChevronRight, X, Check, AlertCircle, Info } from 'lucide-react';
 import Layout from '../components/Layout';
+import AgentCoachingProfile from '../components/qa/AgentCoachingProfile';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -128,6 +129,8 @@ export default function SettingsQA() {
   const [criteria, setCriteria] = useState<AnalysisCriteria[]>([]);
   const [loading, setLoading] = useState(false);
   const [criteriaLoading, setCriteriaLoading] = useState(false);
+  const [staff, setStaff] = useState<Array<{ id: string; first_name: string; last_name: string; enabled?: boolean }>>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState('');
 
   // Modals
   const [showTemplateModal, setShowTemplateModal] = useState(false);
@@ -208,6 +211,16 @@ export default function SettingsQA() {
   }, [showToast]);
 
   useEffect(() => { loadTemplates(); }, [loadTemplates]);
+
+  useEffect(() => {
+    axios.get('/api/staff', { headers: authHeaders() }).then((res) => {
+      const enabled = (res.data.staff || []).filter((member: { enabled?: boolean }) => member.enabled !== false);
+      setStaff(enabled);
+      if (enabled.length > 0) setSelectedStaffId(enabled[0].id);
+    }).catch(() => {
+      setStaff([]);
+    });
+  }, []);
 
   useEffect(() => {
     if (selectedTemplate) loadCriteria(selectedTemplate.id);
@@ -710,6 +723,43 @@ export default function SettingsQA() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 font-medium">Coaching QA</p>
+              <h2 className="mt-2 text-xl font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>
+                Profil individuel agent
+              </h2>
+              <p className="mt-1 text-sm text-[#344453]/55">
+                Suivez les axes de progression d'un agent sur les 30 derniers jours.
+              </p>
+            </div>
+            <div className="w-full max-w-xs">
+              <select
+                value={selectedStaffId}
+                onChange={(e) => setSelectedStaffId(e.target.value)}
+                className="w-full rounded-xl border border-[#344453]/20 bg-[#F8F9FB] px-4 py-2.5 text-sm text-[#141F28] focus:border-[#344453]/50 focus:outline-none"
+              >
+                {staff.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.first_name} {member.last_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            {selectedStaffId ? (
+              <AgentCoachingProfile staffId={selectedStaffId} period="30d" />
+            ) : (
+              <div className="rounded-[20px] border border-dashed border-[#344453]/20 bg-[#F8F9FB] p-8 text-center text-sm text-[#344453]/50">
+                Aucun agent disponible pour le coaching QA.
               </div>
             )}
           </div>
