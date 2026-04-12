@@ -234,11 +234,10 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
     return;
   }
 
-  // No matching dispatch rule: hold message (manual transfer from dashboard)
-  res.type('text/xml').send(buildTwiml(
-    `<Say language="fr-FR">Merci. Veuillez patienter, un agent va vous prendre en charge.</Say>` +
-    `<Pause length="30"/><Say language="fr-FR">Nous vous remercions de votre patience.</Say><Pause length="30"/><Hangup />`
-  ));
+  // No matching dispatch rule (outside hours or no rule configured): fallback to Receptio voicemail
+  const greetingUrlFallback = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${encodeURIComponent(companyId)}`);
+  const recordingCompleteUrlFallback = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+  res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrlFallback, recordingCompleteUrlFallback));
 });
 
 router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
@@ -660,7 +659,7 @@ router.all('/twilio/transfer', async (req: Request, res: Response) => {
   }
 
   const twiml = buildTwiml(
-    `<Dial timeout="30" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
+    `<Dial timeout="15" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
   );
   res.type('text/xml').send(twiml);
 });
@@ -887,7 +886,7 @@ function buildDispatchTransferTwiml(params: BuildDispatchTransferTwimlParams): s
   return buildTwiml(
     `<Say language="fr-FR">${escapeXml(announcement)}</Say>` +
     `<Start><Stream url="${escapeXml(streamUrl)}" track="both_tracks"><Parameter name="callId" value="${escapeXml(callId)}" /><Parameter name="companyId" value="${escapeXml(companyId)}" /></Stream></Start>` +
-    `<Dial timeout="30" answerOnBridge="true" action="${escapeXml(dialActionUrl)}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST">${numberTags}</Dial>`
+    `<Dial timeout="15" answerOnBridge="true" action="${escapeXml(dialActionUrl)}" method="POST" record="record-from-answer-dual" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST">${numberTags}</Dial>`
   );
 }
 
@@ -1315,19 +1314,19 @@ router.post('/twilio/streaming-recording', async (req: Request, res: Response) =
 });
 
 // ---------------------------------------------------------------------------
-// Outbound call: Twilio calls the destination, when answered we bridge to staff
+// Outbound call (agent-first): agent answered → now dial the client
 // GET/POST /api/webhooks/twilio/outbound-answer
 // ---------------------------------------------------------------------------
 router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
   try {
     const callId = String(req.query.callId || '');
-    const staffPhone = String(req.query.staffPhone || '');
+    const destNumber = String(req.query.destNumber || '');
     const companyId = String(req.query.companyId || '');
     const callStatus = String(req.body?.CallStatus || req.query.callStatus || '');
 
-    logger.info('Outbound answer webhook', { callId, callStatus, staffPhone });
+    logger.info('Outbound answer webhook (agent picked up, now dialling client)', { callId, callStatus, destNumber });
 
-    if (!staffPhone) {
+    if (!destNumber) {
       res.type('text/xml').send(buildTwiml('<Say language="fr-FR">Une erreur de configuration est survenue.</Say><Hangup />'));
       return;
     }
@@ -1340,7 +1339,7 @@ router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
 
       await query(
         `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-        [callId, 'outbound.answered', { staffPhone, callStatus }]
+        [callId, 'outbound.agent_answered', { destNumber, callStatus }]
       ).catch(() => {});
     }
 
@@ -1348,13 +1347,53 @@ router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
     const recordingCompleteUrl = joinUrl(baseUrl, `/api/webhooks/twilio/outbound-recording?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
     const wsBaseUrl = toWebSocketBaseUrl(baseUrl);
     const streamUrl = joinUrl(wsBaseUrl, `/api/media-streams/outbound?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
+    const clientEndUrl = joinUrl(baseUrl, `/api/webhooks/twilio/outbound-client-end?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
 
+    // Announce to the agent, then dial the client
     const twiml = buildTwiml(
-      `<Start><Stream url="${escapeXml(streamUrl)}" track="both_tracks"><Parameter name="callId" value="${escapeXml(callId)}" /><Parameter name="companyId" value="${escapeXml(companyId)}" /></Stream></Start><Dial record="record-from-answer" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" timeout="30" answerOnBridge="true"><Number>${escapeXml(staffPhone)}</Number></Dial>`
+      `<Say language="fr-FR">Connexion en cours avec le client. Veuillez patienter.</Say>` +
+      `<Start><Stream url="${escapeXml(streamUrl)}" track="both_tracks"><Parameter name="callId" value="${escapeXml(callId)}" /><Parameter name="companyId" value="${escapeXml(companyId)}" /></Stream></Start>` +
+      `<Dial record="record-from-answer" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" timeout="30" answerOnBridge="true" action="${escapeXml(clientEndUrl)}" method="POST">` +
+      `<Number>${escapeXml(destNumber)}</Number></Dial>`
     );
     res.type('text/xml').send(twiml);
   } catch (error: any) {
     logger.error('Outbound answer webhook error', { error: error.message });
+    res.type('text/xml').send(buildTwiml('<Hangup />'));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Outbound call: client-side dial ended (no-answer, busy, completed…)
+// POST /api/webhooks/twilio/outbound-client-end
+// ---------------------------------------------------------------------------
+router.all('/twilio/outbound-client-end', async (req: Request, res: Response) => {
+  try {
+    const callId = String(req.query.callId || '');
+    const dialCallStatus = String(req.body?.DialCallStatus || '');
+
+    logger.info('Outbound client-end', { callId, dialCallStatus });
+
+    if (callId && dialCallStatus !== 'completed') {
+      await query(
+        `UPDATE calls SET status = 'missed', ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $1`,
+        [callId]
+      ).catch(() => {});
+      await query(
+        `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+        [callId, 'outbound.client_no_answer', { dialCallStatus }]
+      ).catch(() => {});
+    }
+
+    if (dialCallStatus === 'no-answer' || dialCallStatus === 'busy') {
+      res.type('text/xml').send(buildTwiml(
+        `<Say language="fr-FR">Le client n'a pas répondu. Au revoir.</Say><Hangup />`
+      ));
+    } else {
+      res.type('text/xml').send(buildTwiml('<Hangup />'));
+    }
+  } catch (error: any) {
+    logger.error('Outbound client-end webhook error', { error: error.message });
     res.type('text/xml').send(buildTwiml('<Hangup />'));
   }
 });
@@ -1379,6 +1418,8 @@ router.post('/twilio/outbound-status', async (req: Request, res: Response) => {
     const terminalStatuses = ['completed', 'no-answer', 'busy', 'failed', 'canceled'];
 
     if (callStatus === 'no-answer' || callStatus === 'busy' || callStatus === 'failed') {
+      // Agent-first flow: this status refers to the initial call TO THE AGENT.
+      // If the agent doesn't answer, simply mark the call as missed — no voicemail on the agent's phone.
       await query(
         `UPDATE calls SET status = 'missed', duration = $1, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP) WHERE id = $2`,
         [callDuration, callId]
@@ -1386,49 +1427,10 @@ router.post('/twilio/outbound-status', async (req: Request, res: Response) => {
 
       await query(
         `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-        [callId, `outbound.${callStatus}`, { callDuration }]
+        [callId, `outbound.agent_${callStatus}`, { callDuration }]
       );
 
-      const callRow = await query(
-        `SELECT c.destination_number, c.company_id, co.settings, co.name AS company_name
-         FROM calls c LEFT JOIN companies co ON co.id = c.company_id WHERE c.id = $1`,
-        [callId]
-      );
-
-      if (callRow.rows.length > 0) {
-        const { destination_number: destNumber, settings, company_name: companyName } = callRow.rows[0];
-        const voicemailText = settings?.outboundVoicemailText ||
-          `Bonjour, vous avez manqué un appel de ${companyName}. N'hésitez pas à nous rappeler.`;
-
-        const voicemailTwiml = buildTwiml(
-          `<Say language="fr-FR">${escapeXml(voicemailText)}</Say><Hangup />`
-        );
-
-        const accountSid = process.env.TWILIO_ACCOUNT_SID;
-        const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-        const companyRow = await query('SELECT phone_number FROM companies WHERE id = $1', [callRow.rows[0].company_id]);
-        const fromNumber = companyRow.rows[0]?.phone_number;
-
-        if (accountSid && authToken && fromNumber && destNumber) {
-          try {
-            const client = require('twilio')(accountSid, authToken);
-            await client.calls.create({
-              to: destNumber,
-              from: fromNumber,
-              twiml: voicemailTwiml,
-            });
-            await query(
-              `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-              [callId, 'outbound.voicemail_sent', { voicemailText }]
-            );
-            logger.info('Outbound voicemail sent', { callId, destNumber });
-          } catch (vmErr: any) {
-            logger.error('Outbound voicemail send error', { callId, error: vmErr.message });
-          }
-        }
-      }
-
+      logger.info('Outbound call missed — agent did not answer', { callId, callStatus });
       res.sendStatus(200);
       return;
     }

@@ -70,12 +70,14 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     const callId = callRecord.rows[0].id as string;
     const baseUrl = getBaseUrl(req);
 
-    const answerUrl = `${baseUrl}/api/webhooks/twilio/outbound-answer?callId=${encodeURIComponent(callId)}&staffPhone=${encodeURIComponent(staff.phone_number)}&companyId=${encodeURIComponent(companyId)}`;
+    // Agent-first flow: Receptio calls the agent first, then dials the client
+    // once the agent has picked up — the client never waits.
+    const answerUrl = `${baseUrl}/api/webhooks/twilio/outbound-answer?callId=${encodeURIComponent(callId)}&destNumber=${encodeURIComponent(destinationNumber)}&companyId=${encodeURIComponent(companyId)}`;
     const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/outbound-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`;
 
     const client = twilio(accountSid, authToken);
     const twilioCall = await client.calls.create({
-      to: destinationNumber,
+      to: staff.phone_number,       // Call the agent first
       from: company.phone_number,
       url: answerUrl,
       statusCallback: statusCallbackUrl,

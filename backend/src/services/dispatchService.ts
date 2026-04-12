@@ -11,6 +11,51 @@ export interface DispatchTarget {
 }
 
 /**
+ * Returns true if the current time (in the given timezone) falls within the
+ * group's weekly schedule.
+ */
+function isWithinSchedule(schedule: any, timezone: string): boolean {
+  if (!schedule) return true; // No schedule = always available
+
+  try {
+    const now = new Date();
+
+    // Get weekday name and current HH:MM in the company's timezone
+    const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      weekday: 'long',
+    });
+    const timeFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+
+    const weekday = weekdayFormatter.format(now).toLowerCase(); // 'monday', 'tuesday', …
+    const timeParts = timeFormatter.formatToParts(now);
+    const hour = timeParts.find(p => p.type === 'hour')?.value ?? '00';
+    const minute = timeParts.find(p => p.type === 'minute')?.value ?? '00';
+    const currentTime = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+
+    const day = schedule[weekday];
+    if (!day || !day.enabled) {
+      logger.info('dispatch: group not available today', { weekday, timezone });
+      return false;
+    }
+
+    const available = currentTime >= day.open && currentTime < day.close;
+    if (!available) {
+      logger.info('dispatch: group outside scheduled hours', { weekday, currentTime, open: day.open, close: day.close, timezone });
+    }
+    return available;
+  } catch (err: any) {
+    logger.warn('dispatch: schedule check failed, defaulting to available', { error: err.message });
+    return true; // Safe default: let the call through if check fails
+  }
+}
+
+/**
  * Resolve a dispatch target for an inbound call.
  * Iterates enabled rules in priority order, returns the first match.
  *
@@ -21,6 +66,13 @@ export async function resolveDispatchTarget(
   companyId: string,
   speechText?: string
 ): Promise<DispatchTarget | null> {
+  // Fetch company timezone for schedule checks
+  const companyResult = await query(
+    `SELECT settings FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  const timezone: string = companyResult.rows[0]?.settings?.timezone ?? 'Europe/Brussels';
+
   const rulesResult = await query(
     `SELECT * FROM dispatch_rules
      WHERE company_id = $1 AND enabled = true
@@ -31,9 +83,9 @@ export async function resolveDispatchTarget(
   for (const rule of rulesResult.rows) {
     if (!matchesCondition(rule, speechText)) continue;
 
-    const numbers = await resolveNumbers(rule);
+    const numbers = await resolveNumbers(rule, timezone);
     if (numbers.length === 0) {
-      logger.info('dispatch: rule matched but no reachable agents', { ruleId: rule.id, ruleName: rule.name });
+      logger.info('dispatch: rule matched but no reachable agents (outside hours or none configured)', { ruleId: rule.id, ruleName: rule.name });
       continue;
     }
 
@@ -73,8 +125,8 @@ function matchesCondition(rule: any, speechText?: string): boolean {
   return false;
 }
 
-async function resolveNumbers(rule: any): Promise<string[]> {
-  // Target: specific agent
+async function resolveNumbers(rule: any, timezone: string): Promise<string[]> {
+  // Target: specific agent (no schedule check — individual agents don't have schedules)
   if (rule.target_type === 'agent' && rule.target_staff_id) {
     const result = await query(
       `SELECT phone_number FROM staff WHERE id = $1 AND enabled = true`,
@@ -83,8 +135,21 @@ async function resolveNumbers(rule: any): Promise<string[]> {
     return result.rows.map((r: any) => r.phone_number).filter(Boolean);
   }
 
-  // Target: group
+  // Target: group — check schedule before returning members
   if (rule.target_type === 'group' && rule.target_group_id) {
+    // Fetch group schedule along with members
+    const groupResult = await query(
+      `SELECT schedule FROM staff_groups WHERE id = $1 AND enabled = true`,
+      [rule.target_group_id]
+    );
+
+    if (groupResult.rows.length === 0) return []; // Group disabled or not found
+
+    const schedule = groupResult.rows[0].schedule;
+    if (!isWithinSchedule(schedule, timezone)) {
+      return []; // Outside scheduled hours → no agents available from this group
+    }
+
     const membersResult = await query(
       `SELECT s.id, s.phone_number
        FROM staff_group_members sgm
