@@ -776,8 +776,14 @@ export default function Analytics() {
         {/* ── Onglet Qualité IA ── */}
         {tab === 'qa' && (
           <div className="space-y-6">
-            {/* Bouton batch */}
-            <div className="flex justify-end">
+            {/* Actions QA */}
+            <div className="flex items-center justify-end gap-3">
+              <Link
+                to="/settings/qa"
+                className="inline-flex items-center gap-2 rounded-full border border-[#344453]/20 bg-white px-4 py-2 text-sm font-medium text-[#344453] hover:bg-[#344453]/5 transition"
+              >
+                Configurer les templates
+              </Link>
               <button
                 onClick={() => setShowBatchModal(true)}
                 className="inline-flex items-center gap-2 rounded-full bg-[#344453] px-4 py-2 text-sm font-medium text-white shadow-[0_4px_12px_rgba(52,68,83,0.18)] hover:bg-[#2a3848] transition"
