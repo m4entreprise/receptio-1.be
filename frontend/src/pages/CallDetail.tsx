@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRef } from 'react';
-import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, PhoneIncoming, ChevronDown } from 'lucide-react';
+import { Phone, Clock, Calendar, ArrowLeft, Trash2, Download, Sparkles, ShieldCheck, Play, Pause, Loader2, Volume2, PhoneOutgoing, PhoneIncoming, ChevronDown, ClipboardCheck } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -85,13 +85,50 @@ export default function CallDetail() {
   const [dialResult, setDialResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showDialPanel, setShowDialPanel] = useState(false);
 
+  // QA
+  const [qaTemplates, setQaTemplates] = useState<{ id: string; name: string; isActive: boolean }[]>([]);
+  const [qaResults, setQaResults] = useState<{ id: string; templateName: string; globalScore: number; flags: string[]; processedAt: string }[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [qaAnalyzing, setQaAnalyzing] = useState(false);
+  const [qaMessage, setQaMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   useEffect(() => {
     axios.get('/api/staff').then((res) => {
       const enabled = (res.data.staff || []).filter((s: any) => s.enabled);
       setStaff(enabled);
       if (enabled.length > 0) setSelectedStaffId(enabled[0].id);
     }).catch(() => {});
+
+    // Charger les templates QA actifs
+    axios.get('/api/qa/templates').then((res) => {
+      const active = (res.data.templates || []).filter((t: any) => t.isActive);
+      setQaTemplates(active);
+      if (active.length > 0) setSelectedTemplateId(active[0].id);
+    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isValidCallId || !id) return;
+    axios.get(`/api/qa/results/${id}`).then((res) => {
+      setQaResults(res.data.results || []);
+    }).catch(() => {});
+  }, [id, isValidCallId]);
+
+  const handleAnalyze = async () => {
+    if (!id || !selectedTemplateId) return;
+    setQaAnalyzing(true);
+    setQaMessage(null);
+    try {
+      await axios.post(`/api/qa/analyze/${id}`, { templateId: selectedTemplateId });
+      setQaMessage({ type: 'success', text: 'Analyse terminée avec succès.' });
+      const res = await axios.get(`/api/qa/results/${id}`);
+      setQaResults(res.data.results || []);
+    } catch (err: any) {
+      setQaMessage({ type: 'error', text: err?.response?.data?.error || 'Erreur lors de l\'analyse.' });
+    } finally {
+      setQaAnalyzing(false);
+    }
+  };
 
   const handleDial = async () => {
     if (!selectedStaffId || !id) return;
@@ -635,6 +672,103 @@ export default function CallDetail() {
                     </>
                   )}
                 </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ── Section Analyse QA ── */}
+        <section className="rounded-[28px] border border-[#344453]/10 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-[#344453]/8 px-5 py-4 sm:px-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
+              <ClipboardCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>
+                Analyse qualité (QA)
+              </h2>
+              <p className="text-xs text-[#344453]/50 mt-0.5">
+                Évaluation de l'appel par Mistral selon vos critères configurés.
+              </p>
+            </div>
+          </div>
+
+          <div className="px-5 py-5 sm:px-6 space-y-5">
+            {/* Lancer une analyse */}
+            {qaTemplates.length === 0 ? (
+              <p className="text-sm text-[#344453]/55">
+                Aucun template actif.{' '}
+                <a href="/settings/qa" className="font-medium text-[#C7601D] hover:underline">
+                  Configurer les templates →
+                </a>
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <select
+                  value={selectedTemplateId}
+                  onChange={e => setSelectedTemplateId(e.target.value)}
+                  className="flex-1 rounded-xl border border-[#344453]/15 bg-[#344453]/3 px-3 py-2.5 text-sm text-[#141F28] focus:border-[#344453]/30 focus:outline-none"
+                >
+                  {qaTemplates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAnalyze}
+                  disabled={qaAnalyzing || !selectedTemplateId}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#344453] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2a3848] disabled:opacity-50 transition"
+                >
+                  {qaAnalyzing ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Analyse en cours…</>
+                  ) : (
+                    <><ClipboardCheck className="h-4 w-4" /> Lancer l'analyse</>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {qaMessage && (
+              <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${
+                qaMessage.type === 'success'
+                  ? 'border-[#2D9D78]/25 bg-[#2D9D78]/8 text-[#2D9D78]'
+                  : 'border-[#D94052]/20 bg-[#D94052]/6 text-[#D94052]'
+              }`}>
+                {qaMessage.text}
+              </div>
+            )}
+
+            {/* Résultats existants */}
+            {qaResults.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>
+                  Analyses précédentes
+                </p>
+                {qaResults.map(r => (
+                  <div key={r.id} className="flex items-center gap-4 rounded-xl border border-[#344453]/10 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[#141F28] truncate">{r.templateName}</p>
+                      <p className="text-xs text-[#344453]/45 mt-0.5">
+                        {r.processedAt ? new Date(r.processedAt).toLocaleString('fr-BE', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1 flex-1 justify-end">
+                      {(r.flags || []).map(f => (
+                        <span key={f} className="rounded-full bg-[#344453]/8 px-2 py-0.5 text-[10px] text-[#344453]/60">
+                          {f.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+                      r.globalScore >= 70
+                        ? 'bg-[#2D9D78]/10 text-[#2D9D78]'
+                        : r.globalScore >= 50
+                        ? 'bg-[#C7601D]/10 text-[#C7601D]'
+                        : 'bg-[#D94052]/10 text-[#D94052]'
+                    }`}>
+                      {r.globalScore}/100
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
