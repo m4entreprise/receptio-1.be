@@ -167,23 +167,23 @@ router.get('/kpis', authenticateToken, async (req: AuthRequest, res: Response, n
         urgentCount:           Number(kpi.urgent_count) || 0,
       },
       charts: {
-        volumeBySlot: volumeResult.rows.map((r) => ({
+        volumeBySlot: volumeResult.rows.map((r: Record<string, unknown>) => ({
           slot:     r.slot instanceof Date ? r.slot.toISOString() : String(r.slot),
           total:    Number(r.total),
           inbound:  Number(r.inbound),
           outbound: Number(r.outbound),
         })),
-        callsByAgent: agentResult.rows.map((r) => ({
+        callsByAgent: agentResult.rows.map((r: Record<string, unknown>) => ({
           staffId:   r.staff_id,
           firstName: r.first_name,
           lastName:  r.last_name,
           count:     Number(r.count),
         })),
-        intentDistribution: intentResult.rows.map((r) => ({
-          intent: r.intent || 'autre',
+        intentDistribution: intentResult.rows.map((r: Record<string, unknown>) => ({
+          intent: (r.intent as string) || 'autre',
           count:  Number(r.count),
         })),
-        outcomeDistribution: outcomeResult.rows.map((r) => ({
+        outcomeDistribution: outcomeResult.rows.map((r: Record<string, unknown>) => ({
           status: r.status,
           count:  Number(r.count),
         })),

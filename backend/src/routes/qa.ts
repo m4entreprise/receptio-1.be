@@ -58,10 +58,10 @@ router.get('/templates', authenticateToken, async (req: AuthRequest, res: Respon
        ORDER BY t.version DESC, t.created_at DESC`,
       [companyId]
     );
-    res.json({ templates: result.rows.map(rowToTemplate).map((t, i) => ({
-      ...t,
-      criteriaCount: Number(result.rows[i].criteria_count),
-      resultsCount: Number(result.rows[i].results_count),
+    res.json({ templates: result.rows.map((row: Record<string, unknown>) => ({
+      ...rowToTemplate(row),
+      criteriaCount: Number(row.criteria_count),
+      resultsCount: Number(row.results_count),
     })) });
   } catch (error) {
     next(error);
@@ -142,7 +142,8 @@ router.patch('/templates/:id', authenticateToken, async (req: AuthRequest, res: 
         const newTemplate = await createNewTemplateVersion(existing, {
           name, callType, promptTemplate, outputSchema,
         });
-        return res.json({ template: newTemplate, versioned: true });
+        res.json({ template: newTemplate, versioned: true });
+        return;
       }
     }
 
@@ -157,7 +158,10 @@ router.patch('/templates/:id', authenticateToken, async (req: AuthRequest, res: 
     if (isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(isActive); }
     if (outputSchema !== undefined) { fields.push(`output_schema = $${idx++}`); values.push(JSON.stringify(outputSchema)); }
 
-    if (fields.length === 0) return res.json({ template: existing });
+    if (fields.length === 0) {
+      res.json({ template: existing });
+      return;
+    }
 
     values.push(id);
     const updated = await query(
@@ -280,7 +284,10 @@ router.patch('/criteria/:id', authenticateToken, async (req: AuthRequest, res: R
     if (required !== undefined) { fields.push(`required = $${idx++}`); values.push(required); }
     if (position !== undefined) { fields.push(`position = $${idx++}`); values.push(position); }
 
-    if (fields.length === 0) return res.json({ criterion: cResult.rows[0] });
+    if (fields.length === 0) {
+      res.json({ criterion: cResult.rows[0] });
+      return;
+    }
 
     values.push(id);
     const updated = await query(

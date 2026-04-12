@@ -13,7 +13,8 @@
       "Bash(grep -rn \"call_events\\\\|INSERT INTO call_events\" /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/routes/*.ts)",
       "Bash(grep -rn \"event_type.*VALUES\" /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/routes/*.ts)",
       "Bash(grep \"event_type.*\\\\$2\" /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/routes/*.ts)",
-      "Bash(grep -h \"VALUES.*event_type\" /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/routes/*.ts -B 2)"
+      "Bash(grep -h \"VALUES.*event_type\" /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/routes/*.ts -B 2)",
+      "Bash(npm run:*)"
     ]
   },
   "outputStyle": "default"

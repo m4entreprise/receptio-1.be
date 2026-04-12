@@ -130,7 +130,7 @@ export async function analyzeCall(
     [templateId]
   );
 
-  const criteria: AnalysisCriteria[] = criteriaResult.rows.map((r) => ({
+  const criteria: AnalysisCriteria[] = criteriaResult.rows.map((r: Record<string, unknown>) => ({
     id: r.id,
     templateId: r.template_id,
     label: r.label,
