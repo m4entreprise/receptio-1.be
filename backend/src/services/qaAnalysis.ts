@@ -98,8 +98,61 @@ function safeJSON(raw: string): unknown {
   }
 }
 
+function extractJsonObject(raw: string): string {
+  const trimmed = stripCodeFences(raw);
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    return trimmed.slice(start, end + 1);
+  }
+  return trimmed;
+}
+
 function stripCodeFences(raw: string): string {
   return raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+}
+
+function coerceNonEmptySentence(value: unknown, fallback: string): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (text.length >= 10) return text;
+  if (text.length > 0) return `${text}${text.endsWith('.') ? '' : '.'} Analyse QA normalisée automatiquement.`;
+  return fallback;
+}
+
+function normalizeModelOutput(parsed: unknown, allowedFlags: string[]): unknown {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return parsed;
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  const scoresRaw = Array.isArray(candidate.scores) ? candidate.scores : [];
+  const flagsRaw = Array.isArray(candidate.flags_detail) ? candidate.flags_detail : [];
+
+  const scores = scoresRaw
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+    .map((entry) => ({
+      critere_id: typeof entry.critere_id === 'string' ? entry.critere_id : '',
+      note: Number(entry.note ?? 0),
+      max: Math.max(1, Number(entry.max ?? 1)),
+      justification: coerceNonEmptySentence(entry.justification, 'Justification absente dans la réponse modèle. Analyse QA normalisée automatiquement.'),
+    }))
+    .filter((entry) => entry.critere_id);
+
+  const flags_detail = flagsRaw
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+    .map((entry) => ({
+      type: typeof entry.type === 'string' ? entry.type : '',
+      extrait: typeof entry.extrait === 'string' ? entry.extrait : null,
+      position_ms: typeof entry.position_ms === 'number' ? entry.position_ms : undefined,
+    }))
+    .filter((entry) => entry.type && allowedFlags.includes(entry.type));
+
+  return {
+    scores,
+    flags_detail,
+    resume: typeof candidate.resume === 'string' ? candidate.resume.slice(0, 400) : '',
+    coaching_tip: typeof candidate.coaching_tip === 'string' ? candidate.coaching_tip.slice(0, 300) : '',
+  };
 }
 
 function normalizeFlagDefinitions(raw: unknown): AnalysisFlagDefinition[] {
@@ -517,8 +570,9 @@ export async function analyzeCall(
     );
 
     lastRaw = raw;
-    const parsed = safeJSON(stripCodeFences(raw));
-    const validated = resultSchema.safeParse(parsed);
+    const parsed = safeJSON(extractJsonObject(raw));
+    const normalizedParsed = normalizeModelOutput(parsed, allowedFlags);
+    const validated = resultSchema.safeParse(normalizedParsed);
 
     if (!validated.success) {
       logger.warn('QA analysis validation failed', {
