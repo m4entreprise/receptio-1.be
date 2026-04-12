@@ -164,7 +164,18 @@ export default function SettingsQA() {
     setLoading(true);
     try {
       const { data } = await axios.get('/api/qa/templates', { headers: authHeaders() });
-      setTemplates(data.templates || []);
+      // Normalise snake_case → camelCase
+      const normalized = (data.templates || []).map((t: Record<string, unknown>) => ({
+        id: t.id,
+        name: t.name,
+        callType:       t.call_type       ?? t.callType       ?? '*',
+        promptTemplate: t.prompt_template ?? t.promptTemplate ?? '',
+        version:        t.version         ?? 1,
+        isActive:       t.is_active       ?? t.isActive       ?? true,
+        criteriaCount:  Number(t.criteria_count ?? t.criteriaCount ?? 0),
+        resultsCount:   Number(t.results_count  ?? t.resultsCount  ?? 0),
+      }));
+      setTemplates(normalized as AnalysisTemplate[]);
     } catch {
       showToast('Impossible de charger les templates', 'error');
     } finally {
@@ -178,7 +189,17 @@ export default function SettingsQA() {
       const { data } = await axios.get(`/api/qa/templates/${templateId}/criteria`, {
         headers: authHeaders(),
       });
-      setCriteria(data.criteria || []);
+      const normalized = (data.criteria || []).map((c: Record<string, unknown>) => ({
+        id:          c.id,
+        templateId:  c.template_id ?? c.templateId,
+        label:       c.label,
+        description: c.description ?? null,
+        weight:      Number(c.weight ?? 10),
+        type:        c.type ?? 'boolean',
+        required:    Boolean(c.required),
+        position:    Number(c.position ?? 0),
+      }));
+      setCriteria(normalized as AnalysisCriteria[]);
     } catch {
       showToast('Impossible de charger les critères', 'error');
     } finally {
@@ -217,13 +238,21 @@ export default function SettingsQA() {
           { name: tForm.name, callType: tForm.callType, promptTemplate: tForm.promptTemplate },
           { headers: authHeaders() }
         );
+        const t = data.template;
+        const updated: AnalysisTemplate = {
+          id: t.id, name: t.name,
+          callType: t.call_type ?? t.callType ?? '*',
+          promptTemplate: t.prompt_template ?? t.promptTemplate ?? '',
+          version: t.version ?? 1,
+          isActive: t.is_active ?? t.isActive ?? true,
+        };
         if (data.versioned) {
-          showToast(`Version v${data.template.version} créée — l'ancienne version est archivée`, 'info');
+          showToast(`Version v${updated.version} créée — l'ancienne version est archivée`, 'info');
         } else {
           showToast('Template mis à jour');
         }
         if (selectedTemplate?.id === editingTemplate.id) {
-          setSelectedTemplate(data.template);
+          setSelectedTemplate(updated);
         }
       } else {
         await axios.post(

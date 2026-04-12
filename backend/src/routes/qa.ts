@@ -328,9 +328,20 @@ router.post('/analyze/:callId', authenticateToken, async (req: AuthRequest, res:
   try {
     const { companyId } = req.user!;
     const { callId } = req.params;
-    const { templateId } = req.body;
+    const { templateId, force = false } = req.body;
 
     if (!templateId) throw new AppError('templateId is required', 400);
+
+    // Vérifier si une analyse existe déjà pour ce couple appel+template (sauf si force=true)
+    if (!force) {
+      const existing = await query(
+        `SELECT id FROM call_analysis_results WHERE call_id = $1 AND template_id = $2 LIMIT 1`,
+        [callId, templateId]
+      );
+      if (existing.rows.length > 0) {
+        throw new AppError('Une analyse existe déjà pour cet appel avec ce template. Utilisez force=true pour relancer.', 409);
+      }
+    }
 
     const result = await analyzeCall(callId, templateId, companyId);
     res.json({ result });
@@ -378,11 +389,20 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
          car.scores, car.global_score, car.verbatims, car.flags, car.processed_at,
          c.caller_number, c.created_at AS call_created_at, c.direction,
          t.name AS template_name, t.version AS template_current_version,
-         s.first_name AS agent_first_name, s.last_name AS agent_last_name
+         COALESCE(s_init.first_name, s_xfer.first_name)  AS agent_first_name,
+         COALESCE(s_init.last_name,  s_xfer.last_name)   AS agent_last_name
        FROM call_analysis_results car
        JOIN calls c ON c.id = car.call_id
        JOIN analysis_templates t ON t.id = car.template_id
-       LEFT JOIN staff s ON s.id = c.initiated_by_staff_id
+       LEFT JOIN staff s_init ON s_init.id = c.initiated_by_staff_id
+       LEFT JOIN LATERAL (
+         SELECT s2.first_name, s2.last_name
+         FROM call_events ce2
+         JOIN staff s2 ON s2.id::text = ce2.data->>'staffId'
+         WHERE ce2.call_id = c.id
+           AND ce2.event_type = 'twilio.routing.transferred'
+         LIMIT 1
+       ) s_xfer ON true
        WHERE c.company_id = $1
          AND car.processed_at >= $2
          AND car.processed_at <= $3${extraWhere}

@@ -64,6 +64,16 @@ function parseTranscriptTextWithPrefixes(text: string | null | undefined): Trans
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function normalizeQaResults(rows: Record<string, unknown>[]) {
+  return rows.map(r => ({
+    id: r.id as string,
+    templateName: (r.template_name ?? r.templateName ?? '—') as string,
+    globalScore: Number(r.global_score ?? r.globalScore ?? 0),
+    flags: Array.isArray(r.flags) ? r.flags as string[] : [],
+    processedAt: (r.processed_at ?? r.processedAt ?? '') as string,
+  }));
+}
+
 export default function CallDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -90,7 +100,7 @@ export default function CallDetail() {
   const [qaResults, setQaResults] = useState<{ id: string; templateName: string; globalScore: number; flags: string[]; processedAt: string }[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [qaAnalyzing, setQaAnalyzing] = useState(false);
-  const [qaMessage, setQaMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [qaMessage, setQaMessage] = useState<{ type: 'success' | 'error'; text: string; canForce?: boolean } | null>(null);
 
   useEffect(() => {
     axios.get('/api/staff').then((res) => {
@@ -110,21 +120,29 @@ export default function CallDetail() {
   useEffect(() => {
     if (!isValidCallId || !id) return;
     axios.get(`/api/qa/results/${id}`).then((res) => {
-      setQaResults(res.data.results || []);
+      setQaResults(normalizeQaResults(res.data.results || []));
     }).catch(() => {});
   }, [id, isValidCallId]);
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = async (force = false) => {
     if (!id || !selectedTemplateId) return;
     setQaAnalyzing(true);
     setQaMessage(null);
     try {
-      await axios.post(`/api/qa/analyze/${id}`, { templateId: selectedTemplateId });
+      await axios.post(`/api/qa/analyze/${id}`, { templateId: selectedTemplateId, force });
       setQaMessage({ type: 'success', text: 'Analyse terminée avec succès.' });
       const res = await axios.get(`/api/qa/results/${id}`);
-      setQaResults(res.data.results || []);
+      setQaResults(normalizeQaResults(res.data.results || []));
     } catch (err: any) {
-      setQaMessage({ type: 'error', text: err?.response?.data?.error || 'Erreur lors de l\'analyse.' });
+      if (err?.response?.status === 409) {
+        setQaMessage({
+          type: 'error',
+          text: 'Cet appel a déjà été analysé avec ce template.',
+          canForce: true,
+        });
+      } else {
+        setQaMessage({ type: 'error', text: err?.response?.data?.error || 'Erreur lors de l\'analyse.' });
+      }
     } finally {
       setQaAnalyzing(false);
     }
@@ -714,7 +732,7 @@ export default function CallDetail() {
                   ))}
                 </select>
                 <button
-                  onClick={handleAnalyze}
+                  onClick={() => handleAnalyze()}
                   disabled={qaAnalyzing || !selectedTemplateId}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#344453] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2a3848] disabled:opacity-50 transition"
                 >
@@ -728,12 +746,21 @@ export default function CallDetail() {
             )}
 
             {qaMessage && (
-              <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${
+              <div className={`rounded-xl border px-4 py-3 text-sm ${
                 qaMessage.type === 'success'
                   ? 'border-[#2D9D78]/25 bg-[#2D9D78]/8 text-[#2D9D78]'
                   : 'border-[#D94052]/20 bg-[#D94052]/6 text-[#D94052]'
               }`}>
-                {qaMessage.text}
+                <span className="font-medium">{qaMessage.text}</span>
+                {qaMessage.canForce && (
+                  <button
+                    onClick={() => handleAnalyze(true)}
+                    disabled={qaAnalyzing}
+                    className="ml-3 underline opacity-70 hover:opacity-100"
+                  >
+                    Relancer quand même
+                  </button>
+                )}
               </div>
             )}
 
