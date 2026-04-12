@@ -11,6 +11,8 @@ import SettingsAgentIA from './pages/SettingsAgentIA';
 import SettingsOfferB from './pages/SettingsOfferB';
 import Staff from './pages/Staff';
 import OutboundCall from './pages/OutboundCall';
+import Analytics from './pages/Analytics';
+import SettingsQA from './pages/SettingsQA';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -36,6 +38,8 @@ function App() {
           <Route path="/settings" element={<PrivateRoute><SettingsOfferB /></PrivateRoute>} />
           <Route path="/outbound" element={<PrivateRoute><OutboundCall /></PrivateRoute>} />
           <Route path="/outbound/:id" element={<PrivateRoute><OutboundCall /></PrivateRoute>} />
+          <Route path="/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
+          <Route path="/settings/qa" element={<PrivateRoute><SettingsQA /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
