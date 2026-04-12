@@ -26,6 +26,11 @@ const ULaw_FRAME_BYTES = 160;
 const ULaw_FRAME_DURATION_MS = 20;
 const MAX_HISTORY_MESSAGES = 12;
 
+function isUnavailableSummary(summary: unknown): boolean {
+  const value = typeof summary === 'string' ? summary.trim() : '';
+  return !value || value === 'Résumé non disponible';
+}
+
 interface StreamSessionState {
   baseUrl: string;
   assistantPlaybackUntil: number;
@@ -1439,7 +1444,7 @@ async function finalizeStreamingCall(state: StreamSessionState, reason: string) 
 
 async function persistFinalSummary(callId: string, intent: string, llmProvider: 'openai' | 'mistral') {
   const [summaryResult, transcriptionResult] = await Promise.all([
-    query('SELECT id, actions FROM call_summaries WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1', [callId]),
+    query('SELECT id, summary, actions FROM call_summaries WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1', [callId]),
     query('SELECT text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1', [callId]),
   ]);
 
@@ -1457,10 +1462,12 @@ async function persistFinalSummary(callId: string, intent: string, llmProvider: 
     return;
   }
 
-  await query(
-    'UPDATE call_summaries SET summary = $1, intent = $2 WHERE id = $3',
-    [summary, intent, summaryResult.rows[0].id]
-  );
+  if (!isUnavailableSummary(summary) || isUnavailableSummary(summaryResult.rows[0].summary)) {
+    await query(
+      'UPDATE call_summaries SET summary = $1, intent = $2 WHERE id = $3',
+      [summary, intent, summaryResult.rows[0].id]
+    );
+  }
 }
 
 async function redirectToVoicemail(state: StreamSessionState) {

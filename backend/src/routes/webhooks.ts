@@ -12,6 +12,11 @@ import logger from '../utils/logger';
 
 const router = Router();
 
+function isUnavailableSummary(summary: unknown): boolean {
+  const value = typeof summary === 'string' ? summary.trim() : '';
+  return !value || value === 'Résumé non disponible';
+}
+
 router.post('/telnyx/call', async (req: Request, res: Response, next) => {
   try {
     const event = req.body;
@@ -184,11 +189,16 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
             detectIntent(speechResult, companyId),
           ]);
 
-          const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
+          const existingSummary = await query('SELECT id, summary FROM call_summaries WHERE call_id = $1', [callId]);
           if (existingSummary.rows.length === 0) {
             await query(
               `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
               [callId, summary, intentData.intent, JSON.stringify([])]
+            );
+          } else if (!isUnavailableSummary(summary) || isUnavailableSummary(existingSummary.rows[0].summary)) {
+            await query(
+              'UPDATE call_summaries SET summary = $1, intent = $2 WHERE id = $3',
+              [summary, intentData.intent, existingSummary.rows[0].id]
             );
           }
 
@@ -618,9 +628,11 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
           detectIntent(fullText, call.company_id),
         ]);
 
-        const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [call.id]);
+        const existingSummary = await query('SELECT id, summary FROM call_summaries WHERE call_id = $1', [call.id]);
         if (existingSummary.rows.length > 0) {
-          await query('UPDATE call_summaries SET summary = $1, intent = $2 WHERE call_id = $3', [summary, intentData.intent, call.id]);
+          if (!isUnavailableSummary(summary) || isUnavailableSummary(existingSummary.rows[0].summary)) {
+            await query('UPDATE call_summaries SET summary = $1, intent = $2 WHERE call_id = $3', [summary, intentData.intent, call.id]);
+          }
         } else {
           await query(
             'INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)',
@@ -1580,14 +1592,16 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
           detectIntent(transcriptionText, outboundCompanyId),
         ]);
 
-        const existingS = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
+        const existingS = await query('SELECT id, summary FROM call_summaries WHERE call_id = $1', [callId]);
         if (existingS.rows.length === 0) {
           await query(
             `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
             [callId, summary, intentData.intent, JSON.stringify([])]
           );
         } else {
-          await query('UPDATE call_summaries SET summary = $1, intent = $2 WHERE id = $3', [summary, intentData.intent, existingS.rows[0].id]);
+          if (!isUnavailableSummary(summary) || isUnavailableSummary(existingS.rows[0].summary)) {
+            await query('UPDATE call_summaries SET summary = $1, intent = $2 WHERE id = $3', [summary, intentData.intent, existingS.rows[0].id]);
+          }
         }
 
         await query('UPDATE calls SET live_summary = $1 WHERE id = $2', [summary, callId]);
