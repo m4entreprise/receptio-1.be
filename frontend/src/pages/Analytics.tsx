@@ -208,81 +208,45 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 interface BatchTemplate { id: string; name: string; isActive: boolean }
 interface EligibleCall { id: string; callerNumber: string | null; createdAt: string; direction: string }
 
+type BatchStatus = 'idle' | 'running' | 'done' | 'cancelled';
+
+interface BatchProgressState {
+  status: BatchStatus;
+  progress: number;
+  successCount: number;
+  errorCount: number;
+  total: number;
+}
+
 function BatchAnalysisModal({
   period,
+  templates,
+  selectedTemplate,
+  onSelectTemplate,
+  skipExisting,
+  onToggleSkipExisting,
+  eligible,
+  loadingEligible,
+  batchState,
+  onStart,
+  onCancel,
   onClose,
   onDone,
 }: {
   period: Period;
+  templates: BatchTemplate[];
+  selectedTemplate: string;
+  onSelectTemplate: (value: string) => void;
+  skipExisting: boolean;
+  onToggleSkipExisting: () => void;
+  eligible: EligibleCall[] | null;
+  loadingEligible: boolean;
+  batchState: BatchProgressState;
+  onStart: () => void;
+  onCancel: () => void;
   onClose: () => void;
   onDone: () => void;
 }) {
-  const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
-
-  const [templates, setTemplates] = useState<BatchTemplate[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState('');
-  const [skipExisting, setSkipExisting] = useState(true);
-  const [eligible, setEligible] = useState<EligibleCall[] | null>(null);
-  const [loadingEligible, setLoadingEligible] = useState(false);
-
-  // État batch
-  type BatchStatus = 'idle' | 'running' | 'done' | 'cancelled';
-  const [batchStatus, setBatchStatus] = useState<BatchStatus>('idle');
-  const [progress, setProgress] = useState(0);
-  const [successCount, setSuccessCount] = useState(0);
-  const [errorCount, setErrorCount] = useState(0);
-  const cancelRef = useRef(false);
-
-  // Charger les templates actifs
-  useEffect(() => {
-    axios.get('/api/qa/templates', { headers: authHeader() }).then(res => {
-      const active = (res.data.templates || []).filter((t: BatchTemplate) => t.isActive);
-      setTemplates(active);
-      if (active.length > 0) setSelectedTemplate(active[0].id);
-    }).catch(() => {});
-  }, []);
-
-  // Charger les appels éligibles quand template ou skipExisting change
-  useEffect(() => {
-    if (!selectedTemplate) return;
-    setEligible(null);
-    setLoadingEligible(true);
-    axios.get(`/api/qa/batch-eligible?templateId=${selectedTemplate}&period=${period}&skipExisting=${skipExisting}`, { headers: authHeader() })
-      .then(res => setEligible(res.data.calls || []))
-      .catch(() => setEligible([]))
-      .finally(() => setLoadingEligible(false));
-  }, [selectedTemplate, skipExisting, period]);
-
-  async function handleStart() {
-    if (!eligible || eligible.length === 0 || !selectedTemplate) return;
-    cancelRef.current = false;
-    setBatchStatus('running');
-    setProgress(0);
-    setSuccessCount(0);
-    setErrorCount(0);
-
-    for (let i = 0; i < eligible.length; i++) {
-      if (cancelRef.current) {
-        setBatchStatus('cancelled');
-        break;
-      }
-      const call = eligible[i];
-      try {
-        await axios.post(`/api/qa/analyze/${call.id}`, { templateId: selectedTemplate }, { headers: authHeader() });
-        setSuccessCount(s => s + 1);
-      } catch {
-        setErrorCount(e => e + 1);
-      }
-      setProgress(i + 1);
-    }
-
-    if (!cancelRef.current) setBatchStatus('done');
-  }
-
-  function handleCancel() {
-    cancelRef.current = true;
-  }
-
   const total = eligible?.length ?? 0;
 
   return (
@@ -300,7 +264,7 @@ function BatchAnalysisModal({
 
         <div className="p-6 space-y-5">
           {/* Config */}
-          {batchStatus === 'idle' && (
+          {batchState.status === 'idle' && (
             <>
               {templates.length === 0 ? (
                 <p className="text-sm text-[#344453]/60">
@@ -313,7 +277,7 @@ function BatchAnalysisModal({
                     <label className="block text-xs font-medium text-[#344453]/70 mb-1.5">Template</label>
                     <select
                       value={selectedTemplate}
-                      onChange={e => setSelectedTemplate(e.target.value)}
+                      onChange={e => onSelectTemplate(e.target.value)}
                       className="w-full rounded-xl border border-[#344453]/15 bg-[#344453]/3 px-3 py-2.5 text-sm text-[#141F28] focus:border-[#344453]/30 focus:outline-none"
                     >
                       {templates.map(t => (
@@ -325,7 +289,7 @@ function BatchAnalysisModal({
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setSkipExisting(v => !v)}
+                      onClick={onToggleSkipExisting}
                       className={`relative h-5 w-9 rounded-full transition-colors ${skipExisting ? 'bg-[#2D9D78]' : 'bg-[#344453]/20'}`}
                     >
                       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${skipExisting ? 'translate-x-4' : 'translate-x-0.5'}`} />
@@ -350,7 +314,7 @@ function BatchAnalysisModal({
                       Annuler
                     </button>
                     <button
-                      onClick={handleStart}
+                      onClick={onStart}
                       disabled={!eligible || total === 0 || loadingEligible}
                       className="inline-flex items-center gap-2 rounded-xl bg-[#344453] px-4 py-2 text-sm font-medium text-white hover:bg-[#2a3848] disabled:opacity-50 transition"
                     >
@@ -364,30 +328,30 @@ function BatchAnalysisModal({
           )}
 
           {/* Progression */}
-          {(batchStatus === 'running' || batchStatus === 'cancelled') && (
+          {(batchState.status === 'running' || batchState.status === 'cancelled') && (
             <div className="space-y-4">
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium text-[#141F28]">
-                  {batchStatus === 'cancelled' ? 'Annulé' : 'Analyse en cours…'}
+                  {batchState.status === 'cancelled' ? 'Annulé' : 'Analyse en cours…'}
                 </span>
-                <span className="text-[#344453]/55">{progress} / {total}</span>
+                <span className="text-[#344453]/55">{batchState.progress} / {batchState.total}</span>
               </div>
 
               <div className="h-2 w-full rounded-full bg-[#344453]/10 overflow-hidden">
                 <div
                   className="h-full rounded-full bg-[#344453] transition-all duration-300"
-                  style={{ width: total > 0 ? `${(progress / total) * 100}%` : '0%' }}
+                  style={{ width: batchState.total > 0 ? `${(batchState.progress / batchState.total) * 100}%` : '0%' }}
                 />
               </div>
 
               <div className="flex gap-4 text-sm">
-                <span className="text-[#2D9D78]">✓ {successCount} réussi{successCount !== 1 ? 's' : ''}</span>
-                {errorCount > 0 && <span className="text-[#D94052]">✗ {errorCount} erreur{errorCount !== 1 ? 's' : ''}</span>}
+                <span className="text-[#2D9D78]">✓ {batchState.successCount} réussi{batchState.successCount !== 1 ? 's' : ''}</span>
+                {batchState.errorCount > 0 && <span className="text-[#D94052]">✗ {batchState.errorCount} erreur{batchState.errorCount !== 1 ? 's' : ''}</span>}
               </div>
 
-              {batchStatus === 'running' && (
+              {batchState.status === 'running' && (
                 <button
-                  onClick={handleCancel}
+                  onClick={onCancel}
                   className="inline-flex items-center gap-2 rounded-xl border border-[#D94052]/25 px-4 py-2 text-sm text-[#D94052] hover:bg-[#D94052]/5 transition"
                 >
                   <Square className="h-3.5 w-3.5" />
@@ -398,20 +362,20 @@ function BatchAnalysisModal({
           )}
 
           {/* Résultats finaux */}
-          {batchStatus === 'done' && (
+          {batchState.status === 'done' && (
             <div className="space-y-4">
               <div className="flex items-center gap-3 rounded-xl bg-[#2D9D78]/8 border border-[#2D9D78]/20 px-4 py-3">
                 <CheckCircle className="h-5 w-5 text-[#2D9D78] shrink-0" />
                 <div className="text-sm">
                   <p className="font-semibold text-[#2D9D78]">Batch terminé</p>
                   <p className="text-[#344453]/60 mt-0.5">
-                    {successCount} analyse{successCount !== 1 ? 's' : ''} réussie{successCount !== 1 ? 's' : ''}
-                    {errorCount > 0 && ` • ${errorCount} erreur${errorCount !== 1 ? 's' : ''}`}
+                    {batchState.successCount} analyse{batchState.successCount !== 1 ? 's' : ''} réussie{batchState.successCount !== 1 ? 's' : ''}
+                    {batchState.errorCount > 0 && ` • ${batchState.errorCount} erreur${batchState.errorCount !== 1 ? 's' : ''}`}
                   </p>
                 </div>
               </div>
 
-              {errorCount > 0 && (
+              {batchState.errorCount > 0 && (
                 <div className="flex items-start gap-2 text-xs text-[#C7601D]/80">
                   <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   Les erreurs concernent généralement des appels sans transcription utilisable ou des timeouts Mistral.
@@ -462,12 +426,28 @@ export default function Analytics() {
   const [error, setError] = useState<string | null>(null);
   const [showBatchModal, setShowBatchModal] = useState(false);
 
+  const [batchTemplates, setBatchTemplates] = useState<BatchTemplate[]>([]);
+  const [batchSelectedTemplate, setBatchSelectedTemplate] = useState('');
+  const [batchSkipExisting, setBatchSkipExisting] = useState(true);
+  const [batchEligible, setBatchEligible] = useState<EligibleCall[] | null>(null);
+  const [batchLoadingEligible, setBatchLoadingEligible] = useState(false);
+  const [batchState, setBatchState] = useState<BatchProgressState>({
+    status: 'idle',
+    progress: 0,
+    successCount: 0,
+    errorCount: 0,
+    total: 0,
+  });
+  const [batchControlHovered, setBatchControlHovered] = useState(false);
+  const batchCancelRef = useRef(false);
+  const authHeader = useCallback(() => ({ Authorization: `Bearer ${localStorage.getItem('token')}` }), []);
+
   const loadKpis = useCallback(async (p: Period) => {
     setLoading(true);
     setError(null);
     try {
       const { data } = await axios.get(`/api/analytics/kpis?period=${p}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: authHeader(),
       });
       setKpiData(data);
     } catch {
@@ -475,13 +455,13 @@ export default function Analytics() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authHeader]);
 
   const loadQaResults = useCallback(async (p: Period) => {
     setQaLoading(true);
     try {
       const { data } = await axios.get(`/api/qa/results?period=${p}&limit=200`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: authHeader(),
       });
       // L'API retourne du snake_case — on normalise en camelCase
       const normalized = (data.results || []).map((r: Record<string, unknown>) => ({
@@ -502,7 +482,7 @@ export default function Analytics() {
     } finally {
       setQaLoading(false);
     }
-  }, []);
+  }, [authHeader]);
 
   const loadQaAdvanced = useCallback(async (p: Period, nextFlagType?: string) => {
     try {
@@ -534,7 +514,7 @@ export default function Analytics() {
       setWeakCriteria([]);
       setFlagTrend([]);
     }
-  }, []);
+  }, [authHeader]);
 
   useEffect(() => {
     loadKpis(period);
@@ -605,6 +585,95 @@ export default function Analytics() {
   useEffect(() => {
     void loadQaAdvanced(period, effectiveSelectedFlagType);
   }, [period, effectiveSelectedFlagType, loadQaAdvanced]);
+
+  useEffect(() => {
+    if (tab !== 'qa') return;
+    if (batchTemplates.length > 0) return;
+
+    axios.get('/api/qa/templates', { headers: authHeader() }).then((res) => {
+      const active = (res.data.templates || []).filter((t: BatchTemplate) => t.isActive);
+      setBatchTemplates(active);
+      if (active.length > 0) {
+        setBatchSelectedTemplate((current) => current || active[0].id);
+      }
+    }).catch(() => {});
+  }, [tab, batchTemplates.length, authHeader]);
+
+  useEffect(() => {
+    if (tab !== 'qa') return;
+    if (!batchSelectedTemplate) return;
+
+    setBatchEligible(null);
+    setBatchLoadingEligible(true);
+
+    axios.get(`/api/qa/batch-eligible?templateId=${batchSelectedTemplate}&period=${period}&skipExisting=${batchSkipExisting}`, {
+      headers: authHeader(),
+    })
+      .then((res) => setBatchEligible(res.data.calls || []))
+      .catch(() => setBatchEligible([]))
+      .finally(() => setBatchLoadingEligible(false));
+  }, [tab, batchSelectedTemplate, batchSkipExisting, period, authHeader]);
+
+  const handleStartBatch = useCallback(async () => {
+    if (!batchEligible || batchEligible.length === 0 || !batchSelectedTemplate) return;
+
+    batchCancelRef.current = false;
+    setBatchState({
+      status: 'running',
+      progress: 0,
+      successCount: 0,
+      errorCount: 0,
+      total: batchEligible.length,
+    });
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < batchEligible.length; i++) {
+      if (batchCancelRef.current) {
+        setBatchState({
+          status: 'cancelled',
+          progress: i,
+          successCount,
+          errorCount,
+          total: batchEligible.length,
+        });
+        return;
+      }
+
+      const call = batchEligible[i];
+
+      try {
+        await axios.post(`/api/qa/analyze/${call.id}`, { templateId: batchSelectedTemplate }, {
+          headers: authHeader(),
+        });
+        successCount += 1;
+      } catch {
+        errorCount += 1;
+      }
+
+      setBatchState({
+        status: 'running',
+        progress: i + 1,
+        successCount,
+        errorCount,
+        total: batchEligible.length,
+      });
+    }
+
+    setBatchState({
+      status: 'done',
+      progress: batchEligible.length,
+      successCount,
+      errorCount,
+      total: batchEligible.length,
+    });
+    void loadQaResults(period);
+  }, [batchEligible, batchSelectedTemplate, authHeader, loadQaResults, period]);
+
+  const handleCancelBatch = useCallback(() => {
+    batchCancelRef.current = true;
+  }, []);
 
   const periodLabel: Record<Period, string> = {
     today: "Aujourd'hui",
@@ -851,13 +920,47 @@ export default function Analytics() {
               >
                 Configurer les templates
               </Link>
-              <button
-                onClick={() => setShowBatchModal(true)}
-                className="inline-flex items-center gap-2 rounded-full bg-[#344453] px-4 py-2 text-sm font-medium text-white shadow-[0_4px_12px_rgba(52,68,83,0.18)] hover:bg-[#2a3848] transition"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Lancer un batch d'analyses
-              </button>
+              {batchState.status === 'running' ? (
+                <button
+                  onClick={handleCancelBatch}
+                  onMouseEnter={() => setBatchControlHovered(true)}
+                  onMouseLeave={() => setBatchControlHovered(false)}
+                  className={`group relative flex h-11 w-full max-w-[320px] items-center overflow-hidden rounded-full border px-4 text-sm font-medium transition sm:w-[320px] ${
+                    batchControlHovered
+                      ? 'border-[#D94052]/30 bg-[#D94052]/8 text-[#D94052]'
+                      : 'border-[#344453]/15 bg-white text-[#344453] shadow-[0_4px_12px_rgba(52,68,83,0.12)]'
+                  }`}
+                >
+                  {batchControlHovered ? (
+                    <span className="mx-auto inline-flex items-center gap-2">
+                      <Square className="h-3.5 w-3.5" />
+                      Stopper l'analyse
+                    </span>
+                  ) : (
+                    <>
+                      <div className="absolute inset-0 bg-[#344453]/6" />
+                      <div
+                        className="absolute inset-y-0 left-0 bg-[#344453] transition-all duration-300"
+                        style={{ width: batchState.total > 0 ? `${(batchState.progress / batchState.total) * 100}%` : '0%' }}
+                      />
+                      <span className="relative z-10 flex w-full items-center justify-between gap-3 text-white">
+                        <span className="truncate">Analyse en cours…</span>
+                        <span className="shrink-0" style={{ fontFamily: 'var(--font-mono)' }}>
+                          {batchState.progress} / {batchState.total}
+                        </span>
+                      </span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowBatchModal(true)}
+                  className="inline-flex items-center gap-2 rounded-full bg-[#344453] px-4 py-2 text-sm font-medium text-white shadow-[0_4px_12px_rgba(52,68,83,0.18)] hover:bg-[#2a3848] transition"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Lancer un batch d'analyses
+                </button>
+              )}
             </div>
 
             {qaLoading && (
@@ -1146,6 +1249,16 @@ export default function Analytics() {
       {showBatchModal && (
         <BatchAnalysisModal
           period={period}
+          templates={batchTemplates}
+          selectedTemplate={batchSelectedTemplate}
+          onSelectTemplate={setBatchSelectedTemplate}
+          skipExisting={batchSkipExisting}
+          onToggleSkipExisting={() => setBatchSkipExisting((value) => !value)}
+          eligible={batchEligible}
+          loadingEligible={batchLoadingEligible}
+          batchState={batchState}
+          onStart={() => { void handleStartBatch(); }}
+          onCancel={handleCancelBatch}
           onClose={() => setShowBatchModal(false)}
           onDone={() => loadQaResults(period)}
         />
