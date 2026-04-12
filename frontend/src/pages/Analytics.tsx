@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import {
@@ -19,6 +19,7 @@ import {
 import Layout from '../components/Layout';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { X, Play, Square, CheckCircle, AlertCircle } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -183,6 +184,237 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Modal batch ───────────────────────────────────────────────────────────────
+
+interface BatchTemplate { id: string; name: string; isActive: boolean }
+interface EligibleCall { id: string; callerNumber: string | null; createdAt: string; direction: string }
+
+function BatchAnalysisModal({
+  period,
+  onClose,
+  onDone,
+}: {
+  period: Period;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
+
+  const [templates, setTemplates] = useState<BatchTemplate[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [skipExisting, setSkipExisting] = useState(true);
+  const [eligible, setEligible] = useState<EligibleCall[] | null>(null);
+  const [loadingEligible, setLoadingEligible] = useState(false);
+
+  // État batch
+  type BatchStatus = 'idle' | 'running' | 'done' | 'cancelled';
+  const [batchStatus, setBatchStatus] = useState<BatchStatus>('idle');
+  const [progress, setProgress] = useState(0);
+  const [successCount, setSuccessCount] = useState(0);
+  const [errorCount, setErrorCount] = useState(0);
+  const cancelRef = useRef(false);
+
+  // Charger les templates actifs
+  useEffect(() => {
+    axios.get('/api/qa/templates', { headers: authHeader() }).then(res => {
+      const active = (res.data.templates || []).filter((t: BatchTemplate) => t.isActive);
+      setTemplates(active);
+      if (active.length > 0) setSelectedTemplate(active[0].id);
+    }).catch(() => {});
+  }, []);
+
+  // Charger les appels éligibles quand template ou skipExisting change
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    setEligible(null);
+    setLoadingEligible(true);
+    axios.get(`/api/qa/batch-eligible?templateId=${selectedTemplate}&period=${period}&skipExisting=${skipExisting}`, { headers: authHeader() })
+      .then(res => setEligible(res.data.calls || []))
+      .catch(() => setEligible([]))
+      .finally(() => setLoadingEligible(false));
+  }, [selectedTemplate, skipExisting, period]);
+
+  async function handleStart() {
+    if (!eligible || eligible.length === 0 || !selectedTemplate) return;
+    cancelRef.current = false;
+    setBatchStatus('running');
+    setProgress(0);
+    setSuccessCount(0);
+    setErrorCount(0);
+
+    for (let i = 0; i < eligible.length; i++) {
+      if (cancelRef.current) {
+        setBatchStatus('cancelled');
+        break;
+      }
+      const call = eligible[i];
+      try {
+        await axios.post(`/api/qa/analyze/${call.id}`, { templateId: selectedTemplate }, { headers: authHeader() });
+        setSuccessCount(s => s + 1);
+      } catch {
+        setErrorCount(e => e + 1);
+      }
+      setProgress(i + 1);
+    }
+
+    if (!cancelRef.current) setBatchStatus('done');
+  }
+
+  function handleCancel() {
+    cancelRef.current = true;
+  }
+
+  const total = eligible?.length ?? 0;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="w-full max-w-lg rounded-[24px] border border-[#344453]/10 bg-white shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[#344453]/10 px-6 py-4">
+          <h2 className="text-base font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>
+            Analyse batch
+          </h2>
+          <button onClick={onClose} className="rounded-full p-1.5 text-[#344453]/50 hover:bg-[#344453]/8 hover:text-[#344453] transition">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Config */}
+          {batchStatus === 'idle' && (
+            <>
+              {templates.length === 0 ? (
+                <p className="text-sm text-[#344453]/60">
+                  Aucun template actif.{' '}
+                  <Link to="/settings/qa" className="text-[#C7601D] hover:underline font-medium">Configurer →</Link>
+                </p>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-[#344453]/70 mb-1.5">Template</label>
+                    <select
+                      value={selectedTemplate}
+                      onChange={e => setSelectedTemplate(e.target.value)}
+                      className="w-full rounded-xl border border-[#344453]/15 bg-[#344453]/3 px-3 py-2.5 text-sm text-[#141F28] focus:border-[#344453]/30 focus:outline-none"
+                    >
+                      {templates.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSkipExisting(v => !v)}
+                      className={`relative h-5 w-9 rounded-full transition-colors ${skipExisting ? 'bg-[#2D9D78]' : 'bg-[#344453]/20'}`}
+                    >
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${skipExisting ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                    <span className="text-sm text-[#344453]/70">Ignorer les appels déjà analysés avec ce template</span>
+                  </div>
+
+                  <div className="rounded-xl bg-[#344453]/4 px-4 py-3">
+                    {loadingEligible ? (
+                      <p className="text-sm text-[#344453]/50">Calcul des appels éligibles…</p>
+                    ) : eligible === null ? null : (
+                      <p className="text-sm text-[#141F28]">
+                        <span className="font-semibold">{total}</span> appel{total !== 1 ? 's' : ''} éligible{total !== 1 ? 's' : ''} sur la période{' '}
+                        <span className="text-[#344453]/50">({period === 'today' ? "aujourd'hui" : period === '7d' ? '7 jours' : '30 jours'})</span>
+                        {total === 100 && <span className="ml-1 text-[#C7601D]">— limité à 100</span>}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-1">
+                    <button onClick={onClose} className="rounded-xl border border-[#344453]/15 px-4 py-2 text-sm text-[#344453]/70 hover:bg-[#344453]/5 transition">
+                      Annuler
+                    </button>
+                    <button
+                      onClick={handleStart}
+                      disabled={!eligible || total === 0 || loadingEligible}
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#344453] px-4 py-2 text-sm font-medium text-white hover:bg-[#2a3848] disabled:opacity-50 transition"
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      Lancer {total > 0 ? `(${total})` : ''}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
+          {/* Progression */}
+          {(batchStatus === 'running' || batchStatus === 'cancelled') && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium text-[#141F28]">
+                  {batchStatus === 'cancelled' ? 'Annulé' : 'Analyse en cours…'}
+                </span>
+                <span className="text-[#344453]/55">{progress} / {total}</span>
+              </div>
+
+              <div className="h-2 w-full rounded-full bg-[#344453]/10 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-[#344453] transition-all duration-300"
+                  style={{ width: total > 0 ? `${(progress / total) * 100}%` : '0%' }}
+                />
+              </div>
+
+              <div className="flex gap-4 text-sm">
+                <span className="text-[#2D9D78]">✓ {successCount} réussi{successCount !== 1 ? 's' : ''}</span>
+                {errorCount > 0 && <span className="text-[#D94052]">✗ {errorCount} erreur{errorCount !== 1 ? 's' : ''}</span>}
+              </div>
+
+              {batchStatus === 'running' && (
+                <button
+                  onClick={handleCancel}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#D94052]/25 px-4 py-2 text-sm text-[#D94052] hover:bg-[#D94052]/5 transition"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                  Arrêter le batch
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Résultats finaux */}
+          {batchStatus === 'done' && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-xl bg-[#2D9D78]/8 border border-[#2D9D78]/20 px-4 py-3">
+                <CheckCircle className="h-5 w-5 text-[#2D9D78] shrink-0" />
+                <div className="text-sm">
+                  <p className="font-semibold text-[#2D9D78]">Batch terminé</p>
+                  <p className="text-[#344453]/60 mt-0.5">
+                    {successCount} analyse{successCount !== 1 ? 's' : ''} réussie{successCount !== 1 ? 's' : ''}
+                    {errorCount > 0 && ` • ${errorCount} erreur${errorCount !== 1 ? 's' : ''}`}
+                  </p>
+                </div>
+              </div>
+
+              {errorCount > 0 && (
+                <div className="flex items-start gap-2 text-xs text-[#C7601D]/80">
+                  <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  Les erreurs concernent généralement des appels sans transcription utilisable ou des timeouts Mistral.
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  onClick={() => { onDone(); onClose(); }}
+                  className="rounded-xl bg-[#344453] px-5 py-2 text-sm font-medium text-white hover:bg-[#2a3848] transition"
+                >
+                  Voir les résultats
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-[20px] border border-[#344453]/10 bg-white p-5 shadow-sm">
@@ -204,6 +436,7 @@ export default function Analytics() {
   const [loading, setLoading] = useState(false);
   const [qaLoading, setQaLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showBatchModal, setShowBatchModal] = useState(false);
 
   const loadKpis = useCallback(async (p: Period) => {
     setLoading(true);
@@ -525,6 +758,17 @@ export default function Analytics() {
         {/* ── Onglet Qualité IA ── */}
         {tab === 'qa' && (
           <div className="space-y-6">
+            {/* Bouton batch */}
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowBatchModal(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-[#344453] px-4 py-2 text-sm font-medium text-white shadow-[0_4px_12px_rgba(52,68,83,0.18)] hover:bg-[#2a3848] transition"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Lancer un batch d'analyses
+              </button>
+            </div>
+
             {qaLoading && (
               <div className="flex items-center justify-center py-16">
                 <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#344453]/20 border-t-[#344453]" />
@@ -693,6 +937,13 @@ export default function Analytics() {
           </div>
         )}
       </div>
+      {showBatchModal && (
+        <BatchAnalysisModal
+          period={period}
+          onClose={() => setShowBatchModal(false)}
+          onDone={() => loadQaResults(period)}
+        />
+      )}
     </Layout>
   );
 }

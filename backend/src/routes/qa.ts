@@ -427,4 +427,62 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
   }
 });
 
+// GET /api/qa/batch-eligible
+// Retourne les IDs des appels éligibles à une analyse batch
+// Query params: templateId (requis), period (today|7d|30d, défaut 30d), skipExisting (true|false, défaut true)
+router.get('/batch-eligible', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    const { companyId } = req.user!;
+    const templateId = typeof req.query.templateId === 'string' ? req.query.templateId : null;
+    const periodParam = typeof req.query.period === 'string' ? req.query.period : '30d';
+    const skipExisting = req.query.skipExisting !== 'false'; // défaut true
+
+    if (!templateId) throw new AppError('templateId is required', 400);
+
+    // Vérifier ownership du template
+    const tResult = await query(
+      `SELECT id FROM analysis_templates WHERE id = $1 AND company_id = $2`,
+      [templateId, companyId]
+    );
+    if (tResult.rows.length === 0) throw new AppError('Template not found', 404);
+
+    const { from, to } = getPeriodBounds(periodParam);
+
+    // Appels avec transcription dans la période, pour cette company
+    let sql = `
+      SELECT c.id, c.caller_number, c.created_at, c.direction
+      FROM calls c
+      INNER JOIN transcriptions t ON t.call_id = c.id AND t.text IS NOT NULL AND t.text <> ''
+      WHERE c.company_id = $1
+        AND c.created_at >= $2
+        AND c.created_at <= $3`;
+
+    const params: unknown[] = [companyId, from.toISOString(), to.toISOString()];
+
+    if (skipExisting) {
+      params.push(templateId);
+      sql += ` AND NOT EXISTS (
+        SELECT 1 FROM call_analysis_results car
+        WHERE car.call_id = c.id AND car.template_id = $${params.length}
+      )`;
+    }
+
+    sql += ` ORDER BY c.created_at DESC LIMIT 100`;
+
+    const result = await query(sql, params);
+
+    res.json({
+      calls: result.rows.map((r: Record<string, unknown>) => ({
+        id: r.id,
+        callerNumber: r.caller_number,
+        createdAt: r.created_at,
+        direction: r.direction,
+      })),
+      total: result.rows.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;
