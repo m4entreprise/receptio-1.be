@@ -181,7 +181,7 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
 
           const [summary, intentData] = await Promise.all([
             summarizeCall(speechResult),
-            detectIntent(speechResult),
+            detectIntent(speechResult, companyId),
           ]);
 
           const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
@@ -615,7 +615,7 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
         const [summary, intentData] = await Promise.all([
           summarizeCall(fullText),
-          detectIntent(fullText),
+          detectIntent(fullText, call.company_id),
         ]);
 
         const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [call.id]);
@@ -1234,7 +1234,7 @@ async function handleRecordingSaved(payload: any) {
         const transcription = await transcribeAudio(recordingUrl, 'fr');
         const [summary, intentData] = await Promise.all([
           summarizeCall(transcription.text),
-          detectIntent(transcription.text),
+          detectIntent(transcription.text, call.company_id),
         ]);
 
         await query(
@@ -1483,6 +1483,8 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
       try {
         // Check if transcription already exists with structured segments (from WebSocket flush)
         const existingT = await query('SELECT id, text, segments FROM transcriptions WHERE call_id = $1 LIMIT 1', [callId]);
+        const callCompanyRow = await query('SELECT company_id FROM calls WHERE id = $1', [callId]);
+        const outboundCompanyId: string | undefined = callCompanyRow.rows[0]?.company_id ?? undefined;
 
         let transcriptionText = '';
         let transcriptionSegments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null = null;
@@ -1575,7 +1577,7 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
 
         const [summary, intentData] = await Promise.all([
           summarizeCall(transcriptionText),
-          detectIntent(transcriptionText),
+          detectIntent(transcriptionText, outboundCompanyId),
         ]);
 
         const existingS = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);

@@ -13,6 +13,7 @@ import Staff from './pages/Staff';
 import OutboundCall from './pages/OutboundCall';
 import Analytics from './pages/Analytics';
 import SettingsQA from './pages/SettingsQA';
+import SettingsIntents from './pages/SettingsIntents';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -40,6 +41,7 @@ function App() {
           <Route path="/outbound/:id" element={<PrivateRoute><OutboundCall /></PrivateRoute>} />
           <Route path="/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
           <Route path="/settings/qa" element={<PrivateRoute><SettingsQA /></PrivateRoute>} />
+          <Route path="/settings/intents" element={<PrivateRoute><SettingsIntents /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>

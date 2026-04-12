@@ -23,6 +23,7 @@ import outboundCallsRoutes from './routes/outboundCalls';
 import dispatchRulesRoutes from './routes/dispatchRules';
 import analyticsRoutes from './routes/analytics';
 import qaRoutes from './routes/qa';
+import intentsRoutes from './routes/intents';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -64,6 +65,7 @@ app.use('/api/outbound-calls', outboundCallsRoutes);
 app.use('/api/dispatch-rules', dispatchRulesRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/qa', qaRoutes);
+app.use('/api/intents', intentsRoutes);
 
 app.use(errorHandler);
 
