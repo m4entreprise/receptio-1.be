@@ -320,7 +320,14 @@ async function fetchCall(callId: string, companyId: string): Promise<CallForAnal
               FROM call_events ce
               WHERE ce.call_id = c.id
                 AND ce.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
-            ) AS has_human_transfer
+            ) AS has_human_transfer,
+            EXISTS (
+              SELECT 1
+              FROM call_events ce
+              WHERE ce.call_id = c.id
+                AND ce.event_type IN ('twilio.recording.completed', 'twilio.streaming.recording.completed')
+            ) AS has_verified_recording,
+            POSITION('[Conversation avec l''agent]' IN COALESCE(t.text, '')) > 0 AS has_human_transcript_marker
      FROM calls c
      LEFT JOIN transcriptions t ON t.call_id = c.id
      LEFT JOIN call_summaries cs ON cs.call_id = c.id
@@ -338,11 +345,12 @@ async function fetchCall(callId: string, companyId: string): Promise<CallForAnal
     : typeof row.summary === 'string' && row.summary.trim()
       ? `Résumé disponible mais transcription manquante : ${row.summary as string}`
       : 'Aucune transcription disponible.';
-  const hasAiReceptionist = Boolean(row.has_ai_receptionist) || transcript.includes('Agent:');
+  const hasAiReceptionist = Boolean(row.has_ai_receptionist);
   const hasHumanTransfer = Boolean(row.has_human_transfer);
-  const conversationMode = hasHumanTransfer
+  const hasVerifiedHumanConversation = Boolean(row.has_verified_recording) || Boolean(row.has_human_transcript_marker);
+  const conversationMode = hasAiReceptionist && hasHumanTransfer && hasVerifiedHumanConversation
     ? 'ai_and_human'
-    : hasAiReceptionist
+    : hasAiReceptionist && !hasHumanTransfer
       ? 'ai_only'
       : 'unknown';
 

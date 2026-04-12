@@ -73,6 +73,20 @@ function normalizeFlags(raw: unknown): string[] {
   return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
+function isProvenAgentInteraction(row: Record<string, unknown>): boolean {
+  const hasAiReceptionist = Boolean(row.has_ai_receptionist);
+  const hasHumanTransfer = Boolean(row.has_human_transfer);
+  const hasVerifiedRecording = Boolean(row.has_verified_recording);
+  const hasHumanTranscriptMarker = Boolean(row.has_human_transcript_marker);
+  const directHumanOwnership = Boolean(row.initiated_by_staff_id);
+
+  if (hasAiReceptionist) {
+    return hasHumanTransfer && (hasVerifiedRecording || hasHumanTranscriptMarker);
+  }
+
+  return directHumanOwnership || hasVerifiedRecording || hasHumanTranscriptMarker;
+ }
+
 // GET /api/analytics/kpis?period=today|7d|30d
 router.get('/kpis', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
@@ -256,19 +270,36 @@ router.get('/qa/weak-criteria', authenticateToken, async (req: AuthRequest, res:
     }
 
     const result = await query(
-      `SELECT car.scores, car.template_id
-       FROM call_analysis_results car
-       JOIN calls c ON c.id = car.call_id
-       WHERE c.company_id = $1
-         AND car.processed_at >= $2
-         AND car.processed_at <= $3${extraWhere}`,
+      `SELECT car.scores, car.template_id,
+               c.initiated_by_staff_id,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_mode
+                 WHERE ce_mode.call_id = c.id
+                   AND ce_mode.event_type IN ('twilio.offer_b.started', 'agent_replied', 'agent_closed_call', 'agent_needs_clarification', 'bbis.turn.completed', 'bbis.turn.failed', 'bbis.turn.no_transcript')
+               ) AS has_ai_receptionist,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_transfer
+                 WHERE ce_transfer.call_id = c.id
+                   AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
+               ) AS has_human_transfer,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_recording
+                 WHERE ce_recording.call_id = c.id
+                   AND ce_recording.event_type IN ('twilio.recording.completed', 'twilio.streaming.recording.completed')
+               ) AS has_verified_recording,
+               POSITION('[Conversation avec l''agent]' IN COALESCE(tr.text, '')) > 0 AS has_human_transcript_marker
+        FROM call_analysis_results car
+        JOIN calls c ON c.id = car.call_id
+        LEFT JOIN transcriptions tr ON tr.call_id = c.id
+        WHERE c.company_id = $1
+          AND car.processed_at >= $2
+          AND car.processed_at <= $3${extraWhere}`,
       params
     );
 
     const aggregates = new Map<string, { totalNote: number; totalMax: number; count: number }>();
-    const templateIds = new Set<string>();
     for (const row of result.rows as Record<string, unknown>[]) {
-      if (typeof row.template_id === 'string') templateIds.add(row.template_id);
+      if (!isProvenAgentInteraction(row)) continue;
       for (const score of normalizeScores(row.scores)) {
         const current = aggregates.get(score.critere_id) || { totalNote: 0, totalMax: 0, count: 0 };
         current.totalNote += score.note;
@@ -318,18 +349,37 @@ router.get('/qa/flags/trend', authenticateToken, async (req: AuthRequest, res: R
     const { from, to } = getPeriodBounds(period);
 
     const result = await query(
-      `SELECT car.flags, car.processed_at
-       FROM call_analysis_results car
-       JOIN calls c ON c.id = car.call_id
-       WHERE c.company_id = $1
-         AND car.processed_at >= $2
-         AND car.processed_at <= $3
+      `SELECT car.flags, car.processed_at,
+               c.initiated_by_staff_id,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_mode
+                 WHERE ce_mode.call_id = c.id
+                   AND ce_mode.event_type IN ('twilio.offer_b.started', 'agent_replied', 'agent_closed_call', 'agent_needs_clarification', 'bbis.turn.completed', 'bbis.turn.failed', 'bbis.turn.no_transcript')
+               ) AS has_ai_receptionist,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_transfer
+                 WHERE ce_transfer.call_id = c.id
+                   AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
+               ) AS has_human_transfer,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_recording
+                 WHERE ce_recording.call_id = c.id
+                   AND ce_recording.event_type IN ('twilio.recording.completed', 'twilio.streaming.recording.completed')
+               ) AS has_verified_recording,
+               POSITION('[Conversation avec l''agent]' IN COALESCE(tr.text, '')) > 0 AS has_human_transcript_marker
+        FROM call_analysis_results car
+        JOIN calls c ON c.id = car.call_id
+        LEFT JOIN transcriptions tr ON tr.call_id = c.id
+        WHERE c.company_id = $1
+          AND car.processed_at >= $2
+          AND car.processed_at <= $3
        ORDER BY car.processed_at ASC`,
       [companyId, from.toISOString(), to.toISOString()]
     );
 
     const trendMap = new Map<string, number>();
     for (const row of result.rows as Record<string, unknown>[]) {
+      if (!isProvenAgentInteraction(row)) continue;
       const date = String(row.processed_at).slice(0, 10);
       const flags = normalizeFlags(row.flags);
       if (!flagType || flags.includes(flagType)) {
@@ -366,12 +416,30 @@ router.get('/qa/score-distribution', authenticateToken, async (req: AuthRequest,
     }
 
     const result = await query(
-      `SELECT car.global_score
-       FROM call_analysis_results car
-       JOIN calls c ON c.id = car.call_id
-       WHERE c.company_id = $1
-         AND car.processed_at >= $2
-         AND car.processed_at <= $3${extraWhere}`,
+      `SELECT car.global_score,
+               c.initiated_by_staff_id,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_mode
+                 WHERE ce_mode.call_id = c.id
+                   AND ce_mode.event_type IN ('twilio.offer_b.started', 'agent_replied', 'agent_closed_call', 'agent_needs_clarification', 'bbis.turn.completed', 'bbis.turn.failed', 'bbis.turn.no_transcript')
+               ) AS has_ai_receptionist,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_transfer
+                 WHERE ce_transfer.call_id = c.id
+                   AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
+               ) AS has_human_transfer,
+               EXISTS (
+                 SELECT 1 FROM call_events ce_recording
+                 WHERE ce_recording.call_id = c.id
+                   AND ce_recording.event_type IN ('twilio.recording.completed', 'twilio.streaming.recording.completed')
+               ) AS has_verified_recording,
+               POSITION('[Conversation avec l''agent]' IN COALESCE(tr.text, '')) > 0 AS has_human_transcript_marker
+        FROM call_analysis_results car
+        JOIN calls c ON c.id = car.call_id
+        LEFT JOIN transcriptions tr ON tr.call_id = c.id
+        WHERE c.company_id = $1
+          AND car.processed_at >= $2
+          AND car.processed_at <= $3${extraWhere}`,
       params
     );
 
@@ -382,6 +450,7 @@ router.get('/qa/score-distribution', authenticateToken, async (req: AuthRequest,
     buckets.set('100-100', 0);
 
     for (const row of result.rows as Record<string, unknown>[]) {
+      if (!isProvenAgentInteraction(row)) continue;
       const score = Math.max(0, Math.min(100, Number(row.global_score || 0)));
       const bucket = score === 100 ? '100-100' : `${Math.floor(score / 10) * 10}-${Math.floor(score / 10) * 10 + 10}`;
       buckets.set(bucket, (buckets.get(bucket) || 0) + 1);

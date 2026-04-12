@@ -161,12 +161,32 @@ function buildCoachingFocus(topFlag: { type: string; count: number } | null, cal
   return `Travaille principalement sur ${topFlag.type} (${ratio}% des appels).`;
 }
 
+function hasVerifiedHumanConversation(row: Record<string, unknown>): boolean {
+  return Boolean(row.has_verified_recording) || Boolean(row.has_human_transcript_marker);
+}
+
 function deriveConversationMode(row: Record<string, unknown>): 'ai_only' | 'ai_and_human' | 'unknown' {
   const hasHumanTransfer = Boolean(row.has_human_transfer);
   const hasAiReceptionist = Boolean(row.has_ai_receptionist);
-  if (hasHumanTransfer) return 'ai_and_human';
+  if (hasAiReceptionist && hasHumanTransfer && hasVerifiedHumanConversation(row)) return 'ai_and_human';
   if (hasAiReceptionist) return 'ai_only';
   return 'unknown';
+}
+
+function isAgentInteractionProven(row: Record<string, unknown>): boolean {
+  const hasAiReceptionist = Boolean(row.has_ai_receptionist);
+  const hasHumanTransfer = Boolean(row.has_human_transfer);
+  const directHumanOwnership = Boolean(row.initiated_by_staff_id);
+  if (hasAiReceptionist) {
+    return hasHumanTransfer && hasVerifiedHumanConversation(row);
+  }
+  return directHumanOwnership || hasVerifiedHumanConversation(row);
+}
+
+function getAgentInteractionStatus(row: Record<string, unknown>): 'proven' | 'unverified' | 'not_agent' {
+  if (isAgentInteractionProven(row)) return 'proven';
+  if (Boolean(row.has_ai_receptionist) || Boolean(row.has_human_transfer)) return 'unverified';
+  return 'not_agent';
 }
 
 async function ensureTemplateOwnership(templateId: string, companyId: string) {
@@ -474,7 +494,7 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
          car.id, car.call_id, car.template_id, car.template_version,
          car.scores, car.global_score, car.verbatims, car.flags, car.flags_detail,
          car.resume, car.coaching_tip, car.model, car.prompt_hash, car.retries, car.processed_at,
-         c.caller_number, c.created_at AS call_created_at, c.direction,
+         c.caller_number, c.created_at AS call_created_at, c.direction, c.initiated_by_staff_id,
          EXISTS (
            SELECT 1 FROM call_events ce_mode
            WHERE ce_mode.call_id = c.id
@@ -485,6 +505,12 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
            WHERE ce_transfer.call_id = c.id
              AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
          ) AS has_human_transfer,
+         EXISTS (
+           SELECT 1 FROM call_events ce_recording
+           WHERE ce_recording.call_id = c.id
+             AND ce_recording.event_type IN ('twilio.recording.completed', 'twilio.streaming.recording.completed')
+         ) AS has_verified_recording,
+         POSITION('[Conversation avec l''agent]' IN COALESCE(tr.text, '')) > 0 AS has_human_transcript_marker,
          t.name AS template_name, t.version AS template_current_version,
          COALESCE(s_init.id, s_xfer.id) AS agent_id,
          COALESCE(s_init.first_name, s_xfer.first_name) AS agent_first_name,
@@ -492,6 +518,7 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
        FROM call_analysis_results car
        JOIN calls c ON c.id = car.call_id
        JOIN analysis_templates t ON t.id = car.template_id
+       LEFT JOIN transcriptions tr ON tr.call_id = c.id
        LEFT JOIN staff s_init ON s_init.id = c.initiated_by_staff_id
        LEFT JOIN LATERAL (
          SELECT s2.id, s2.first_name, s2.last_name
@@ -515,6 +542,8 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
         return {
           ...row,
           conversation_mode: deriveConversationMode(row),
+          agent_interaction_proven: isAgentInteractionProven(row),
+          agent_interaction_status: getAgentInteractionStatus(row),
           flags,
           flags_detail: normalizeFlagsDetail(row.flags_detail, flags),
         };
@@ -538,6 +567,7 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
          car.id, car.call_id, car.template_id, car.template_version,
          car.scores, car.global_score, car.verbatims, car.flags, car.flags_detail,
          car.resume, car.coaching_tip, car.model, car.prompt_hash, car.retries, car.processed_at,
+         c.initiated_by_staff_id,
          EXISTS (
            SELECT 1 FROM call_events ce_mode
            WHERE ce_mode.call_id = c.id
@@ -548,6 +578,12 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
            WHERE ce_transfer.call_id = c.id
              AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
          ) AS has_human_transfer,
+         EXISTS (
+           SELECT 1 FROM call_events ce_recording
+           WHERE ce_recording.call_id = c.id
+             AND ce_recording.event_type IN ('twilio.recording.completed', 'twilio.streaming.recording.completed')
+         ) AS has_verified_recording,
+         POSITION('[Conversation avec l''agent]' IN COALESCE(tr.text, '')) > 0 AS has_human_transcript_marker,
          t.name AS template_name, t.version AS template_current_version,
          c.created_at AS call_created_at,
          COALESCE(s_init.id, s_xfer.id) AS agent_id,
@@ -556,6 +592,7 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
        FROM call_analysis_results car
        JOIN calls c ON c.id = car.call_id
        JOIN analysis_templates t ON t.id = car.template_id
+       LEFT JOIN transcriptions tr ON tr.call_id = c.id
        LEFT JOIN staff s_init ON s_init.id = c.initiated_by_staff_id
        LEFT JOIN LATERAL (
          SELECT s2.id, s2.first_name, s2.last_name
@@ -575,6 +612,8 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
       template_name: row.template_name,
       global_score: Number(row.global_score || 0),
       conversation_mode: deriveConversationMode(row),
+      agent_interaction_proven: isAgentInteractionProven(row),
+      agent_interaction_status: getAgentInteractionStatus(row),
       flags: normalizeFlags(row.flags),
       processed_at: row.processed_at,
     }));
@@ -598,9 +637,11 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
     res.json({
       result: {
         call_id: latest.call_id,
-        agent: latest.agent_id ? { id: latest.agent_id, name: `${latest.agent_first_name || ''} ${latest.agent_last_name || ''}`.trim() } : null,
+        agent: isAgentInteractionProven(latest) && latest.agent_id ? { id: latest.agent_id, name: `${latest.agent_first_name || ''} ${latest.agent_last_name || ''}`.trim() } : null,
         template: { id: latest.template_id, name: latest.template_name, version: Number(latest.template_version || latest.template_current_version || 1) },
         conversation_mode: deriveConversationMode(latest),
+        agent_interaction_proven: isAgentInteractionProven(latest),
+        agent_interaction_status: getAgentInteractionStatus(latest),
         global_score: Number(latest.global_score || 0),
         processed_at: latest.processed_at,
         resume: (latest.resume as string) || '',
@@ -633,9 +674,27 @@ router.get('/agents/:staffId/profile', authenticateToken, async (req: AuthReques
     if (agentResult.rows.length === 0) throw new AppError('Staff member not found', 404);
 
     const analysesResult = await query(
-      `SELECT car.call_id, car.global_score, car.flags, car.scores, car.processed_at
+      `SELECT car.call_id, car.global_score, car.flags, car.scores, car.processed_at,
+              c.initiated_by_staff_id,
+              EXISTS (
+                SELECT 1 FROM call_events ce_mode
+                WHERE ce_mode.call_id = c.id
+                  AND ce_mode.event_type IN ('twilio.offer_b.started', 'agent_replied', 'agent_closed_call', 'agent_needs_clarification', 'bbis.turn.completed', 'bbis.turn.failed', 'bbis.turn.no_transcript')
+              ) AS has_ai_receptionist,
+              EXISTS (
+                SELECT 1 FROM call_events ce_transfer
+                WHERE ce_transfer.call_id = c.id
+                  AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
+              ) AS has_human_transfer,
+              EXISTS (
+                SELECT 1 FROM call_events ce_recording
+                WHERE ce_recording.call_id = c.id
+                  AND ce_recording.event_type IN ('twilio.recording.completed', 'twilio.streaming.recording.completed')
+              ) AS has_verified_recording,
+              POSITION('[Conversation avec l''agent]' IN COALESCE(tr.text, '')) > 0 AS has_human_transcript_marker
        FROM call_analysis_results car
        JOIN calls c ON c.id = car.call_id
+       LEFT JOIN transcriptions tr ON tr.call_id = c.id
        WHERE c.company_id = $1
          AND c.initiated_by_staff_id = $2
          AND car.processed_at >= $3
@@ -644,7 +703,7 @@ router.get('/agents/:staffId/profile', authenticateToken, async (req: AuthReques
       [companyId, staffId, from.toISOString(), to.toISOString()]
     );
 
-    const rows = analysesResult.rows as Record<string, unknown>[];
+    const rows = (analysesResult.rows as Record<string, unknown>[]).filter((row) => isAgentInteractionProven(row));
     const callCount = rows.length;
     const avgScore = callCount > 0 ? Math.round(rows.reduce((sum, row) => sum + Number(row.global_score || 0), 0) / callCount) : 0;
 
