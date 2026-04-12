@@ -10,7 +10,7 @@ export default function CoachingTip({ tip }: CoachingTipProps) {
       <p className="text-[11px] uppercase tracking-[0.24em] text-[#8D6A00]" style={{ fontFamily: 'var(--font-mono)' }}>
         Recommandation
       </p>
-      <p className="mt-3 text-sm font-medium leading-7 text-[#141F28]">
+      <p className="mt-3 break-words whitespace-pre-wrap text-sm font-medium leading-7 text-[#141F28]">
         La prochaine fois : {tip}
       </p>
     </div>
