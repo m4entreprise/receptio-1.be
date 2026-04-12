@@ -8,6 +8,7 @@ import { textToSpeech as deepgramTextToSpeech, transcribeAudioBuffer as deepgram
 import { generateResponse as mistralGenerateResponse, summarizeCall as mistralSummarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
 import { generateResponse, summarizeCall, transcribeAudioBuffer } from './openai';
 import logger from '../utils/logger';
+import Twilio from 'twilio';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
@@ -479,6 +480,12 @@ async function handleTwilioMessage(
       const customParameters = startEvent.start?.customParameters || {};
       const resolvedCallId = state.callId || String(customParameters.callId || '');
       const resolvedCompanyId = state.companyId || String(customParameters.companyId || '');
+
+      // Start Twilio call recording for streaming calls
+      const resolvedCallSid = startEvent.start?.callSid;
+      if (resolvedCallSid && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+        void startTwilioRecording(resolvedCallSid, state.baseUrl, resolvedCallId);
+      }
 
       if (!state.initialized) {
         if (!resolvedCallId || !resolvedCompanyId) {
@@ -1778,4 +1785,34 @@ function wait(durationMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, durationMs);
   });
+}
+
+async function startTwilioRecording(callSid: string, baseUrl: string, callId: string): Promise<void> {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    logger.warn('Twilio recording skipped: missing credentials', { callSid });
+    return;
+  }
+
+  try {
+    const recordingCallbackUrl = `${baseUrl.replace(/\/$/, '')}/api/webhooks/twilio/streaming-recording?callId=${encodeURIComponent(callId)}`;
+    const client = Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+
+    const recording = await client.calls(callSid).recordings.create({
+      recordingStatusCallback: recordingCallbackUrl,
+      recordingStatusCallbackMethod: 'POST',
+      recordingChannels: 'dual', // Dual channel for speaker separation
+    });
+
+    logger.info('Twilio recording started for streaming call', {
+      callSid,
+      callId,
+      recordingSid: recording.sid,
+    });
+  } catch (error: any) {
+    logger.error('Failed to start Twilio recording', {
+      callSid,
+      callId,
+      error: error.message,
+    });
+  }
 }

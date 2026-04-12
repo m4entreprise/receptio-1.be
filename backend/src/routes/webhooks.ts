@@ -1272,6 +1272,49 @@ async function handleRecordingSaved(payload: any) {
 }
 
 // ---------------------------------------------------------------------------
+// Offer B streaming call: recording complete callback
+// POST /api/webhooks/twilio/streaming-recording
+// ---------------------------------------------------------------------------
+router.post('/twilio/streaming-recording', async (req: Request, res: Response) => {
+  try {
+    const callId = String(req.query.callId || '');
+    const recordingSid = req.body?.RecordingSid;
+    const recordingUrl = req.body?.RecordingUrl;
+    const recordingDuration = Number(req.body?.RecordingDuration || 0);
+    const recordingStatus = req.body?.RecordingStatus;
+
+    logger.info('Streaming recording callback', { callId, recordingSid, recordingStatus, recordingDuration });
+
+    if (!callId) {
+      res.sendStatus(200);
+      return;
+    }
+
+    // Only process completed recordings
+    if (recordingStatus === 'completed' && recordingUrl) {
+      const fullUrl = String(recordingUrl).endsWith('.mp3') ? String(recordingUrl) : `${String(recordingUrl)}.mp3`;
+
+      await query(
+        `UPDATE calls SET recording_url = $1, duration = COALESCE(NULLIF($2, 0), duration) WHERE id = $3`,
+        [fullUrl, recordingDuration, callId]
+      );
+
+      await query(
+        `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
+        [callId, 'twilio.streaming.recording.completed', { recordingUrl: fullUrl, recordingSid, recordingDuration }]
+      );
+
+      logger.info('Streaming recording saved', { callId, recordingUrl: fullUrl });
+    }
+
+    res.sendStatus(200);
+  } catch (error: any) {
+    logger.error('Streaming recording callback error', { error: error.message });
+    res.sendStatus(200);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Outbound call: Twilio calls the destination, when answered we bridge to staff
 // GET/POST /api/webhooks/twilio/outbound-answer
 // ---------------------------------------------------------------------------
