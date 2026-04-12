@@ -9,6 +9,7 @@ interface DetailResult {
   call_id: string;
   agent: { id: string; name: string } | null;
   template: { id: string; name: string; version: number };
+  conversation_mode: 'ai_only' | 'ai_and_human' | 'unknown';
   global_score: number;
   processed_at: string;
   resume: string;
@@ -31,6 +32,12 @@ interface DetailResult {
 export default function CallQADetail({ callId, emptyActionHref }: { callId: string; emptyActionHref?: string }) {
   const [data, setData] = useState<DetailResult | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const conversationModeMeta = data?.conversation_mode === 'ai_and_human'
+    ? { label: 'IA + agent humain', className: 'bg-[#C7601D]/10 text-[#C7601D]' }
+    : data?.conversation_mode === 'ai_only'
+      ? { label: 'Réceptionniste IA uniquement', className: 'bg-[#2D9D78]/10 text-[#2D9D78]' }
+      : { label: 'Mode indéterminé', className: 'bg-[#344453]/8 text-[#344453]/70' };
 
   useEffect(() => {
     let active = true;
@@ -84,6 +91,11 @@ export default function CallQADetail({ callId, emptyActionHref }: { callId: stri
               <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>Débriefing QA</p>
               <h3 className="mt-2 text-xl font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>{data.template.name}</h3>
               <p className="mt-1 text-sm text-[#344453]/55">{data.agent?.name || 'Agent inconnu'} · {new Date(data.processed_at).toLocaleString('fr-BE')}</p>
+              <div className="mt-3">
+                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${conversationModeMeta.className}`}>
+                  {conversationModeMeta.label}
+                </span>
+              </div>
             </div>
           </div>
           <div className="rounded-2xl bg-[#344453]/6 px-4 py-3 text-sm text-[#344453]/60">v{data.template.version}</div>

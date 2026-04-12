@@ -161,6 +161,14 @@ function buildCoachingFocus(topFlag: { type: string; count: number } | null, cal
   return `Travaille principalement sur ${topFlag.type} (${ratio}% des appels).`;
 }
 
+function deriveConversationMode(row: Record<string, unknown>): 'ai_only' | 'ai_and_human' | 'unknown' {
+  const hasHumanTransfer = Boolean(row.has_human_transfer);
+  const hasAiReceptionist = Boolean(row.has_ai_receptionist);
+  if (hasHumanTransfer) return 'ai_and_human';
+  if (hasAiReceptionist) return 'ai_only';
+  return 'unknown';
+}
+
 async function ensureTemplateOwnership(templateId: string, companyId: string) {
   const result = await query(
     `SELECT * FROM analysis_templates WHERE id = $1 AND company_id = $2`,
@@ -467,6 +475,16 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
          car.scores, car.global_score, car.verbatims, car.flags, car.flags_detail,
          car.resume, car.coaching_tip, car.model, car.prompt_hash, car.retries, car.processed_at,
          c.caller_number, c.created_at AS call_created_at, c.direction,
+         EXISTS (
+           SELECT 1 FROM call_events ce_mode
+           WHERE ce_mode.call_id = c.id
+             AND ce_mode.event_type IN ('twilio.offer_b.started', 'agent_replied', 'agent_closed_call', 'agent_needs_clarification', 'bbis.turn.completed', 'bbis.turn.failed', 'bbis.turn.no_transcript')
+         ) AS has_ai_receptionist,
+         EXISTS (
+           SELECT 1 FROM call_events ce_transfer
+           WHERE ce_transfer.call_id = c.id
+             AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
+         ) AS has_human_transfer,
          t.name AS template_name, t.version AS template_current_version,
          COALESCE(s_init.id, s_xfer.id) AS agent_id,
          COALESCE(s_init.first_name, s_xfer.first_name) AS agent_first_name,
@@ -496,6 +514,7 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
         const flags = normalizeFlags(row.flags);
         return {
           ...row,
+          conversation_mode: deriveConversationMode(row),
           flags,
           flags_detail: normalizeFlagsDetail(row.flags_detail, flags),
         };
@@ -519,6 +538,16 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
          car.id, car.call_id, car.template_id, car.template_version,
          car.scores, car.global_score, car.verbatims, car.flags, car.flags_detail,
          car.resume, car.coaching_tip, car.model, car.prompt_hash, car.retries, car.processed_at,
+         EXISTS (
+           SELECT 1 FROM call_events ce_mode
+           WHERE ce_mode.call_id = c.id
+             AND ce_mode.event_type IN ('twilio.offer_b.started', 'agent_replied', 'agent_closed_call', 'agent_needs_clarification', 'bbis.turn.completed', 'bbis.turn.failed', 'bbis.turn.no_transcript')
+         ) AS has_ai_receptionist,
+         EXISTS (
+           SELECT 1 FROM call_events ce_transfer
+           WHERE ce_transfer.call_id = c.id
+             AND ce_transfer.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
+         ) AS has_human_transfer,
          t.name AS template_name, t.version AS template_current_version,
          c.created_at AS call_created_at,
          COALESCE(s_init.id, s_xfer.id) AS agent_id,
@@ -545,6 +574,7 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
       id: row.id,
       template_name: row.template_name,
       global_score: Number(row.global_score || 0),
+      conversation_mode: deriveConversationMode(row),
       flags: normalizeFlags(row.flags),
       processed_at: row.processed_at,
     }));
@@ -570,6 +600,7 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
         call_id: latest.call_id,
         agent: latest.agent_id ? { id: latest.agent_id, name: `${latest.agent_first_name || ''} ${latest.agent_last_name || ''}`.trim() } : null,
         template: { id: latest.template_id, name: latest.template_name, version: Number(latest.template_version || latest.template_current_version || 1) },
+        conversation_mode: deriveConversationMode(latest),
         global_score: Number(latest.global_score || 0),
         processed_at: latest.processed_at,
         resume: (latest.resume as string) || '',

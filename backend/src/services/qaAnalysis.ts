@@ -67,6 +67,7 @@ export interface QAAnalysisResult {
   flagsDetail: QAFlagDetail[];
   flags: string[];
   verbatims: Record<string, string>;
+  conversationMode: 'ai_only' | 'ai_and_human' | 'unknown';
   resume: string;
   coachingTip: string;
   globalScore: number;
@@ -86,6 +87,7 @@ interface CallForAnalysis {
   agentId: string | null;
   transcript: string;
   intent: string;
+  conversationMode: 'ai_only' | 'ai_and_human' | 'unknown';
 }
 
 function safeJSON(raw: string): unknown {
@@ -206,7 +208,8 @@ function extractVerbatims(scores: QAScore[]): Record<string, string> {
 function buildPrompt(
   transcription: string,
   intent: string,
-  template: TemplateWithCriteria
+  template: TemplateWithCriteria,
+  conversationMode: 'ai_only' | 'ai_and_human' | 'unknown'
 ): string {
   const criteresBlock = template.criteria
     .sort((a, b) => a.position - b.position)
@@ -230,6 +233,13 @@ ${transcription}
 
 ## Intent détecté
 ${intent}
+
+## Contexte de conversation
+Mode détecté : ${conversationMode}
+- ai_only = conversation avec le réceptionniste IA uniquement
+- ai_and_human = conversation impliquant aussi un agent humain après transfert
+- unknown = impossible à déterminer avec certitude
+Adapte l'analyse à ce contexte et ne confonds jamais le réceptionniste IA avec un agent humain transféré.
 
 ## Critères d'évaluation
 ${criteresBlock}
@@ -298,7 +308,19 @@ async function fetchCall(callId: string, companyId: string): Promise<CallForAnal
     `SELECT c.id, c.company_id, c.initiated_by_staff_id,
             t.text AS transcript,
             cs.intent,
-            cs.summary
+            cs.summary,
+            EXISTS (
+              SELECT 1
+              FROM call_events ce
+              WHERE ce.call_id = c.id
+                AND ce.event_type IN ('twilio.offer_b.started', 'agent_replied', 'agent_closed_call', 'agent_needs_clarification', 'bbis.turn.completed', 'bbis.turn.failed', 'bbis.turn.no_transcript')
+            ) AS has_ai_receptionist,
+            EXISTS (
+              SELECT 1
+              FROM call_events ce
+              WHERE ce.call_id = c.id
+                AND ce.event_type IN ('twilio.routing.transferred', 'transfer_to_human')
+            ) AS has_human_transfer
      FROM calls c
      LEFT JOIN transcriptions t ON t.call_id = c.id
      LEFT JOIN call_summaries cs ON cs.call_id = c.id
@@ -316,6 +338,13 @@ async function fetchCall(callId: string, companyId: string): Promise<CallForAnal
     : typeof row.summary === 'string' && row.summary.trim()
       ? `Résumé disponible mais transcription manquante : ${row.summary as string}`
       : 'Aucune transcription disponible.';
+  const hasAiReceptionist = Boolean(row.has_ai_receptionist) || transcript.includes('Agent:');
+  const hasHumanTransfer = Boolean(row.has_human_transfer);
+  const conversationMode = hasHumanTransfer
+    ? 'ai_and_human'
+    : hasAiReceptionist
+      ? 'ai_only'
+      : 'unknown';
 
   return {
     id: row.id as string,
@@ -323,6 +352,7 @@ async function fetchCall(callId: string, companyId: string): Promise<CallForAnal
     agentId: (row.initiated_by_staff_id as string | null) ?? null,
     transcript,
     intent: (row.intent as string) || 'inconnu',
+    conversationMode,
   };
 }
 
@@ -461,7 +491,7 @@ export async function analyzeCall(
     fetchTemplate(companyId, templateId),
   ]);
 
-  const prompt = buildPrompt(call.transcript, call.intent, template);
+  const prompt = buildPrompt(call.transcript, call.intent, template, call.conversationMode);
   const promptHash = createHash('sha256').update(prompt).digest('hex');
   const allowedFlags = getAllowedFlags(template);
   const resultSchema = createQAResultSchema(allowedFlags);
@@ -525,6 +555,7 @@ export async function analyzeCall(
       flagsDetail,
       flags,
       verbatims,
+      conversationMode: call.conversationMode,
       resume: data.resume,
       coachingTip: data.coaching_tip,
       globalScore,
