@@ -4,10 +4,16 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
+import { summarizeCall } from '../services/openai';
 import logger from '../utils/logger';
 
 const router = Router();
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUnavailableSummary(summary: unknown): boolean {
+  const value = typeof summary === 'string' ? summary.trim() : '';
+  return !value || value === 'Résumé non disponible';
+}
 
 function assertValidCallId(id: string) {
   if (!uuidPattern.test(id)) {
@@ -91,13 +97,27 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
       throw new AppError('Call not found', 404);
     }
 
+    const callRow = result.rows[0] as Record<string, unknown>;
+    const transcriptionText = typeof callRow.transcription_text === 'string' ? callRow.transcription_text.trim() : '';
+    if (isUnavailableSummary(callRow.summary) && transcriptionText) {
+      try {
+        const regeneratedSummary = await summarizeCall(transcriptionText);
+        if (!isUnavailableSummary(regeneratedSummary)) {
+          await query('UPDATE call_summaries SET summary = $1 WHERE call_id = $2', [regeneratedSummary, id]);
+          callRow.summary = regeneratedSummary;
+        }
+      } catch (summaryError: any) {
+        logger.warn('Call summary regeneration failed on detail fetch', { callId: id, error: summaryError.message });
+      }
+    }
+
     const eventsResult = await query(
       'SELECT * FROM call_events WHERE call_id = $1 ORDER BY timestamp ASC',
       [id]
     );
 
     res.json({
-      call: result.rows[0],
+      call: callRow,
       events: eventsResult.rows,
     });
   } catch (error) {

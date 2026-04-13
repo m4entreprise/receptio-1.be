@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getStatusDisplay } from '../utils/callStatus';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Phone, PhoneIncoming, PhoneOutgoing, Search, Filter, ArrowRight, CalendarClock, Sparkles } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
@@ -19,6 +19,7 @@ interface CallItem {
 }
 
 export default function Calls() {
+  const navigate = useNavigate();
   const [calls, setCalls] = useState<CallItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -199,10 +200,10 @@ export default function Calls() {
             ) : (
               <div className="space-y-3">
                 {filteredCalls.map((call) => (
-                  <Link
+                  <div
                     key={call.id}
-                    to={`/calls/${call.id}`}
-                    className="block rounded-[24px] border border-[#344453]/8 bg-[#F8F9FB] p-4 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_36px_rgba(52,68,83,0.10)] sm:p-5"
+                    onClick={() => navigate(`/calls/${call.id}`)}
+                    className="cursor-pointer rounded-[24px] border border-[#344453]/8 bg-[#F8F9FB] p-4 transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_36px_rgba(52,68,83,0.10)] sm:p-5"
                   >
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -262,12 +263,21 @@ export default function Calls() {
                         </p>
                       )}
 
-                      <div className="inline-flex items-center gap-2 text-sm font-medium text-[#344453]">
-                        Ouvrir le détail
-                        <ArrowRight className="h-4 w-4" />
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="inline-flex items-center gap-2 text-sm font-medium text-[#344453]">
+                          Ouvrir la fiche d'appel
+                          <ArrowRight className="h-4 w-4" />
+                        </div>
+                        <Link
+                          to={`/calls/${call.id}/qa`}
+                          onClick={(event) => event.stopPropagation()}
+                          className="text-sm font-medium text-[#C7601D] hover:underline"
+                        >
+                          Voir le rapport QA
+                        </Link>
                       </div>
                     </div>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}

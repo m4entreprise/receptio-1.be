@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Building2, Save, ShieldCheck, Sparkles, MessageSquare } from 'lucide-react';
+import { Building2, Save, ShieldCheck, Sparkles, MessageSquare, Tag, ClipboardCheck, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import Layout from '../components/Layout';
 
@@ -232,6 +233,53 @@ export default function Settings() {
               </button>
             </div>
           </form>
+        </section>
+
+        {/* Modules de configuration avancée */}
+        <section className="rounded-[28px] border border-[#344453]/10 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-[#344453]/8 px-4 py-5 sm:px-6">
+            <div>
+              <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>
+                Modules avancés
+              </h2>
+              <p className="mt-1 text-sm text-[#344453]/55">
+                Configuration de la qualification IA et de l'analyse qualité.
+              </p>
+            </div>
+          </div>
+          <div className="divide-y divide-[#344453]/8">
+            <Link
+              to="/settings/intents"
+              className="flex items-center gap-4 px-4 py-4 sm:px-6 hover:bg-[#344453]/4 transition group"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453] group-hover:bg-[#344453]/15 transition">
+                <Tag className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-[#141F28]">Intents de qualification</p>
+                <p className="text-xs text-[#344453]/55 mt-0.5">
+                  Définissez les catégories dans lesquelles l'IA classe automatiquement chaque appel.
+                </p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-[#344453]/30 group-hover:text-[#344453]/60 transition" />
+            </Link>
+
+            <Link
+              to="/settings/qa"
+              className="flex items-center gap-4 px-4 py-4 sm:px-6 hover:bg-[#344453]/4 transition group"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453] group-hover:bg-[#344453]/15 transition">
+                <ClipboardCheck className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-[#141F28]">Qualité IA (QA)</p>
+                <p className="text-xs text-[#344453]/55 mt-0.5">
+                  Créez des grilles d'évaluation et analysez la qualité de vos appels avec Mistral.
+                </p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-[#344453]/30 group-hover:text-[#344453]/60 transition" />
+            </Link>
+          </div>
         </section>
       </div>
     </Layout>

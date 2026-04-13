@@ -1,5 +1,6 @@
 import axios from 'axios';
 import logger from '../utils/logger';
+import { query } from '../config/database';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_API_URL = 'https://api.openai.com/v1';
@@ -315,21 +316,46 @@ export async function generateResponse(
   }
 }
 
-export async function detectIntent(transcription: string): Promise<{
+export async function detectIntent(
+  transcription: string,
+  companyId?: string
+): Promise<{
   intent: string;
   confidence: number;
   entities: Record<string, unknown>;
 }> {
   try {
     if (!hasMeaningfulTranscription(transcription)) {
-      return {
-        intent: 'autre',
-        confidence: 0,
-        entities: {},
-      };
+      return { intent: 'autre', confidence: 0, entities: {} };
     }
 
-    const systemPrompt = `Tu analyses des appels entrants pour une PME. Retourne uniquement un JSON valide avec les clés intent, confidence et entities. intent doit être parmi rdv, info, urgence, reclamation, autre.`;
+    // Charger les intents configurés par le tenant
+    let intentList: string;
+    if (companyId) {
+      const result = await query(
+        `SELECT label, description, keywords
+         FROM call_intents
+         WHERE company_id = $1 AND is_active = true
+         ORDER BY position ASC, created_at ASC`,
+        [companyId]
+      );
+
+      if (result.rows.length > 0) {
+        const lines = result.rows.map((r: Record<string, unknown>) => {
+          let line = String(r.label);
+          if (r.description) line += ` (${String(r.description)})`;
+          if (r.keywords) line += ` — mots-clés : ${String(r.keywords)}`;
+          return line;
+        });
+        intentList = lines.join(', ') + ', autre';
+      } else {
+        intentList = 'rdv, info, urgence, reclamation, autre';
+      }
+    } else {
+      intentList = 'rdv, info, urgence, reclamation, autre';
+    }
+
+    const systemPrompt = `Tu analyses des appels entrants pour une PME. Retourne uniquement un JSON valide avec les clés intent, confidence et entities. intent doit être EXACTEMENT l'un de ces labels (sans modification) : ${intentList}.`;
 
     const response = await generateResponse(
       [{ role: 'user', content: `Analyse cette transcription : ${transcription}` }],
@@ -345,11 +371,7 @@ export async function detectIntent(transcription: string): Promise<{
     };
   } catch (error: any) {
     logger.error('OpenAI intent detection error', { error: error.message });
-    return {
-      intent: 'autre',
-      confidence: 0,
-      entities: {},
-    };
+    return { intent: 'autre', confidence: 0, entities: {} };
   }
 }
 
