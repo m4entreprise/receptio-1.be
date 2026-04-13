@@ -56,7 +56,7 @@ export default function Dashboard() {
 
     const intervalId = window.setInterval(() => {
       fetchDashboardData(false);
-    }, 5000);
+    }, 30000);
 
     const tickId = window.setInterval(() => setNow(Date.now()), 10000);
 

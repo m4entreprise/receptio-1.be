@@ -14,9 +14,9 @@ const pool = new Pool({
   ssl: !databaseUrl || isLocalDatabase || isSslDisabled
     ? false
     : { rejectUnauthorized: false },
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  max: 10,
+  idleTimeoutMillis: 600000,   // 10 min — garde les connexions vivantes entre les requêtes
+  connectionTimeoutMillis: 10000, // 10 sec — laisse le temps si le serveur est sous charge
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });

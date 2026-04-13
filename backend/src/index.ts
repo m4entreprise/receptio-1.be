@@ -42,9 +42,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 60 * 1000,  // fenêtre d'1 minute
+  max: 120,             // 120 req/min par IP (largement suffisant pour le dashboard)
   message: 'Too many requests from this IP',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 app.use('/api/', limiter);
