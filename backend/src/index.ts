@@ -41,10 +41,25 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Rate limit par utilisateur authentifié (JWT sub), fallback sur IP pour les routes publiques
 const limiter = rateLimit({
-  windowMs: 60 * 1000,  // fenêtre d'1 minute
-  max: 120,             // 120 req/min par IP (largement suffisant pour le dashboard)
-  message: 'Too many requests from this IP',
+  windowMs: 60 * 1000,
+  max: 120,
+  keyGenerator: (req) => {
+    const auth = req.headers.authorization;
+    if (auth?.startsWith('Bearer ')) {
+      try {
+        const payload = JSON.parse(
+          Buffer.from(auth.split('.')[1], 'base64').toString()
+        );
+        if (payload.sub || payload.userId || payload.id) {
+          return String(payload.sub || payload.userId || payload.id);
+        }
+      } catch {}
+    }
+    return req.ip || 'unknown';
+  },
+  message: 'Too many requests',
   standardHeaders: true,
   legacyHeaders: false,
 });
