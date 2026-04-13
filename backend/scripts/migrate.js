@@ -42,6 +42,7 @@ const pool = new Pool({
 });
 
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../database/migrations');
+const INIT_SQL = path.resolve(__dirname, '../../database/init.sql');
 
 async function ensureExtensions(client) {
   await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
@@ -66,6 +67,11 @@ async function run() {
   try {
     await ensureExtensions(client);
     await client.query('BEGIN');
+
+    // Applique le schéma de base (idempotent — CREATE TABLE IF NOT EXISTS)
+    console.log('  init  init.sql');
+    const initSql = fs.readFileSync(INIT_SQL, 'utf8');
+    await client.query(initSql);
 
     await ensureMigrationsTable(client);
     const applied = await getAppliedMigrations(client);
