@@ -24,8 +24,6 @@ for (const p of envPaths) {
 const rawUrl = process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL;
 const dbUrl = rawUrl;
 
-console.log('URL utilisée (début):', rawUrl ? rawUrl.substring(0, 50) + '...' : '(vide)');
-
 if (!rawUrl || rawUrl.includes('+ssh') || rawUrl.includes('usePrivateKey')) {
   console.error('\nERROR: URL invalide pour une connexion pg directe.');
   console.error('Sur Ploi, ajoute cette variable dans ton site → Environment Variables :');
