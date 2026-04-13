@@ -21,11 +21,16 @@ for (const p of envPaths) {
 }
 
 // DATABASE_URL_DIRECT prend la priorité (utile sur Ploi où DATABASE_URL est au format SSH propriétaire)
-const dbUrl = process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL;
-if (!dbUrl || !dbUrl.startsWith('postgres')) {
-  console.error('ERROR: Aucune DATABASE_URL valide trouvée.');
-  console.error('Sur Ploi, ajoute DATABASE_URL_DIRECT=postgresql://user:password@127.0.0.1:5432/dbname');
-  console.error('Valeur actuelle:', dbUrl ? dbUrl.substring(0, 40) + '...' : '(vide)');
+const rawUrl = process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL;
+const dbUrl = rawUrl;
+
+console.log('URL utilisée (début):', rawUrl ? rawUrl.substring(0, 50) + '...' : '(vide)');
+
+if (!rawUrl || rawUrl.includes('+ssh') || rawUrl.includes('usePrivateKey')) {
+  console.error('\nERROR: URL invalide pour une connexion pg directe.');
+  console.error('Sur Ploi, ajoute cette variable dans ton site → Environment Variables :');
+  console.error('  DATABASE_URL_DIRECT=postgresql://ploi:MOT_DE_PASSE@127.0.0.1:5432/receptiodev');
+  console.error('Trouve le mot de passe dans Ploi → Databases → ta base.');
   process.exit(1);
 }
 
@@ -37,6 +42,10 @@ const pool = new Pool({
 });
 
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../database/migrations');
+
+async function ensureExtensions(client) {
+  await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+}
 
 async function ensureMigrationsTable(client) {
   await client.query(`
@@ -55,6 +64,7 @@ async function getAppliedMigrations(client) {
 async function run() {
   const client = await pool.connect();
   try {
+    await ensureExtensions(client);
     await client.query('BEGIN');
 
     await ensureMigrationsTable(client);
