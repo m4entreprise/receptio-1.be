@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   ArrowRight,
   AudioLines,
@@ -178,6 +179,8 @@ const plans = [
 ];
 
 export default function LandingPage() {
+  const { user } = useAuth();
+
   useEffect(() => {
     const elements = Array.from(
       document.querySelectorAll<HTMLElement>('[data-reveal]'),
@@ -224,19 +227,31 @@ export default function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <Link
-              to="/login"
-              className="hidden rounded-full border border-[#344453]/20 px-4 py-2 text-sm font-medium text-[#344453] transition hover:bg-[#344453]/5 sm:inline-flex"
-            >
-              Connexion
-            </Link>
-            <Link
-              to="/register"
-              className="inline-flex items-center gap-2 rounded-full bg-[#C7601D] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_4px_16px_rgba(199,96,29,0.32)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#b35519]"
-            >
-              Essai gratuit
-              <ChevronRight className="h-4 w-4" />
-            </Link>
+            {user ? (
+              <Link
+                to="/dashboard"
+                className="inline-flex items-center gap-2 rounded-full bg-[#C7601D] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_4px_16px_rgba(199,96,29,0.32)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#b35519]"
+              >
+                Ouvrir le dashboard
+                <ChevronRight className="h-4 w-4" />
+              </Link>
+            ) : (
+              <>
+                <Link
+                  to="/login"
+                  className="hidden rounded-full border border-[#344453]/20 px-4 py-2 text-sm font-medium text-[#344453] transition hover:bg-[#344453]/5 sm:inline-flex"
+                >
+                  Connexion
+                </Link>
+                <Link
+                  to="/register"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#C7601D] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_4px_16px_rgba(199,96,29,0.32)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#b35519]"
+                >
+                  Essai gratuit
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
