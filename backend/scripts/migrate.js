@@ -20,11 +20,12 @@ for (const p of envPaths) {
   }
 }
 
-const dbUrl = process.env.DATABASE_URL;
-if (!dbUrl) {
-  console.error('ERROR: DATABASE_URL is not set.');
-  console.error('Checked .env paths:', envPaths);
-  console.error('If you are on Ploi, make sure DATABASE_URL is in your site environment variables.');
+// DATABASE_URL_DIRECT prend la priorité (utile sur Ploi où DATABASE_URL est au format SSH propriétaire)
+const dbUrl = process.env.DATABASE_URL_DIRECT || process.env.DATABASE_URL;
+if (!dbUrl || !dbUrl.startsWith('postgres')) {
+  console.error('ERROR: Aucune DATABASE_URL valide trouvée.');
+  console.error('Sur Ploi, ajoute DATABASE_URL_DIRECT=postgresql://user:password@127.0.0.1:5432/dbname');
+  console.error('Valeur actuelle:', dbUrl ? dbUrl.substring(0, 40) + '...' : '(vide)');
   process.exit(1);
 }
 
