@@ -7,11 +7,30 @@
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+
+// Try loading .env from multiple locations (repo root or backend/)
+const envPaths = [
+  path.resolve(__dirname, '../../.env'),
+  path.resolve(__dirname, '../.env'),
+];
+for (const p of envPaths) {
+  if (fs.existsSync(p)) {
+    require('dotenv').config({ path: p });
+    break;
+  }
+}
+
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) {
+  console.error('ERROR: DATABASE_URL is not set.');
+  console.error('Checked .env paths:', envPaths);
+  console.error('If you are on Ploi, make sure DATABASE_URL is in your site environment variables.');
+  process.exit(1);
+}
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: /localhost|127\.0\.0\.1/i.test(process.env.DATABASE_URL || '')
+  connectionString: dbUrl,
+  ssl: /localhost|127\.0\.0\.1/i.test(dbUrl)
     ? false
     : { rejectUnauthorized: false },
 });
