@@ -375,7 +375,6 @@ export function shouldUseOfferBStreamingPipeline(settings: OfferBSettings): bool
     return false;
   }
 
-  const bbisAgentSettings = getBbisAgentSettings(settings);
   return Boolean(MISTRAL_API_KEY);
 }
 
