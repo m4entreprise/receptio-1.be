@@ -75,7 +75,14 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     const answerUrl = `${baseUrl}/api/webhooks/twilio/outbound-answer?callId=${encodeURIComponent(callId)}&destNumber=${encodeURIComponent(destinationNumber)}&companyId=${encodeURIComponent(companyId)}`;
     const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/outbound-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`;
 
-    const client = twilio(accountSid, authToken);
+    const twilioRegion = process.env.TWILIO_REGION || undefined;
+    const client = twilio(accountSid, authToken, twilioRegion ? { region: twilioRegion } : {});
+    logger.info('Outbound call: creating Twilio call', {
+      from: company.phone_number,
+      to: staff.phone_number,
+      answerUrl,
+      region: twilioRegion || 'default (us1)',
+    });
     let twilioCall;
     try {
       twilioCall = await client.calls.create({
@@ -88,8 +95,14 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
       });
     } catch (twilioErr: any) {
       const code = twilioErr.code ?? twilioErr.status;
+      logger.error('Twilio call creation failed', { code, message: twilioErr.message, moreInfo: twilioErr.moreInfo, status: twilioErr.status });
       if (code === 20003 || twilioErr.message === 'Authenticate') {
-        throw new AppError('Identifiants Twilio invalides ou expirés — vérifiez TWILIO_ACCOUNT_SID et TWILIO_AUTH_TOKEN', 500);
+        throw new AppError(
+          twilioRegion
+            ? `Identifiants Twilio invalides pour la région "${twilioRegion}"`
+            : 'Identifiants Twilio invalides — si votre compte est sur le datacenter EU, ajoutez TWILIO_REGION=ie1 dans .env',
+          500
+        );
       }
       if (code === 21211 || code === 21214) {
         throw new AppError(`Numéro de destination invalide : ${destinationNumber}`, 400);
@@ -97,7 +110,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
       if (code === 21606) {
         throw new AppError(`Le numéro émetteur ${company.phone_number} n'est pas autorisé pour les appels sortants`, 400);
       }
-      throw new AppError(twilioErr.message || 'Erreur Twilio lors de l\'initiation de l\'appel', 500);
+      throw new AppError(`Erreur Twilio (${code ?? 'inconnu'}) : ${twilioErr.message}`, 500);
     }
 
     await query(
