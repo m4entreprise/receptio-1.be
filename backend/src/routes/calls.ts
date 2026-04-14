@@ -168,73 +168,86 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       throw new AppError('Recording not found', 404);
     }
 
-    const isTwilioRecording = /twilio\.com/i.test(recordingUrl);
     const twilioSid = process.env.TWILIO_ACCOUNT_SID;
     const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-    const hasTwilioCreds = !!(twilioSid && twilioToken);
+    const isTwilioRecording = /twilio\.com/i.test(recordingUrl);
 
     logger.info('Recording proxy request', {
       callId: id,
       isTwilioRecording,
-      hasTwilioCreds,
-      sidPresent: !!twilioSid,
-      tokenPresent: !!twilioToken,
+      hasTwilioCreds: !!(twilioSid && twilioToken),
       recordingUrl,
     });
 
-    let finalUrl = recordingUrl;
-
-    // Twilio's recording API requires Basic auth to resolve the URL, but then
-    // redirects to a CDN that must NOT receive the Authorization header.
-    // We manually follow redirects with auth on the Twilio origin, then stop
-    // once we reach a non-Twilio URL and stream that without auth.
-    if (isTwilioRecording && hasTwilioCreds) {
-      finalUrl = await resolveTwilioRecordingUrl(recordingUrl, twilioSid!, twilioToken!);
-      logger.info('Recording proxy: resolved URL', { callId: id, isSameDomain: finalUrl === recordingUrl, finalUrl: finalUrl.substring(0, 80) });
-    }
-
-    // Stream the fully-resolved URL.
-    // maxRedirects: 0 — the URL is already resolved; no further redirects expected.
-    // Auth only if we're still on a Twilio origin (CDN URLs must NOT get auth).
-    const isFinalUrlTwilio = /twilio\.com/i.test(finalUrl);
-    const response = await axios.get(finalUrl, {
-      responseType: 'stream',
-      maxRedirects: 0,
-      validateStatus: (s) => s >= 200 && s < 300,
-      ...(isFinalUrlTwilio && hasTwilioCreds
-        ? { auth: { username: twilioSid!, password: twilioToken! } }
-        : {}),
-    });
-
-    const contentType = typeof response.headers['content-type'] === 'string'
-      ? response.headers['content-type']
-      : 'audio/mpeg';
-    const contentLength = response.headers['content-length'];
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `inline; filename="call-${id}.mp3"`);
-
-    if (typeof contentLength === 'string') {
-      res.setHeader('Content-Length', contentLength);
-    }
-
-    response.data.on('error', (streamError: Error) => {
-      logger.error('Recording stream error', { callId: id, error: streamError.message });
-      if (!res.headersSent) {
-        next(streamError);
+    // For Twilio recordings: use the SDK to fetch recording metadata,
+    // then stream the media file via a direct authenticated URL.
+    // The Twilio SDK handles auth correctly; we get the proper CDN URL.
+    if (isTwilioRecording && twilioSid && twilioToken) {
+      // Extract Recording SID (RE + 32 hex chars) from the stored URL
+      const sidMatch = recordingUrl.match(/RE[0-9a-f]{32}/i);
+      if (!sidMatch) {
+        throw new AppError('URL d\'enregistrement invalide', 500);
       }
-    });
+      const recordingSid = sidMatch[0];
 
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const twilioClient = (require('twilio') as typeof import('twilio'))(twilioSid, twilioToken);
+      const recording = await twilioClient.recordings(recordingSid).fetch();
+
+      // Build the direct MP3 URL: https://api.twilio.com/.../Recordings/RExxxx.mp3
+      // Use the account SID from the recording itself (handles sub-accounts)
+      const directUrl = `https://api.twilio.com/2010-04-01/Accounts/${recording.accountSid}/Recordings/${recordingSid}.mp3`;
+
+      logger.info('Recording proxy: streaming via SDK URL', { callId: id, recordingSid, accountSid: recording.accountSid });
+
+      // Stream with Basic auth — Twilio will serve the MP3 directly or redirect.
+      // We use maxRedirects:10 but disable auth forwarding on redirect via
+      // beforeRedirect hook (axios supports this in newer versions).
+      const response = await axios.get(directUrl, {
+        responseType: 'stream',
+        maxRedirects: 10,
+        auth: { username: twilioSid, password: twilioToken },
+        validateStatus: (s) => s >= 200 && s < 300,
+        beforeRedirect: (options: any) => {
+          // Strip auth when redirected away from Twilio (e.g. to S3/CDN)
+          if (options.hostname && !/twilio\.com$/i.test(options.hostname)) {
+            delete options.headers['Authorization'];
+          }
+        },
+      });
+
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Disposition', `inline; filename="call-${id}.mp3"`);
+      if (typeof response.headers['content-length'] === 'string') {
+        res.setHeader('Content-Length', response.headers['content-length']);
+      }
+      response.data.on('error', (streamError: Error) => {
+        logger.error('Recording stream error', { callId: id, error: streamError.message });
+        if (!res.headersSent) next(streamError);
+      });
+      response.data.pipe(res);
+      return;
+    }
+
+    // Non-Twilio recording: stream directly without auth
+    const response = await axios.get(recordingUrl, {
+      responseType: 'stream',
+      validateStatus: (s) => s >= 200 && s < 300,
+    });
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', `inline; filename="call-${id}.mp3"`);
     response.data.pipe(res);
   } catch (error: any) {
-    const upstreamStatus = error.response?.status;
+    const upstreamStatus = error.response?.status ?? error.statusCode;
     logger.error('Recording proxy error', {
       callId: req.params.id,
       error: error.message,
       status: upstreamStatus,
     });
-    console.error('[RECORDING PROXY ERROR]', error.message, error.stack);
-    if (upstreamStatus === 404) {
+    console.error('[RECORDING PROXY ERROR]', error.message);
+    if (error instanceof AppError) {
+      next(error);
+    } else if (upstreamStatus === 404) {
       next(new AppError('Enregistrement introuvable sur Twilio', 404));
     } else if (upstreamStatus === 401 || upstreamStatus === 403) {
       next(new AppError('Accès à l\'enregistrement refusé (authentification Twilio)', 502));
@@ -389,56 +402,5 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response,
   }
 });
 
-/**
- * Resolve a Twilio recording URL to the final streamable CDN URL.
- *
- * Twilio's recording API requires Basic auth and may redirect (302) to a CDN.
- * The CDN rejects Authorization headers (403). We resolve the redirect chain
- * manually: send auth only on twilio.com hops, stop at non-Twilio locations.
- * Use responseType:'stream' + immediate destroy to avoid downloading the body.
- */
-async function resolveTwilioRecordingUrl(url: string, sid: string, token: string): Promise<string> {
-  let currentUrl = url;
-
-  for (let hop = 0; hop < 10; hop++) {
-    const isTwilio = /twilio\.com/i.test(currentUrl);
-    const resp = await axios.head(currentUrl, {
-      maxRedirects: 0,
-      validateStatus: () => true,
-      ...(isTwilio ? { auth: { username: sid, password: token } } : {}),
-    });
-
-    logger.info('resolveTwilioRecordingUrl hop', {
-      hop,
-      status: resp.status,
-      currentUrl,
-      location: resp.headers['location'] || null,
-    });
-
-    if (resp.status === 200) {
-      return currentUrl;
-    }
-
-    if (resp.status >= 301 && resp.status <= 308) {
-      const location = resp.headers['location'] as string | undefined;
-      if (location) {
-        currentUrl = location;
-        continue;
-      }
-    }
-
-    if (resp.status === 401 || resp.status === 403) {
-      throw new AppError('Accès à l\'enregistrement refusé (authentification Twilio)', 502);
-    }
-
-    if (resp.status === 404) {
-      throw new AppError('Enregistrement introuvable sur Twilio', 404);
-    }
-
-    throw new AppError(`Twilio a répondu avec le statut ${resp.status}`, 502);
-  }
-
-  return currentUrl;
-}
 
 export default router;
