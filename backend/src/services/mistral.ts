@@ -193,29 +193,57 @@ export async function transcribeAudioUrlWithDiarization(audioUrl: string, langua
     ensureMistralConfigured();
 
     const audio = await downloadAudioForMistral(audioUrl);
-    const formData = new FormData();
-    formData.append('file', new Blob([audio.buffer], { type: audio.mimeType }), audio.fileName);
-    formData.append('model', model || MISTRAL_DIARIZATION_MODEL);
-    formData.append('language', language);
-    formData.append('diarize', 'true');
-    formData.append('timestamp_granularities', 'segment');
-    formData.append('prompt', 'Appel téléphonique professionnel en français entre un client et un agent de réception. Transcription verbatim fidèle, y compris hésitations.');
+    const transcribeWithModel = async (modelName: string) => {
+      const formData = new FormData();
+      formData.append('file', new Blob([audio.buffer], { type: audio.mimeType }), audio.fileName);
+      formData.append('model', modelName);
+      formData.append('language', language);
+      formData.append('diarize', 'true');
+      formData.append('timestamp_granularities', 'segment');
+      formData.append('prompt', 'Appel téléphonique professionnel en français entre un client et un agent de réception. Transcription verbatim fidèle, y compris hésitations.');
 
-    const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` },
-      body: formData,
-    });
+      const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` },
+        body: formData,
+      });
 
-    const data = await response.json() as {
+      const data = await response.json() as {
+        text?: string;
+        language?: string;
+        segments?: Array<{ text: string; start: number; end: number; speaker_id?: string }>;
+        error?: { message?: string };
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || 'Mistral diarized transcription failed');
+      }
+
+      return data;
+    };
+
+    const requestedModel = model || MISTRAL_DIARIZATION_MODEL;
+    let data: {
       text?: string;
       language?: string;
       segments?: Array<{ text: string; start: number; end: number; speaker_id?: string }>;
       error?: { message?: string };
     };
 
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Mistral diarized transcription failed');
+    try {
+      data = await transcribeWithModel(requestedModel);
+    } catch (error: any) {
+      if (requestedModel !== MISTRAL_DIARIZATION_MODEL) {
+        logger.warn('Configured diarization model failed, retrying with fallback model', {
+          requestedModel,
+          fallbackModel: MISTRAL_DIARIZATION_MODEL,
+          error: error.message,
+          audioUrl,
+        });
+        data = await transcribeWithModel(MISTRAL_DIARIZATION_MODEL);
+      } else {
+        throw error;
+      }
     }
 
     const rawSegments = data.segments || [];
@@ -242,6 +270,7 @@ export async function transcribeAudioUrlWithDiarization(audioUrl: string, langua
 
     logger.info('Audio transcribed with Mistral Voxtral diarization', {
       audioUrl,
+      model: requestedModel,
       segmentsCount: segments?.length ?? 0,
       hasDiarization: !!segments,
     });
