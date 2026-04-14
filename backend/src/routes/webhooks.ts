@@ -764,8 +764,8 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
 
           const callId = callRow.rows[0].id;
 
-          // Always wait 15s: gives Twilio time to store recording_url AND fire recording-complete
-          await new Promise(resolve => setTimeout(resolve, 15000));
+          // Always wait 30s: gives Twilio time to store recording_url AND fire recording-complete
+          await new Promise(resolve => setTimeout(resolve, 30000));
 
           // Re-fetch after waiting to get the up-to-date recording_url
           const freshRow = await query(`SELECT recording_url FROM calls WHERE id = $1`, [callId]);
