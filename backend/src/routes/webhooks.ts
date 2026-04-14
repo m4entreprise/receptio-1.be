@@ -775,12 +775,20 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
           if (hasRecording) {
 
             const [existingSummary, existingTranscription] = await Promise.all([
-              query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]),
-              query('SELECT id FROM transcriptions WHERE call_id = $1', [callId]),
+              query('SELECT id, summary FROM call_summaries WHERE call_id = $1', [callId]),
+              query('SELECT id, text FROM transcriptions WHERE call_id = $1', [callId]),
             ]);
 
-            if (existingSummary.rows.length === 0 || existingTranscription.rows.length === 0) {
-              logger.info('voice-status: recording exists but no transcription yet, running now', { callId, callSid });
+            const isFallbackTranscription = existingTranscription.rows.length > 0 &&
+              existingTranscription.rows[0].text?.includes('raccroché avant de laisser un message');
+            const isFallbackSummary = existingSummary.rows.length > 0 &&
+              existingSummary.rows[0].summary?.includes('raccroché avant de laisser un message');
+
+            const needsTranscription = existingTranscription.rows.length === 0 || isFallbackTranscription;
+            const needsSummary = existingSummary.rows.length === 0 || isFallbackSummary;
+
+            if (needsTranscription || needsSummary) {
+              logger.info('voice-status: recording exists but no real transcription yet, running now', { callId, callSid });
 
               const callDetailsRow = await query(
                 `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email, co.settings AS company_settings
@@ -797,22 +805,36 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
                 ? segments.map((s: any) => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
                 : diarized.text;
 
-              if (existingTranscription.rows.length === 0) {
-                await query(
-                  `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
-                  [callId, fullText, diarized.language, diarized.confidence, segments ? JSON.stringify(segments) : null]
-                );
+              if (needsTranscription) {
+                if (isFallbackTranscription) {
+                  await query(
+                    `UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE call_id = $5`,
+                    [fullText, diarized.language, diarized.confidence, segments ? JSON.stringify(segments) : null, callId]
+                  );
+                } else {
+                  await query(
+                    `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
+                    [callId, fullText, diarized.language, diarized.confidence, segments ? JSON.stringify(segments) : null]
+                  );
+                }
               }
 
-              if (existingSummary.rows.length === 0) {
+              if (needsSummary) {
                 const [summary, intentData] = await Promise.all([
                   summarizeCall(fullText, aiModels.summaryLlmModel || undefined),
                   detectIntent(fullText, call.company_id, aiModels.intentLlmModel || undefined),
                 ]);
-                await query(
-                  'INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)',
-                  [callId, summary, intentData.intent, JSON.stringify([])]
-                );
+                if (isFallbackSummary) {
+                  await query(
+                    `UPDATE call_summaries SET summary = $1, intent = $2 WHERE call_id = $3`,
+                    [summary, intentData.intent, callId]
+                  );
+                } else {
+                  await query(
+                    `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
+                    [callId, summary, intentData.intent, JSON.stringify([])]
+                  );
+                }
               }
 
               logger.info('voice-status: transcription + summary done from recording_url', { callId, callSid });
