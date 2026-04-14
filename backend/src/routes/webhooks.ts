@@ -1230,7 +1230,7 @@ async function handleRecordingSaved(payload: any) {
   );
 
   const callResult = await query(
-    `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email
+    `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email, co.settings AS company_settings
      FROM calls c
      LEFT JOIN companies co ON co.id = c.company_id
      WHERE c.call_sid = $1`,
@@ -1248,10 +1248,11 @@ async function handleRecordingSaved(payload: any) {
 
     if (recordingUrl) {
       try {
-        const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr');
+        const aiModelsTelnyx = getAiModelsSettings(call.company_settings || {});
+        const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent', aiModelsTelnyx.transcriptionSttModel || undefined);
         const [summary, intentData] = await Promise.all([
-          summarizeCall(transcription.text),
-          detectIntent(transcription.text, call.company_id),
+          summarizeCall(transcription.text, aiModelsTelnyx.summaryLlmModel || undefined),
+          detectIntent(transcription.text, call.company_id, aiModelsTelnyx.intentLlmModel || undefined),
         ]);
 
         await query(
@@ -1503,6 +1504,11 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
         const callCompanyRow = await query('SELECT company_id FROM calls WHERE id = $1', [callId]);
         const outboundCompanyId: string | undefined = callCompanyRow.rows[0]?.company_id ?? undefined;
 
+        const outboundCompanySettings = outboundCompanyId
+          ? await query('SELECT settings FROM companies WHERE id = $1', [outboundCompanyId])
+          : null;
+        const aiModelsOut = getAiModelsSettings(outboundCompanySettings?.rows[0]?.settings || {});
+
         let transcriptionText = '';
         let transcriptionSegments: Array<{ role: 'agent' | 'client'; text: string; ts?: number }> | null = null;
         let transcriptionLanguage = 'fr';
@@ -1544,7 +1550,7 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
                 logger.info('Using structured live transcript with speaker separation', { callId, segmentsCount: segments.length });
               } else {
                 // Fallback to diarized recording transcription
-                const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent');
+                const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent', aiModelsOut.transcriptionSttModel || undefined);
                 transcriptionSegments = transcription.segments;
                 transcriptionText = transcription.segments
                   ? transcription.segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
@@ -1553,7 +1559,7 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
                 transcriptionConfidence = transcription.confidence;
               }
             } catch {
-              const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent');
+              const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent', aiModelsOut.transcriptionSttModel || undefined);
               transcriptionSegments = transcription.segments;
               transcriptionText = transcription.segments
                 ? transcription.segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
@@ -1563,7 +1569,7 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
             }
           } else {
             // No live transcript available, use diarized recording transcription
-            const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent');
+            const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent', aiModelsOut.transcriptionSttModel || undefined);
             transcriptionSegments = transcription.segments;
             transcriptionText = transcription.segments
               ? transcription.segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
@@ -1593,8 +1599,8 @@ router.post('/twilio/outbound-recording', async (req: Request, res: Response) =>
         }
 
         const [summary, intentData] = await Promise.all([
-          summarizeCall(transcriptionText),
-          detectIntent(transcriptionText, outboundCompanyId),
+          summarizeCall(transcriptionText, aiModelsOut.summaryLlmModel || undefined),
+          detectIntent(transcriptionText, outboundCompanyId, aiModelsOut.intentLlmModel || undefined),
         ]);
 
         const existingS = await query('SELECT id, summary FROM call_summaries WHERE call_id = $1', [callId]);
