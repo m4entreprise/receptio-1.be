@@ -763,13 +763,16 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
           if (callRow.rows.length === 0) return;
 
           const callId = callRow.rows[0].id;
-          const recordingUrl = callRow.rows[0].recording_url as string | null;
+
+          // Always wait 15s: gives Twilio time to store recording_url AND fire recording-complete
+          await new Promise(resolve => setTimeout(resolve, 15000));
+
+          // Re-fetch after waiting to get the up-to-date recording_url
+          const freshRow = await query(`SELECT recording_url FROM calls WHERE id = $1`, [callId]);
+          const recordingUrl = freshRow.rows[0]?.recording_url as string | null;
           const hasRecording = Boolean(recordingUrl);
 
           if (hasRecording) {
-            // recording_url exists but recording-complete may not have fired yet.
-            // Wait 10s then check if transcription is still missing — if so, run it now.
-            await new Promise(resolve => setTimeout(resolve, 10000));
 
             const [existingSummary, existingTranscription] = await Promise.all([
               query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]),
