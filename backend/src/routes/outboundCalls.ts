@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
+import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -15,6 +16,8 @@ function assertUuid(id: string, label = 'id') {
 }
 
 function getBaseUrl(req: Request): string {
+  // PUBLIC_WEBHOOK_URL wins if set (handles cases where nginx doesn't forward X-Forwarded-Proto)
+  if (process.env.PUBLIC_WEBHOOK_URL) return process.env.PUBLIC_WEBHOOK_URL;
   const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
   return `${proto}://${host}`;
@@ -75,57 +78,75 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     const answerUrl = `${baseUrl}/api/webhooks/twilio/outbound-answer?callId=${encodeURIComponent(callId)}&destNumber=${encodeURIComponent(destinationNumber)}&companyId=${encodeURIComponent(companyId)}`;
     const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/outbound-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`;
 
-    const twilioRegion = process.env.TWILIO_REGION || undefined;
-    const client = twilio(accountSid, authToken, twilioRegion ? { region: twilioRegion } : {});
-    logger.info('Outbound call: creating Twilio call', {
+    // Build the Twilio REST API URL directly — bypasses SDK region routing issues.
+    // TWILIO_REGION=ie1 → api.ie1.twilio.com, empty → api.twilio.com (US1 default)
+    const twilioRegion = (process.env.TWILIO_REGION || '').trim();
+    const twilioApiBase = twilioRegion
+      ? `https://api.${twilioRegion}.twilio.com`
+      : 'https://api.twilio.com';
+    const callsUrl = `${twilioApiBase}/2010-04-01/Accounts/${accountSid}/Calls.json`;
+
+    logger.info('Outbound call: creating Twilio call via REST', {
       from: company.phone_number,
       to: staff.phone_number,
+      callsUrl,
       answerUrl,
-      region: twilioRegion || 'default (us1)',
     });
-    let twilioCall;
+
+    let twilioSid: string;
     try {
-      twilioCall = await client.calls.create({
-        to: staff.phone_number,       // Call the agent first
-        from: company.phone_number,
-        url: answerUrl,
-        statusCallback: statusCallbackUrl,
-        statusCallbackMethod: 'POST',
-        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed', 'no-answer', 'busy', 'failed'],
+      const params = new URLSearchParams({
+        To: staff.phone_number,
+        From: company.phone_number,
+        Url: answerUrl,
+        StatusCallback: statusCallbackUrl,
+        StatusCallbackMethod: 'POST',
+        'StatusCallbackEvent[0]': 'initiated',
+        'StatusCallbackEvent[1]': 'ringing',
+        'StatusCallbackEvent[2]': 'answered',
+        'StatusCallbackEvent[3]': 'completed',
+        'StatusCallbackEvent[4]': 'no-answer',
+        'StatusCallbackEvent[5]': 'busy',
+        'StatusCallbackEvent[6]': 'failed',
       });
+      const twilioRes = await axios.post(callsUrl, params.toString(), {
+        auth: { username: accountSid, password: authToken },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+      twilioSid = twilioRes.data.sid;
     } catch (twilioErr: any) {
-      const code = twilioErr.code ?? twilioErr.status;
-      logger.error('Twilio call creation failed', { code, message: twilioErr.message, moreInfo: twilioErr.moreInfo, status: twilioErr.status });
-      if (code === 20003 || twilioErr.message === 'Authenticate') {
+      const status = twilioErr.response?.status;
+      const twilioCode = twilioErr.response?.data?.code;
+      const twilioMsg = twilioErr.response?.data?.message || twilioErr.message;
+      logger.error('Twilio call creation failed', { callsUrl, status, twilioCode, twilioMsg, data: twilioErr.response?.data });
+      if (status === 401 || twilioCode === 20003) {
         throw new AppError(
-          twilioRegion
-            ? `Identifiants Twilio invalides pour la région "${twilioRegion}"`
-            : 'Identifiants Twilio invalides — si votre compte est sur le datacenter EU, ajoutez TWILIO_REGION=ie1 dans .env',
+          `Authentification Twilio refusée (${callsUrl}) — vérifiez TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN et TWILIO_REGION`,
           500
         );
       }
-      if (code === 21211 || code === 21214) {
+      if (twilioCode === 21211 || twilioCode === 21214) {
         throw new AppError(`Numéro de destination invalide : ${destinationNumber}`, 400);
       }
-      if (code === 21606) {
+      if (twilioCode === 21606) {
         throw new AppError(`Le numéro émetteur ${company.phone_number} n'est pas autorisé pour les appels sortants`, 400);
       }
-      throw new AppError(`Erreur Twilio (${code ?? 'inconnu'}) : ${twilioErr.message}`, 500);
+      throw new AppError(`Erreur Twilio (${twilioCode ?? status ?? 'inconnu'}) : ${twilioMsg}`, 500);
     }
 
     await query(
       `UPDATE calls SET call_sid = $1, outbound_call_sid = $1 WHERE id = $2`,
-      [twilioCall.sid, callId]
+      [twilioSid, callId]
     );
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-      [callId, 'outbound.initiated', { twilioCallSid: twilioCall.sid, staffId, destinationNumber }]
+      [callId, 'outbound.initiated', { twilioCallSid: twilioSid, staffId, destinationNumber }]
     );
 
-    logger.info('Outbound call initiated', { callId, twilioSid: twilioCall.sid, destinationNumber, staffId });
+    logger.info('Outbound call initiated', { callId, twilioSid, destinationNumber, staffId });
 
-    res.status(201).json({ callId, callSid: twilioCall.sid, status: 'initiated' });
+    res.status(201).json({ callId, callSid: twilioSid, status: 'initiated' });
   } catch (error) {
     next(error);
   }
