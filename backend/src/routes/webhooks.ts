@@ -511,6 +511,14 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
       return;
     }
 
+    // Twilio fires recording-complete with RecordingDuration=0 when silence-trim eliminates the recording.
+    // The file does not actually exist on the CDN in this case, so skip processing to avoid a broken URL.
+    if (recordingDuration === 0) {
+      logger.info('recording-complete: skipping zero-duration (silence-trimmed) recording', { callSid });
+      res.status(200).send('ok');
+      return;
+    }
+
     const recordingUrl = String(rawRecordingUrl).endsWith('.mp3') ? String(rawRecordingUrl) : `${String(rawRecordingUrl)}.mp3`;
     const callResult = await query(
       `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email, co.settings AS company_settings
@@ -781,6 +789,21 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
                 [callId, fallbackSummary, 'autre', JSON.stringify([])]
               );
               logger.info('voice-status: fallback summary created (no recording)', { callId, callSid, mappedStatus });
+            }
+
+            const existingTranscription = await query(
+              'SELECT id FROM transcriptions WHERE call_id = $1',
+              [callId]
+            );
+            if (existingTranscription.rows.length === 0) {
+              const fallbackTranscription = mappedStatus === 'missed'
+                ? 'Appel manqué — aucun message laissé.'
+                : 'Le correspondant a raccroché avant de laisser un message.';
+              await query(
+                `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
+                [callId, fallbackTranscription, 'fr', 1.0]
+              );
+              logger.info('voice-status: fallback transcription created (no recording)', { callId, callSid, mappedStatus });
             }
           }
         } catch (fallbackErr: any) {
