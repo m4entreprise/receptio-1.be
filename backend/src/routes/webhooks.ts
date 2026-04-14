@@ -511,14 +511,6 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
       return;
     }
 
-    // Twilio fires recording-complete with RecordingDuration=0 when silence-trim eliminates the recording.
-    // The file does not actually exist on the CDN in this case, so skip processing to avoid a broken URL.
-    if (recordingDuration === 0) {
-      logger.info('recording-complete: skipping zero-duration (silence-trimmed) recording', { callSid });
-      res.status(200).send('ok');
-      return;
-    }
-
     const recordingUrl = String(rawRecordingUrl).endsWith('.mp3') ? String(rawRecordingUrl) : `${String(rawRecordingUrl)}.mp3`;
     const callResult = await query(
       `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email, co.settings AS company_settings
@@ -893,7 +885,7 @@ function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: st
   // Note: <Play> does NOT support statusCallback - only <Dial> does
   // Note: NO <Hangup> after <Record> - Record is non-blocking and Hangup would terminate the call immediately
   return buildTwiml(
-    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" />`
+    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="do-not-trim" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" />`
   );
 }
 
