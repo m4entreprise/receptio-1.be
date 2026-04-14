@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Bot, Brain, ChevronDown, Cpu, MessageSquare, Mic, Save, Sparkles, Volume2, Zap } from 'lucide-react';
+import { ArrowLeft, Bot, Brain, ChevronDown, Cpu, Mic, Save, Sparkles, Volume2, Zap } from 'lucide-react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
@@ -44,15 +44,13 @@ const CUSTOM_VALUE = '__custom__';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AiModelsFormData {
-  // Agent IA temps réel (Bbis)
+  // Agent IA (pipeline temps réel WebSocket)
   agentSttProvider: 'mistral' | 'gladia';
   agentSttModel: string;
   agentLlmModel: string;
   agentTtsModel: string;
   agentTtsVoice: string;
-  // Répondeur IA (Offre B text-based)
-  offerBLlmModel: string;
-  // Post-appel
+  // Post-appel + accueil (répondeur classique & analyse)
   batchSttModel: string;
   summaryLlmModel: string;
   intentLlmModel: string;
@@ -66,7 +64,6 @@ const DEFAULT_FORM: AiModelsFormData = {
   agentLlmModel: 'mistral-small-2603',
   agentTtsModel: 'voxtral-mini-tts-2603',
   agentTtsVoice: '',
-  offerBLlmModel: 'mistral-small-2603',
   batchSttModel: 'voxtral-mini-2507',
   summaryLlmModel: 'mistral-small-2603',
   intentLlmModel: 'mistral-small-2603',
@@ -211,7 +208,7 @@ function ModelCard({ icon, title, subtitle, children }: ModelCardProps) {
 
 // ─── Page principale ──────────────────────────────────────────────────────────
 
-type Tab = 'agent' | 'offerb' | 'batch';
+type Tab = 'agent' | 'batch';
 
 export default function SettingsModelsIA() {
   const [form, setForm] = useState<AiModelsFormData>(DEFAULT_FORM);
@@ -238,7 +235,6 @@ export default function SettingsModelsIA() {
           agentTtsModel:    agent.ttsModel    || DEFAULT_FORM.agentTtsModel,
           agentTtsVoice:    agent.ttsVoice    || DEFAULT_FORM.agentTtsVoice,
 
-          offerBLlmModel:   ai.offerBLlmModel           || DEFAULT_FORM.offerBLlmModel,
           batchSttModel:    ai.transcriptionSttModel    || DEFAULT_FORM.batchSttModel,
           summaryLlmModel:  ai.summaryLlmModel          || DEFAULT_FORM.summaryLlmModel,
           intentLlmModel:   ai.intentLlmModel           || DEFAULT_FORM.intentLlmModel,
@@ -269,7 +265,6 @@ export default function SettingsModelsIA() {
             ttsVoice:    form.agentTtsVoice,
           },
           aiModels: {
-            offerBLlmModel:        form.offerBLlmModel,
             transcriptionSttModel: form.batchSttModel,
             summaryLlmModel:       form.summaryLlmModel,
             intentLlmModel:        form.intentLlmModel,
@@ -356,9 +351,8 @@ export default function SettingsModelsIA() {
         {/* ── Onglets ───────────────────────────────────────────────────── */}
         <div className="flex gap-2">
           {([
-            { id: 'agent',  icon: <Bot className="h-4 w-4" />,          label: 'Agent IA temps réel' },
-            { id: 'offerb', icon: <MessageSquare className="h-4 w-4" />, label: 'Répondeur IA' },
-            { id: 'batch',  icon: <Cpu className="h-4 w-4" />,          label: 'Post-appel' },
+            { id: 'agent', icon: <Bot className="h-4 w-4" />, label: 'Agent IA' },
+            { id: 'batch', icon: <Cpu className="h-4 w-4" />, label: 'Post-appel & accueil' },
           ] as const).map(({ id, icon, label }) => (
             <button
               key={id}
@@ -382,7 +376,7 @@ export default function SettingsModelsIA() {
             <div className="flex items-center gap-3 px-1">
               <div className="h-px flex-1 bg-[#344453]/10" />
               <span className="text-[11px] uppercase tracking-[0.2em] text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
-                Pipeline Offre Bbis — STT → LLM → TTS
+                Pipeline temps r\u00e9el WebSocket — STT \u2192 LLM \u2192 TTS
               </span>
               <div className="h-px flex-1 bg-[#344453]/10" />
             </div>
@@ -473,56 +467,13 @@ export default function SettingsModelsIA() {
           </section>
         )}
 
-        {/* ── Contenu Répondeur IA ─────────────────────────────────────── */}
-        {activeTab === 'offerb' && (
-          <section className="space-y-4">
-            <div className="flex items-center gap-3 px-1">
-              <div className="h-px flex-1 bg-[#344453]/10" />
-              <span className="text-[11px] uppercase tracking-[0.2em] text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
-                Pipeline Offre B — Agent textuel via Twilio Gather
-              </span>
-              <div className="h-px flex-1 bg-[#344453]/10" />
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              <ModelCard
-                icon={<Brain className="h-5 w-5" />}
-                title="Génération de réponses"
-                subtitle="Comprend la demande et formule la réponse du répondeur IA pendant l'appel"
-              >
-                <ModelSelect
-                  models={LLM_MODELS}
-                  value={form.offerBLlmModel}
-                  onChange={(v) => set('offerBLlmModel', v)}
-                  label="Modèle LLM"
-                  description="Vitesse vs qualité"
-                />
-                <div className="rounded-2xl border border-[#344453]/8 bg-[#344453]/4 px-3 py-2.5">
-                  <p className="text-xs leading-5 text-[#344453]/60">
-                    Utilisé par <code className="font-mono text-[10px]">generateOfferBReply()</code>. Ce pipeline répond à chaque tour de parole du client via Twilio Gather. Un modèle <strong>Rapide</strong> est recommandé pour limiter la latence perçue.
-                  </p>
-                </div>
-              </ModelCard>
-
-              <div className="rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#344453]/50" style={{ fontFamily: 'var(--font-mono)' }}>À noter</p>
-                <ul className="mt-3 space-y-2 text-xs leading-5 text-[#344453]/65">
-                  <li>• Le Répondeur IA (Offre B) est le pipeline <strong>textuel</strong> — il utilise Twilio Gather pour capturer la parole puis génère une réponse LLM.</li>
-                  <li>• Il est différent de l'Agent IA temps réel (Offre Bbis) qui utilise le streaming WebSocket.</li>
-                  <li>• STT et TTS sont gérés directement par Twilio dans ce mode ; seul le LLM est configurable ici.</li>
-                </ul>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* ── Contenu Post-appel ───────────────────────────────────────── */}
+        {/* ── Contenu Post-appel & accueil ────────────────────────────── */}
         {activeTab === 'batch' && (
           <section className="space-y-4">
             <div className="flex items-center gap-3 px-1">
               <div className="h-px flex-1 bg-[#344453]/10" />
               <span className="text-[11px] uppercase tracking-[0.2em] text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
-                Traitement asynchrone après chaque appel
+                R\u00e9pondeur classique \u00b7 post-appel \u00b7 routage intelligent
               </span>
               <div className="h-px flex-1 bg-[#344453]/10" />
             </div>
@@ -533,7 +484,7 @@ export default function SettingsModelsIA() {
               <ModelCard
                 icon={<Mic className="h-5 w-5" />}
                 title="Transcription post-appel"
-                subtitle="Retranscrit l'enregistrement audio après la fin de l'appel (avec diarisation)"
+                subtitle="Retranscrit l'enregistrement audio apr\u00e8s la fin de l'appel, avec diarisation agent/client"
               >
                 <ModelSelect
                   models={STT_MODELS_MISTRAL}
@@ -552,7 +503,7 @@ export default function SettingsModelsIA() {
               <ModelCard
                 icon={<Volume2 className="h-5 w-5" />}
                 title="Message d'accueil vocal"
-                subtitle="Voix synthétique jouée avant l'enregistrement du répondeur (Offre A/B)"
+                subtitle="TTS utilis\u00e9 par le r\u00e9pondeur classique pour lire le message d'accueil et la question de routage"
               >
                 <ModelSelect
                   models={TTS_MODELS}
@@ -595,8 +546,8 @@ export default function SettingsModelsIA() {
               {/* LLM Intent */}
               <ModelCard
                 icon={<Zap className="h-5 w-5" />}
-                title="Qualification & Intent"
-                subtitle="Classifie automatiquement chaque appel selon vos intents configurés"
+                title="Qualification & Routage intelligent"
+                subtitle="Classifie chaque appel selon vos intents — utilis\u00e9 aussi pour le routage intelligent du r\u00e9pondeur"
               >
                 <ModelSelect
                   models={LLM_MODELS}
