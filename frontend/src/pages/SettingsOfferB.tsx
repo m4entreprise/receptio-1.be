@@ -153,7 +153,7 @@ export default function SettingsOfferB() {
         phoneNumber: formData.phoneNumber,
         settings: formData.settings,
       });
-      setMessage('Param\u00e8tres sauvegard\u00e9s avec succ\u00e8s');
+      setMessage('Paramètres sauvegardés avec succès');
       await fetchCompany();
     } catch (error) {
       console.error('Error saving company settings:', error);
@@ -170,17 +170,17 @@ export default function SettingsOfferB() {
     try {
       if (editingKnowledgeId) {
         await axios.patch(`/api/knowledge-base/${editingKnowledgeId}`, knowledgeForm);
-        setKnowledgeMessage('Entr\u00e9e mise \u00e0 jour avec succ\u00e8s');
+        setKnowledgeMessage('Entrée mise à jour avec succès');
       } else {
         await axios.post('/api/knowledge-base', knowledgeForm);
-        setKnowledgeMessage('Entr\u00e9e ajout\u00e9e avec succ\u00e8s');
+        setKnowledgeMessage('Entrée ajoutée avec succès');
       }
       setKnowledgeForm(emptyKnowledgeForm);
       setEditingKnowledgeId(null);
       await fetchKnowledgeBase();
     } catch (error) {
       console.error('Error saving knowledge base entry:', error);
-      setKnowledgeMessage("Erreur lors de la sauvegarde de l'entr\u00e9e");
+      setKnowledgeMessage("Erreur lors de la sauvegarde de l'entrée");
     } finally {
       setSavingKnowledge(false);
     }
@@ -205,7 +205,7 @@ export default function SettingsOfferB() {
         setEditingKnowledgeId(null);
         setKnowledgeForm(emptyKnowledgeForm);
       }
-      setKnowledgeMessage('Entr\u00e9e supprim\u00e9e avec succ\u00e8s');
+      setKnowledgeMessage('Entrée supprimée avec succès');
       await fetchKnowledgeBase();
     } catch (error) {
       console.error('Error deleting knowledge base entry:', error);
@@ -219,7 +219,7 @@ export default function SettingsOfferB() {
       await fetchKnowledgeBase();
     } catch (error) {
       console.error('Error toggling knowledge base entry:', error);
-      setKnowledgeMessage('Erreur lors de la mise \u00e0 jour du statut');
+      setKnowledgeMessage('Erreur lors de la mise à jour du statut');
     }
   };
 
@@ -235,7 +235,7 @@ export default function SettingsOfferB() {
         <div className="flex h-[50vh] items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-center">
             <div className="h-12 w-12 animate-spin rounded-full border-2 border-black/10 border-t-[#111118]" />
-            <p className="text-sm font-medium text-[#6f685d]">Chargement des param\u00e8tres\u2026</p>
+            <p className="text-sm font-medium text-[#6f685d]">Chargement des paramètres…</p>
           </div>
         </div>
       </Layout>
@@ -255,10 +255,10 @@ export default function SettingsOfferB() {
             </div>
             <div className="mt-5 space-y-3">
               <h1 className="text-3xl font-semibold tracking-[-0.03em] text-white sm:text-4xl" style={{ fontFamily: 'var(--font-title)' }}>
-                Configurez votre r\u00e9ceptionniste t\u00e9l\u00e9phonique IA.
+                Configurez votre réceptionniste téléphonique IA.
               </h1>
               <p className="max-w-2xl text-sm leading-7 text-white/60 sm:text-base">
-                Choisissez votre mode de r\u00e9ponse, param\u00e9trez les mod\u00e8les IA, le transfert humain et enrichissez la base de connaissances utilis\u00e9e lors des appels.
+                Choisissez votre mode de réponse, paramétrez les modèles IA, le transfert humain et enrichissez la base de connaissances utilisée lors des appels.
               </p>
             </div>
           </div>
@@ -267,18 +267,18 @@ export default function SettingsOfferB() {
             <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>Compte</p>
             <div className="mt-4 space-y-3">
               <div className="rounded-2xl bg-[#344453]/6 px-4 py-3">
-                <p className="text-xs text-[#344453]/50">Email de r\u00e9f\u00e9rence</p>
-                <p className="mt-0.5 break-all text-sm font-semibold text-[#141F28]">{company?.email || 'Non renseign\u00e9'}</p>
+                <p className="text-xs text-[#344453]/50">Email de référence</p>
+                <p className="mt-0.5 break-all text-sm font-semibold text-[#141F28]">{company?.email || 'Non renseigné'}</p>
               </div>
               <div className="rounded-2xl bg-[#344453]/6 px-4 py-3">
-                <p className="text-xs text-[#344453]/50">Compte cr\u00e9\u00e9 le</p>
+                <p className="text-xs text-[#344453]/50">Compte créé le</p>
                 <p className="mt-0.5 text-sm font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-mono)' }}>
                   {company?.created_at ? new Date(company.created_at).toLocaleDateString('fr-BE') : 'Date indisponible'}
                 </p>
               </div>
               <div className="inline-flex items-center gap-2 rounded-full border border-[#2D9D78]/25 bg-[#2D9D78]/8 px-4 py-2 text-xs text-[#2D9D78]">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Param\u00e8tres synchronis\u00e9s avec votre compte
+                Paramètres synchronisés avec votre compte
               </div>
             </div>
           </div>
@@ -291,7 +291,7 @@ export default function SettingsOfferB() {
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Modules avanc\u00e9s</h2>
+              <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Modules avancés</h2>
               <p className="mt-1 text-sm text-[#344453]/55">Tous les modules sont accessibles quel que soit le mode actif.</p>
             </div>
           </div>
@@ -308,7 +308,7 @@ export default function SettingsOfferB() {
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
                     style={{ background: `${mod.color}15`, color: mod.color }}
                   >
-                    <Icon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+                    <Icon className="h-[18px] w-[18px]" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-[#141F28]">{mod.label}</p>
@@ -328,15 +328,15 @@ export default function SettingsOfferB() {
               <Building2 className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Entreprise & mode de r\u00e9ponse</h2>
-              <p className="mt-1 text-sm text-[#344453]/55">Choisissez comment votre r\u00e9ceptionniste g\u00e8re les appels entrants.</p>
+              <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Entreprise & mode de réponse</h2>
+              <p className="mt-1 text-sm text-[#344453]/55">Choisissez comment votre réceptionniste gère les appels entrants.</p>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6 px-4 py-5 sm:px-6 sm:py-6">
             {message && (
               <div className={`rounded-2xl border px-4 py-3 text-sm font-medium ${
-                message.includes('succ\u00e8s')
+                message.includes('succès')
                   ? 'border-[#2D9D78]/25 bg-[#2D9D78]/8 text-[#2D9D78]'
                   : 'border-[#D94052]/20 bg-[#D94052]/6 text-[#D94052]'
               }`}>
@@ -360,7 +360,7 @@ export default function SettingsOfferB() {
               </div>
               <div>
                 <label htmlFor="phoneNumber" className="block text-sm font-medium text-[#344453]">
-                  Num\u00e9ro de t\u00e9l\u00e9phone Twilio
+                  Numéro de téléphone Twilio
                 </label>
                 <input
                   type="tel"
@@ -375,7 +375,7 @@ export default function SettingsOfferB() {
 
             {/* Sélecteur de mode */}
             <div>
-              <p className="mb-3 text-sm font-medium text-[#344453]">Mode de r\u00e9ponse</p>
+              <p className="mb-3 text-sm font-medium text-[#344453]">Mode de réponse</p>
               <div className="rounded-[24px] border border-[#344453]/12 bg-[#F8F9FB] p-1.5">
                 <div className="grid grid-cols-2 gap-1">
                   <button
@@ -388,7 +388,7 @@ export default function SettingsOfferB() {
                     }`}
                   >
                     <Bot className="h-4 w-4" />
-                    R\u00e9pondeur classique
+                    Répondeur classique
                   </button>
                   <button
                     type="button"
@@ -400,14 +400,14 @@ export default function SettingsOfferB() {
                     }`}
                   >
                     <Sparkles className="h-4 w-4" />
-                    R\u00e9pondeur IA
+                    Répondeur IA
                   </button>
                 </div>
               </div>
               <p className="mt-2 text-xs text-[#344453]/45">
                 {formData.settings.voicePipelineEnabled
-                  ? "L'agent IA d\u00e9croche, dialogue en temps r\u00e9el et inclut le routage intelligent."
-                  : "R\u00e9pondeur vocal classique avec messagerie. Le routage intelligent est disponible en option."}
+                  ? "L'agent IA décroche, dialogue en temps réel et inclut le routage intelligent."
+                  : "Répondeur vocal classique avec messagerie. Le routage intelligent est disponible en option."}
               </p>
             </div>
 
@@ -423,10 +423,10 @@ export default function SettingsOfferB() {
                     rows={3}
                     value={formData.settings.greetingText}
                     onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, greetingText: e.target.value } })}
-                    placeholder={`Bonjour, vous \u00eates bien chez ${formData.name || 'votre entreprise'}. Merci de laisser votre message apr\u00e8s le bip.`}
+                    placeholder={`Bonjour, vous êtes bien chez ${formData.name || 'votre entreprise'}. Merci de laisser votre message après le bip.`}
                     className="mt-2 block w-full resize-none rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25 focus:bg-white"
                   />
-                  <p className="mt-1.5 text-xs text-[#344453]/45">Lu par Twilio \u00e0 chaque appel entrant. Laissez vide pour le message par d\u00e9faut.</p>
+                  <p className="mt-1.5 text-xs text-[#344453]/45">Lu par Twilio à chaque appel entrant. Laissez vide pour le message par défaut.</p>
                 </div>
 
                 <div className="rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
@@ -435,7 +435,7 @@ export default function SettingsOfferB() {
                       <PhoneForwarded className="mt-0.5 h-5 w-5 shrink-0 text-[#344453]" />
                       <div>
                         <p className="text-sm font-medium text-[#141F28]">Routage intelligent</p>
-                        <p className="mt-1 text-sm leading-6 text-[#344453]/55">L'appelant dit son motif, il est mis en attente, et vous le transf\u00e9rez depuis le dashboard.</p>
+                        <p className="mt-1 text-sm leading-6 text-[#344453]/55">L'appelant dit son motif, il est mis en attente, et vous le transférez depuis le dashboard.</p>
                       </div>
                     </div>
                     <input
@@ -448,7 +448,7 @@ export default function SettingsOfferB() {
                   {formData.settings.smartRoutingEnabled && (
                     <div className="mt-4 border-t border-[#344453]/8 pt-4">
                       <label htmlFor="routingQuestion" className="block text-sm font-medium text-[#344453]">
-                        Question pos\u00e9e \u00e0 l'appelant
+                        Question posée à l'appelant
                       </label>
                       <input
                         type="text"
@@ -476,10 +476,10 @@ export default function SettingsOfferB() {
                     id="greetingTextAgent"
                     value={formData.settings.greetingText}
                     onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, greetingText: e.target.value } })}
-                    placeholder={`Bonjour, vous \u00eates bien chez ${formData.name || 'votre entreprise'}. Comment puis-je vous aider ?`}
+                    placeholder={`Bonjour, vous êtes bien chez ${formData.name || 'votre entreprise'}. Comment puis-je vous aider ?`}
                     className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25 focus:bg-white"
                   />
-                  <p className="mt-1.5 text-xs text-[#344453]/45">Premi\u00e8re phrase prononc\u00e9e par l'agent \u00e0 chaque appel.</p>
+                  <p className="mt-1.5 text-xs text-[#344453]/45">Première phrase prononcée par l'agent à chaque appel.</p>
                 </div>
 
                 {/* Transfert humain */}
@@ -491,7 +491,7 @@ export default function SettingsOfferB() {
                   <div className="mt-4 grid gap-4 lg:grid-cols-2">
                     <div>
                       <label htmlFor="humanTransferNumber" className="block text-sm font-medium text-[#344453]">
-                        Num\u00e9ro de transfert
+                        Numéro de transfert
                       </label>
                       <input
                         type="tel"
@@ -526,10 +526,10 @@ export default function SettingsOfferB() {
                       id="transferMessage"
                       value={formData.settings.transferMessage}
                       onChange={(e) => setFormData({ ...formData, settings: { ...formData.settings, transferMessage: e.target.value } })}
-                      placeholder="Je vous mets en relation avec la personne comp\u00e9tente. Un instant s'il vous pla\u00eet."
+                      placeholder="Je vous mets en relation avec la personne compétente. Un instant s'il vous plaît."
                       className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
                     />
-                    <p className="mt-1.5 text-xs text-[#344453]/45">Prononc\u00e9 par l'agent vocal juste avant de passer l'appel.</p>
+                    <p className="mt-1.5 text-xs text-[#344453]/45">Prononcé par l'agent vocal juste avant de passer l'appel.</p>
                   </div>
                 </div>
 
@@ -539,8 +539,8 @@ export default function SettingsOfferB() {
                     <div className="flex items-start gap-3">
                       <Bot className="mt-0.5 h-4 w-4 shrink-0 text-[#344453]" />
                       <div>
-                        <p className="text-sm font-medium text-[#141F28]">Agent vocal activ\u00e9</p>
-                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">L'agent d\u00e9croche et dialogue activement.</p>
+                        <p className="text-sm font-medium text-[#141F28]">Agent vocal activé</p>
+                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">L'agent décroche et dialogue activement.</p>
                       </div>
                     </div>
                     <input
@@ -556,7 +556,7 @@ export default function SettingsOfferB() {
                       <Database className="mt-0.5 h-4 w-4 shrink-0 text-[#344453]" />
                       <div>
                         <p className="text-sm font-medium text-[#141F28]">Base de connaissances</p>
-                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">L'agent s'appuie sur vos infos m\u00e9tier.</p>
+                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">L'agent s'appuie sur vos infos métier.</p>
                       </div>
                     </div>
                     <input
@@ -572,7 +572,7 @@ export default function SettingsOfferB() {
                       <PhoneForwarded className="mt-0.5 h-4 w-4 shrink-0 text-[#344453]" />
                       <div>
                         <p className="text-sm font-medium text-[#141F28]">Fallback messagerie</p>
-                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">Revient au r\u00e9pondeur si l'agent \u00e9choue.</p>
+                        <p className="mt-1 text-xs leading-5 text-[#344453]/55">Revient au répondeur si l'agent échoue.</p>
                       </div>
                     </div>
                     <input
@@ -587,14 +587,14 @@ export default function SettingsOfferB() {
             )}
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-[#344453]/55">Les modifications sont enregistr\u00e9es directement sur votre compte entreprise.</p>
+              <p className="text-sm text-[#344453]/55">Les modifications sont enregistrées directement sur votre compte entreprise.</p>
               <button
                 type="submit"
                 disabled={saving}
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-[#C7601D] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(199,96,29,0.28)] transition hover:bg-[#b35519] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
-                {saving ? 'Sauvegarde\u2026' : 'Sauvegarder'}
+                {saving ? 'Sauvegarde…' : 'Sauvegarder'}
               </button>
             </div>
           </form>
@@ -608,7 +608,7 @@ export default function SettingsOfferB() {
             </div>
             <div>
               <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Base de connaissances</h2>
-              <p className="mt-1 text-sm text-[#344453]/55">Renseignez les informations que l'agent doit conna\u00eetre avant de r\u00e9pondre ou d'\u00e9scalader vers un humain.</p>
+              <p className="mt-1 text-sm text-[#344453]/55">Renseignez les informations que l'agent doit connaître avant de répondre ou d'escalader vers un humain.</p>
             </div>
           </div>
 
@@ -616,7 +616,7 @@ export default function SettingsOfferB() {
             <form onSubmit={handleKnowledgeSubmit} className="space-y-5 rounded-[24px] border border-[#344453]/10 bg-[#344453]/4 p-4 sm:p-5">
               {knowledgeMessage && (
                 <div className={`rounded-2xl border px-4 py-3 text-sm font-medium ${
-                  knowledgeMessage.includes('succ\u00e8s')
+                  knowledgeMessage.includes('succès')
                     ? 'border-[#2D9D78]/25 bg-[#2D9D78]/8 text-[#2D9D78]'
                     : 'border-[#D94052]/20 bg-[#D94052]/6 text-[#D94052]'
                 }`}>
@@ -641,7 +641,7 @@ export default function SettingsOfferB() {
               <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
                 <div>
                   <label htmlFor="knowledgeCategory" className="block text-sm font-medium text-[#344453]">
-                    Cat\u00e9gorie
+                    Catégorie
                   </label>
                   <input
                     type="text"
@@ -654,7 +654,7 @@ export default function SettingsOfferB() {
                 </div>
                 <div>
                   <label htmlFor="knowledgePriority" className="block text-sm font-medium text-[#344453]">
-                    Priorit\u00e9
+                    Priorité
                   </label>
                   <input
                     type="number"
@@ -670,20 +670,20 @@ export default function SettingsOfferB() {
 
               <div>
                 <label htmlFor="knowledgeContent" className="block text-sm font-medium text-[#344453]">
-                  Contenu m\u00e9tier
+                  Contenu métier
                 </label>
                 <textarea
                   id="knowledgeContent"
                   value={knowledgeForm.content}
                   onChange={(e) => setKnowledgeForm({ ...knowledgeForm, content: e.target.value })}
                   rows={6}
-                  placeholder="Exemple : Nous intervenons dans toute la province de Li\u00e8ge du lundi au vendredi de 8h \u00e0 18h."
+                  placeholder="Exemple : Nous intervenons dans toute la province de Liège du lundi au vendredi de 8h à 18h."
                   className="mt-2 block w-full resize-none rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25"
                 />
               </div>
 
               <label className="flex items-center justify-between gap-4 rounded-2xl border border-[#344453]/12 bg-white px-4 py-3 text-sm font-medium text-[#141F28]">
-                <span>Entr\u00e9e active</span>
+                <span>Entrée active</span>
                 <input
                   type="checkbox"
                   checked={knowledgeForm.enabled}
@@ -699,7 +699,7 @@ export default function SettingsOfferB() {
                   className="inline-flex items-center justify-center gap-2 rounded-full bg-[#344453] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(52,68,83,0.22)] transition hover:bg-[#2a3642] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {editingKnowledgeId ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                  {savingKnowledge ? 'Sauvegarde\u2026' : editingKnowledgeId ? 'Mettre \u00e0 jour' : "Ajouter l'entr\u00e9e"}
+                  {savingKnowledge ? 'Sauvegarde…' : editingKnowledgeId ? "Mettre à jour" : "Ajouter l'entrée"}
                 </button>
                 {editingKnowledgeId && (
                   <button
@@ -707,7 +707,7 @@ export default function SettingsOfferB() {
                     onClick={resetKnowledgeEditor}
                     className="rounded-full border border-[#344453]/15 bg-white px-4 py-2 text-sm font-medium text-[#344453] transition hover:bg-[#344453]/5"
                   >
-                    Annuler l'\u00e9dition
+                    Annuler l'édition
                   </button>
                 )}
               </div>
@@ -716,8 +716,8 @@ export default function SettingsOfferB() {
             <div className="space-y-3">
               {knowledgeEntries.length === 0 ? (
                 <div className="rounded-[24px] border border-dashed border-[#344453]/15 bg-[#344453]/4 px-6 py-10 text-center">
-                  <p className="text-base font-medium text-[#141F28]">Aucune information m\u00e9tier pour l'instant</p>
-                  <p className="mt-2 text-sm text-[#344453]/55">Ajoutez ici les r\u00e9ponses et donn\u00e9es d'entreprise sur lesquelles l'agent s'appuiera.</p>
+                  <p className="text-base font-medium text-[#141F28]">Aucune information métier pour l'instant</p>
+                  <p className="mt-2 text-sm text-[#344453]/55">Ajoutez ici les réponses et données d'entreprise sur lesquelles l'agent s'appuiera.</p>
                 </div>
               ) : (
                 knowledgeEntries.map((entry) => (
@@ -735,7 +735,7 @@ export default function SettingsOfferB() {
                             <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
                               entry.enabled ? 'bg-[#2D9D78]/10 text-[#2D9D78]' : 'bg-[#344453]/8 text-[#344453]/50'
                             }`}>
-                              {entry.enabled ? 'Actif' : 'D\u00e9sactiv\u00e9'}
+                              {entry.enabled ? 'Actif' : 'Désactivé'}
                             </span>
                           </div>
                           <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#344453]/60">{entry.content}</p>
@@ -747,7 +747,7 @@ export default function SettingsOfferB() {
                             onClick={() => handleToggleKnowledgeEntry(entry)}
                             className="rounded-full border border-[#344453]/15 bg-white px-4 py-2 text-sm font-medium text-[#344453] transition hover:bg-[#344453]/5"
                           >
-                            {entry.enabled ? 'D\u00e9sactiver' : 'Activer'}
+                            {entry.enabled ? 'Désactiver' : 'Activer'}
                           </button>
                           <button
                             type="button"
@@ -771,8 +771,8 @@ export default function SettingsOfferB() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 text-xs text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
-                        <span>Priorit\u00e9 {entry.priority}</span>
-                        {entry.updated_at && <span>Mis \u00e0 jour le {new Date(entry.updated_at).toLocaleString('fr-BE')}</span>}
+                        <span>Priorité {entry.priority}</span>
+                        {entry.updated_at && <span>Mis à jour le {new Date(entry.updated_at).toLocaleString('fr-BE')}</span>}
                       </div>
                     </div>
                   </div>
