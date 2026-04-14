@@ -763,15 +763,60 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
           if (callRow.rows.length === 0) return;
 
           const callId = callRow.rows[0].id;
-          const hasRecording = Boolean(callRow.rows[0].recording_url);
+          const recordingUrl = callRow.rows[0].recording_url as string | null;
+          const hasRecording = Boolean(recordingUrl);
 
-          // Only create fallback summary when no recording exists
-          // (if recording-complete fires later it will override this)
-          if (!hasRecording) {
-            const existingSummary = await query(
-              'SELECT id FROM call_summaries WHERE call_id = $1',
-              [callId]
-            );
+          if (hasRecording) {
+            // recording_url exists but recording-complete may not have fired yet.
+            // Wait 10s then check if transcription is still missing — if so, run it now.
+            await new Promise(resolve => setTimeout(resolve, 10000));
+
+            const [existingSummary, existingTranscription] = await Promise.all([
+              query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]),
+              query('SELECT id FROM transcriptions WHERE call_id = $1', [callId]),
+            ]);
+
+            if (existingSummary.rows.length === 0 || existingTranscription.rows.length === 0) {
+              logger.info('voice-status: recording exists but no transcription yet, running now', { callId, callSid });
+
+              const callDetailsRow = await query(
+                `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email, co.settings AS company_settings
+                 FROM calls c LEFT JOIN companies co ON co.id = c.company_id WHERE c.id = $1`,
+                [callId]
+              );
+              if (callDetailsRow.rows.length === 0) return;
+              const call = callDetailsRow.rows[0];
+              const aiModels = getAiModelsSettings(call.company_settings || {});
+
+              const diarized = await transcribeAudioUrlWithDiarization(recordingUrl!, 'fr', 'agent', aiModels.transcriptionSttModel || undefined);
+              const segments = diarized.segments ?? null;
+              const fullText = segments
+                ? segments.map((s: any) => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
+                : diarized.text;
+
+              if (existingTranscription.rows.length === 0) {
+                await query(
+                  `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
+                  [callId, fullText, diarized.language, diarized.confidence, segments ? JSON.stringify(segments) : null]
+                );
+              }
+
+              if (existingSummary.rows.length === 0) {
+                const [summary, intentData] = await Promise.all([
+                  summarizeCall(fullText, aiModels.summaryLlmModel || undefined),
+                  detectIntent(fullText, call.company_id, aiModels.intentLlmModel || undefined),
+                ]);
+                await query(
+                  'INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)',
+                  [callId, summary, intentData.intent, JSON.stringify([])]
+                );
+              }
+
+              logger.info('voice-status: transcription + summary done from recording_url', { callId, callSid });
+            }
+          } else {
+            // No recording at all — insert generic fallback
+            const existingSummary = await query('SELECT id FROM call_summaries WHERE call_id = $1', [callId]);
             if (existingSummary.rows.length === 0) {
               const fallbackSummary = mappedStatus === 'missed'
                 ? 'Appel manqué — aucun message laissé.'
@@ -780,13 +825,8 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
                 `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
                 [callId, fallbackSummary, 'autre', JSON.stringify([])]
               );
-              logger.info('voice-status: fallback summary created (no recording)', { callId, callSid, mappedStatus });
             }
-
-            const existingTranscription = await query(
-              'SELECT id FROM transcriptions WHERE call_id = $1',
-              [callId]
-            );
+            const existingTranscription = await query('SELECT id FROM transcriptions WHERE call_id = $1', [callId]);
             if (existingTranscription.rows.length === 0) {
               const fallbackTranscription = mappedStatus === 'missed'
                 ? 'Appel manqué — aucun message laissé.'
@@ -795,7 +835,6 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
                 `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
                 [callId, fallbackTranscription, 'fr', 1.0]
               );
-              logger.info('voice-status: fallback transcription created (no recording)', { callId, callSid, mappedStatus });
             }
           }
         } catch (fallbackErr: any) {
