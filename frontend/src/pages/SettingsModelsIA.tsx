@@ -376,7 +376,7 @@ export default function SettingsModelsIA() {
             <div className="flex items-center gap-3 px-1">
               <div className="h-px flex-1 bg-[#344453]/10" />
               <span className="text-[11px] uppercase tracking-[0.2em] text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
-                Pipeline temps r\u00e9el WebSocket — STT \u2192 LLM \u2192 TTS
+                Pipeline temps réel WebSocket — STT → LLM → TTS
               </span>
               <div className="h-px flex-1 bg-[#344453]/10" />
             </div>
@@ -473,7 +473,7 @@ export default function SettingsModelsIA() {
             <div className="flex items-center gap-3 px-1">
               <div className="h-px flex-1 bg-[#344453]/10" />
               <span className="text-[11px] uppercase tracking-[0.2em] text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>
-                R\u00e9pondeur classique \u00b7 post-appel \u00b7 routage intelligent
+                Répondeur classique · post-appel · routage intelligent
               </span>
               <div className="h-px flex-1 bg-[#344453]/10" />
             </div>
@@ -484,7 +484,7 @@ export default function SettingsModelsIA() {
               <ModelCard
                 icon={<Mic className="h-5 w-5" />}
                 title="Transcription post-appel"
-                subtitle="Retranscrit l'enregistrement audio apr\u00e8s la fin de l'appel, avec diarisation agent/client"
+                subtitle="Retranscrit l'enregistrement audio après la fin de l'appel, avec diarisation agent/client"
               >
                 <ModelSelect
                   models={STT_MODELS_MISTRAL}
@@ -503,7 +503,7 @@ export default function SettingsModelsIA() {
               <ModelCard
                 icon={<Volume2 className="h-5 w-5" />}
                 title="Message d'accueil vocal"
-                subtitle="TTS utilis\u00e9 par le r\u00e9pondeur classique pour lire le message d'accueil et la question de routage"
+                subtitle="TTS utilisé par le répondeur classique pour lire le message d'accueil et la question de routage"
               >
                 <ModelSelect
                   models={TTS_MODELS}
@@ -547,7 +547,7 @@ export default function SettingsModelsIA() {
               <ModelCard
                 icon={<Zap className="h-5 w-5" />}
                 title="Qualification & Routage intelligent"
-                subtitle="Classifie chaque appel selon vos intents — utilis\u00e9 aussi pour le routage intelligent du r\u00e9pondeur"
+                subtitle="Classifie chaque appel selon vos intents — utilisé aussi pour le routage intelligent du répondeur"
               >
                 <ModelSelect
                   models={LLM_MODELS}

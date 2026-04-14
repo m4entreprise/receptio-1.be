@@ -751,6 +751,42 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
       );
 
       logger.info('Call status updated via voice-status', { callSid, mappedStatus, callDuration });
+
+      // Fallback : if the caller hung up before any recording started (recording-complete never fires),
+      // ensure a minimal summary exists so the call detail is not left completely empty.
+      setImmediate(async () => {
+        try {
+          const callRow = await query(
+            `SELECT id, recording_url FROM calls WHERE call_sid = $1`,
+            [callSid]
+          );
+          if (callRow.rows.length === 0) return;
+
+          const callId = callRow.rows[0].id;
+          const hasRecording = Boolean(callRow.rows[0].recording_url);
+
+          // Only create fallback summary when no recording exists
+          // (if recording-complete fires later it will override this)
+          if (!hasRecording) {
+            const existingSummary = await query(
+              'SELECT id FROM call_summaries WHERE call_id = $1',
+              [callId]
+            );
+            if (existingSummary.rows.length === 0) {
+              const fallbackSummary = mappedStatus === 'missed'
+                ? 'Appel manqué — aucun message laissé.'
+                : 'Appel court — le correspondant a raccroché avant de laisser un message.';
+              await query(
+                `INSERT INTO call_summaries (call_id, summary, intent, actions) VALUES ($1, $2, $3, $4)`,
+                [callId, fallbackSummary, 'autre', JSON.stringify([])]
+              );
+              logger.info('voice-status: fallback summary created (no recording)', { callId, callSid, mappedStatus });
+            }
+          }
+        } catch (fallbackErr: any) {
+          logger.warn('voice-status: fallback summary error', { callSid, error: fallbackErr.message });
+        }
+      });
     }
 
     res.sendStatus(200);
