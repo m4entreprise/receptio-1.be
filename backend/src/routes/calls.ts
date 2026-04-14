@@ -191,12 +191,16 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       const recordingSid = sidMatch[0];
 
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const twilioClient = (require('twilio') as typeof import('twilio'))(twilioSid, twilioToken);
+      const twilioClient = (require('twilio') as typeof import('twilio'))(twilioSid, twilioToken, {
+        region: process.env.TWILIO_REGION || undefined,
+      });
       const recording = await twilioClient.recordings(recordingSid).fetch();
 
-      // Build the direct MP3 URL: https://api.twilio.com/.../Recordings/RExxxx.mp3
+      // Build the direct MP3 URL using the correct regional domain
       // Use the account SID from the recording itself (handles sub-accounts)
-      const directUrl = `https://api.twilio.com/2010-04-01/Accounts/${recording.accountSid}/Recordings/${recordingSid}.mp3`;
+      const twilioRegion = process.env.TWILIO_REGION;
+      const twilioApiHost = twilioRegion ? `api.${twilioRegion}.twilio.com` : 'api.twilio.com';
+      const directUrl = `https://${twilioApiHost}/2010-04-01/Accounts/${recording.accountSid}/Recordings/${recordingSid}.mp3`;
 
       logger.info('Recording proxy: streaming via SDK URL', { callId: id, recordingSid, accountSid: recording.accountSid });
 
