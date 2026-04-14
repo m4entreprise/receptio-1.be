@@ -28,6 +28,17 @@ function isUnavailableSummary(summary: unknown): boolean {
   return !value || value === 'Résumé non disponible';
 }
 
+function normalizeBbisMistralSttModel(model: string): string {
+  const normalized = model.trim();
+  if (!normalized) {
+    return normalized;
+  }
+  if (normalized.toLowerCase().includes('realtime')) {
+    return 'voxtral-mini-2602';
+  }
+  return normalized;
+}
+
 interface StreamSessionState {
   baseUrl: string;
   assistantPlaybackUntil: number;
@@ -676,7 +687,9 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
   state.bbisMaxCompletionTokens = bbisAgentSettings.maxCompletionTokens;
   state.bbisMinSpeechMs = bbisAgentSettings.minSpeechMs;
   state.bbisSilenceThresholdMs = bbisAgentSettings.silenceThresholdMs;
-  state.bbisSttModel = bbisAgentSettings.sttModel.trim();
+  state.bbisSttModel = bbisAgentSettings.sttProvider === 'mistral'
+    ? normalizeBbisMistralSttModel(bbisAgentSettings.sttModel)
+    : bbisAgentSettings.sttModel.trim();
   state.bbisSttProvider = bbisAgentSettings.sttProvider;
   state.bbisSystemPrompt = bbisAgentSettings.systemPrompt.trim();
   state.bbisTemperature = bbisAgentSettings.temperature;

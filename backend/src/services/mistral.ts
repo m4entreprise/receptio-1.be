@@ -322,38 +322,63 @@ export async function transcribeAudioBuffer(
 }> {
   try {
     ensureMistralConfigured();
-
-    const formData = new FormData();
     const language = options.language || 'fr';
     const mimeType = options.mimeType || 'audio/wav';
     const fileName = options.fileName || 'audio.wav';
+    const transcribeWithModel = async (modelName: string) => {
+      const formData = new FormData();
+      formData.append('file', new Blob([audioBuffer], { type: mimeType }), fileName);
+      formData.append('model', modelName);
+      formData.append('language', language);
+      formData.append('diarize', 'false');
 
-    formData.append('file', new Blob([audioBuffer], { type: mimeType }), fileName);
-    formData.append('model', options.model || DEFAULT_MISTRAL_STT_MODEL);
-    formData.append('language', language);
-    formData.append('diarize', 'false');
+      const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${MISTRAL_API_KEY}`,
+        },
+        body: formData,
+      });
 
-    const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${MISTRAL_API_KEY}`,
-      },
-      body: formData,
-    });
+      const data = await response.json() as {
+        text?: string;
+        language?: string;
+        segments?: Array<{ avg_logprob?: number }>;
+        error?: { message?: string };
+      };
 
-    const data = await response.json() as {
+      if (!response.ok) {
+        throw new Error(data.error?.message || 'Mistral transcription failed');
+      }
+
+      return data;
+    };
+
+    const requestedModel = options.model || DEFAULT_MISTRAL_STT_MODEL;
+    let data: {
       text?: string;
       language?: string;
       segments?: Array<{ avg_logprob?: number }>;
       error?: { message?: string };
     };
 
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Mistral transcription failed');
+    try {
+      data = await transcribeWithModel(requestedModel);
+    } catch (error: any) {
+      if (requestedModel !== DEFAULT_MISTRAL_STT_MODEL) {
+        logger.warn('Configured STT model failed, retrying with fallback model', {
+          requestedModel,
+          fallbackModel: DEFAULT_MISTRAL_STT_MODEL,
+          error: error.message,
+        });
+        data = await transcribeWithModel(DEFAULT_MISTRAL_STT_MODEL);
+      } else {
+        throw error;
+      }
     }
 
     logger.info('Audio buffer transcribed with Mistral', {
-      model: options.model || DEFAULT_MISTRAL_STT_MODEL,
+      model: requestedModel,
       mimeType,
       textLength: data.text?.length || 0,
     });

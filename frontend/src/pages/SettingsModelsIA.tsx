@@ -12,6 +12,16 @@ const STT_MODELS_MISTRAL = [
   { value: 'voxtral-mini-transcribe-realtime-2602', label: 'Voxtral Mini Realtime 2602', tier: 'realtime' as const },
 ];
 
+const STT_MODELS_MISTRAL_BBIS = STT_MODELS_MISTRAL.filter((model) => !model.value.includes('realtime'));
+
+function normalizeBbisAgentSttModel(model: string): string {
+  const normalized = model.trim();
+  if (!normalized || normalized.includes('realtime')) {
+    return DEFAULT_FORM.agentSttModel;
+  }
+  return normalized;
+}
+
 const TTS_MODELS = [
   { value: 'voxtral-mini-tts-2603', label: 'Voxtral Mini TTS 2603', tier: 'balanced' as const },
 ];
@@ -230,7 +240,7 @@ export default function SettingsModelsIA() {
 
         setForm({
           agentSttProvider: agent.sttProvider || DEFAULT_FORM.agentSttProvider,
-          agentSttModel:    agent.sttModel    || DEFAULT_FORM.agentSttModel,
+          agentSttModel:    normalizeBbisAgentSttModel(agent.sttModel || DEFAULT_FORM.agentSttModel),
           agentLlmModel:    agent.llmModel    || DEFAULT_FORM.agentLlmModel,
           agentTtsModel:    agent.ttsModel    || DEFAULT_FORM.agentTtsModel,
           agentTtsVoice:    agent.ttsVoice    || DEFAULT_FORM.agentTtsVoice,
@@ -259,7 +269,7 @@ export default function SettingsModelsIA() {
         settings: {
           bbisAgent: {
             sttProvider: form.agentSttProvider,
-            sttModel:    form.agentSttModel,
+            sttModel:    form.agentSttProvider === 'mistral' ? normalizeBbisAgentSttModel(form.agentSttModel) : form.agentSttModel,
             llmModel:    form.agentLlmModel,
             ttsModel:    form.agentTtsModel,
             ttsVoice:    form.agentTtsVoice,
@@ -398,7 +408,7 @@ export default function SettingsModelsIA() {
                 </div>
                 {form.agentSttProvider === 'mistral' && (
                   <ModelSelect
-                    models={STT_MODELS_MISTRAL}
+                    models={STT_MODELS_MISTRAL_BBIS}
                     value={form.agentSttModel}
                     onChange={(v) => set('agentSttModel', v)}
                     label="Modèle STT"
