@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
-import { detectIntent, generateResponse, summarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioUrlWithDiarization } from '../services/mistral';
+import { detectIntent, generateResponse, summarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioUrl, transcribeAudioUrlWithDiarization } from '../services/mistral';
 import { buildKnowledgeBaseContext, defaultEscalationPolicy, getAiModelsSettings, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
 import { resolveDispatchTarget } from '../services/dispatchService';
 import { shouldUseOfferBStreamingPipeline } from '../services/twilioMediaStreams';
@@ -594,15 +594,17 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
         // 3. Diarisation de l'enregistrement audio (fallback)
         if (!segments) {
-          logger.info('recording-complete: running diarized transcription', { callId: call.id });
-          const diarized = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent', aiModelsRec.transcriptionSttModel || undefined);
-          segments = diarized.segments ?? null;
-          lang = diarized.language;
-          confidence = diarized.confidence;
-          const convText = segments
-            ? segments.map(s => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
-            : diarized.text;
-          fullText = motifInitial ? `[Motif initial] ${motifInitial}\n\n[Conversation avec l'agent]\n${convText}` : convText;
+          logger.info('recording-complete: running voicemail transcription without diarization', { callId: call.id });
+          const transcription = await transcribeAudioUrl(recordingUrl, {
+            language: 'fr',
+            model: aiModelsRec.transcriptionSttModel || undefined,
+          });
+          segments = null;
+          lang = transcription.language;
+          confidence = transcription.confidence;
+          fullText = motifInitial
+            ? `[Motif initial] ${motifInitial}\n\n[Message vocal]\n${transcription.text}`
+            : transcription.text;
         }
 
         if (!hasExistingSegments) {
@@ -799,22 +801,23 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
               const call = callDetailsRow.rows[0];
               const aiModels = getAiModelsSettings(call.company_settings || {});
 
-              const diarized = await transcribeAudioUrlWithDiarization(recordingUrl!, 'fr', 'agent', aiModels.transcriptionSttModel || undefined);
-              const segments = diarized.segments ?? null;
-              const fullText = segments
-                ? segments.map((s: any) => `${s.role === 'agent' ? 'Agent' : 'Client'}: ${s.text}`).join('\n\n')
-                : diarized.text;
+              const transcription = await transcribeAudioUrl(recordingUrl!, {
+                language: 'fr',
+                model: aiModels.transcriptionSttModel || undefined,
+              });
+              const segments = null;
+              const fullText = transcription.text;
 
               if (needsTranscription) {
                 if (isFallbackTranscription) {
                   await query(
                     `UPDATE transcriptions SET text = $1, language = $2, confidence = $3, segments = $4 WHERE call_id = $5`,
-                    [fullText, diarized.language, diarized.confidence, segments ? JSON.stringify(segments) : null, callId]
+                    [fullText, transcription.language, transcription.confidence, segments ? JSON.stringify(segments) : null, callId]
                   );
                 } else {
                   await query(
                     `INSERT INTO transcriptions (call_id, text, language, confidence, segments) VALUES ($1, $2, $3, $4, $5)`,
-                    [callId, fullText, diarized.language, diarized.confidence, segments ? JSON.stringify(segments) : null]
+                    [callId, fullText, transcription.language, transcription.confidence, segments ? JSON.stringify(segments) : null]
                   );
                 }
               }

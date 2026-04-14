@@ -183,6 +183,26 @@ async function downloadAudioForMistral(audioUrl: string): Promise<{ buffer: Buff
   };
 }
 
+export async function transcribeAudioUrl(
+  audioUrl: string,
+  options: {
+    language?: string;
+    model?: string;
+  } = {}
+): Promise<{
+  text: string;
+  confidence: number;
+  language: string;
+}> {
+  const audio = await downloadAudioForMistral(audioUrl);
+  return transcribeAudioBuffer(audio.buffer, {
+    fileName: audio.fileName,
+    language: options.language,
+    mimeType: audio.mimeType,
+    model: options.model,
+  });
+}
+
 export async function transcribeAudioUrlWithDiarization(audioUrl: string, language: string = 'fr', firstSpeakerRole: 'agent' | 'client' = 'agent', model?: string): Promise<{
   text: string;
   confidence: number;
