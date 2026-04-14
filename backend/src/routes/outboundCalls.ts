@@ -76,14 +76,29 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/outbound-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`;
 
     const client = twilio(accountSid, authToken);
-    const twilioCall = await client.calls.create({
-      to: staff.phone_number,       // Call the agent first
-      from: company.phone_number,
-      url: answerUrl,
-      statusCallback: statusCallbackUrl,
-      statusCallbackMethod: 'POST',
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed', 'no-answer', 'busy', 'failed'],
-    });
+    let twilioCall;
+    try {
+      twilioCall = await client.calls.create({
+        to: staff.phone_number,       // Call the agent first
+        from: company.phone_number,
+        url: answerUrl,
+        statusCallback: statusCallbackUrl,
+        statusCallbackMethod: 'POST',
+        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed', 'no-answer', 'busy', 'failed'],
+      });
+    } catch (twilioErr: any) {
+      const code = twilioErr.code ?? twilioErr.status;
+      if (code === 20003 || twilioErr.message === 'Authenticate') {
+        throw new AppError('Identifiants Twilio invalides ou expirés — vérifiez TWILIO_ACCOUNT_SID et TWILIO_AUTH_TOKEN', 500);
+      }
+      if (code === 21211 || code === 21214) {
+        throw new AppError(`Numéro de destination invalide : ${destinationNumber}`, 400);
+      }
+      if (code === 21606) {
+        throw new AppError(`Le numéro émetteur ${company.phone_number} n'est pas autorisé pour les appels sortants`, 400);
+      }
+      throw new AppError(twilioErr.message || 'Erreur Twilio lors de l\'initiation de l\'appel', 500);
+    }
 
     await query(
       `UPDATE calls SET call_sid = $1, outbound_call_sid = $1 WHERE id = $2`,
