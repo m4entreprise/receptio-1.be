@@ -868,8 +868,9 @@ function buildOfferBStreamingTwiml(streamUrl: string, callId: string, companyId:
 
 function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string, _statusCallbackUrl?: string): string {
   // Note: <Play> does NOT support statusCallback - only <Dial> does
+  // Note: NO <Hangup> after <Record> - Record is non-blocking and Hangup would terminate the call immediately
   return buildTwiml(
-    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" />`
   );
 }
 
