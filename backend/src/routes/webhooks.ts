@@ -866,17 +866,17 @@ function buildOfferBStreamingTwiml(streamUrl: string, callId: string, companyId:
   );
 }
 
-function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string, statusCallbackUrl?: string): string {
-  const statusAttr = statusCallbackUrl ? ` statusCallback="${escapeXml(statusCallbackUrl)}" statusCallbackMethod="POST"` : '';
+function buildOfferAVoicemailTwiml(greetingUrl: string, recordingCompleteUrl: string, _statusCallbackUrl?: string): string {
+  // Note: <Play> does NOT support statusCallback - only <Dial> does
   return buildTwiml(
-    `<Play${statusAttr}>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
+    `<Play>${escapeXml(greetingUrl)}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${escapeXml(recordingCompleteUrl)}" recordingStatusCallbackMethod="POST" /><Hangup />`
   );
 }
 
-function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string, statusCallbackUrl?: string): string {
-  const statusAttr = statusCallbackUrl ? ` statusCallback="${escapeXml(statusCallbackUrl)}" statusCallbackMethod="POST"` : '';
+function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string, _statusCallbackUrl?: string): string {
+  // Note: <Gather> does NOT support statusCallback - only <Dial> and <Conference> do
   return buildTwiml(
-    `<Gather input="speech" language="fr-FR" speechTimeout="auto" action="${escapeXml(gatherUrl)}" method="POST"${statusAttr}><Play>${escapeXml(greetingUrl)}</Play></Gather><Redirect>${escapeXml(gatherUrl)}</Redirect>`
+    `<Gather input="speech" language="fr-FR" speechTimeout="auto" action="${escapeXml(gatherUrl)}" method="POST"><Play>${escapeXml(greetingUrl)}</Play></Gather><Redirect>${escapeXml(gatherUrl)}</Redirect>`
   );
 }
 
