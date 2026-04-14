@@ -196,6 +196,8 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       error: error.message,
       status: error.response?.status,
     });
+    // Force log to stdout for PM2 visibility
+    console.error('[RECORDING PROXY ERROR]', error.message, error.stack);
     next(error);
   }
 });
