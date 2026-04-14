@@ -1,5 +1,6 @@
 import axios from 'axios';
 import logger from '../utils/logger';
+import { query } from '../config/database';
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1';
@@ -182,7 +183,7 @@ async function downloadAudioForMistral(audioUrl: string): Promise<{ buffer: Buff
   };
 }
 
-export async function transcribeAudioUrlWithDiarization(audioUrl: string, language: string = 'fr', firstSpeakerRole: 'agent' | 'client' = 'agent'): Promise<{
+export async function transcribeAudioUrlWithDiarization(audioUrl: string, language: string = 'fr', firstSpeakerRole: 'agent' | 'client' = 'agent', model?: string): Promise<{
   text: string;
   confidence: number;
   language: string;
@@ -194,7 +195,7 @@ export async function transcribeAudioUrlWithDiarization(audioUrl: string, langua
     const audio = await downloadAudioForMistral(audioUrl);
     const formData = new FormData();
     formData.append('file', new Blob([audio.buffer], { type: audio.mimeType }), audio.fileName);
-    formData.append('model', MISTRAL_DIARIZATION_MODEL);
+    formData.append('model', model || MISTRAL_DIARIZATION_MODEL);
     formData.append('language', language);
     formData.append('diarize', 'true');
     formData.append('timestamp_granularities', 'segment');
@@ -407,18 +408,60 @@ export async function textToSpeech(
   }
 }
 
-export async function detectIntent(transcription: string): Promise<{
+export async function detectIntent(
+  transcription: string,
+  companyId?: string,
+  model?: string
+): Promise<{
   intent: string;
   confidence: number;
-  entities: Record<string, any>;
+  entities: Record<string, unknown>;
 }> {
   try {
-    const systemPrompt = `Tu es un assistant qui analyse les intentions des appelants.
-Retourne un JSON avec: intent (rdv|info|urgence|reclamation|autre), confidence (0-1), entities (données extraites).`;
+    if (!hasMeaningfulTranscription(transcription)) {
+      return { intent: 'autre', confidence: 0, entities: {} };
+    }
+
+    let intentList: string;
+    if (companyId) {
+      try {
+        const result = await query(
+          `SELECT label, description, keywords
+           FROM call_intents
+           WHERE company_id = $1 AND is_active = true
+           ORDER BY position ASC, created_at ASC`,
+          [companyId]
+        );
+  
+        if (result.rows.length > 0) {
+          const lines = result.rows.map((r: Record<string, unknown>) => {
+            let line = String(r.label);
+            if (r.description) line += ` (${String(r.description)})`;
+            if (r.keywords) line += ` — mots-clés : ${String(r.keywords)}`;
+            return line;
+          });
+          intentList = lines.join(', ') + ', autre';
+        } else {
+          intentList = 'rdv, info, urgence, reclamation, autre';
+        }
+      } catch (dbError: any) {
+        if ((dbError as any)?.code === '42P01') {
+          logger.warn('call_intents table missing, using default intents', { companyId });
+        } else {
+          logger.error('Failed to load custom intents', { companyId, error: (dbError as any)?.message });
+        }
+        intentList = 'rdv, info, urgence, reclamation, autre';
+      }
+    } else {
+      intentList = 'rdv, info, urgence, reclamation, autre';
+    }
+
+    const systemPrompt = `Tu analyses des appels entrants pour une PME. Retourne uniquement un JSON valide avec les clés intent, confidence et entities. intent doit être EXACTEMENT l'un de ces labels (sans modification) : ${intentList}.`;
 
     const response = await generateResponse(
-      [{ role: 'user', content: `Analyse cette transcription: "${transcription}"` }],
-      systemPrompt
+      [{ role: 'user', content: `Analyse cette transcription : ${transcription}` }],
+      systemPrompt,
+      { model: model || undefined }
     );
 
     const parsed = JSON.parse(response);
@@ -429,16 +472,12 @@ Retourne un JSON avec: intent (rdv|info|urgence|reclamation|autre), confidence (
       entities: parsed.entities || {},
     };
   } catch (error: any) {
-    logger.error('Intent detection error', { error: error.message });
-    return {
-      intent: 'autre',
-      confidence: 0,
-      entities: {},
-    };
+    logger.error('Mistral intent detection error', { error: error.message });
+    return { intent: 'autre', confidence: 0, entities: {} };
   }
 }
 
-export async function summarizeCall(transcription: string): Promise<string> {
+export async function summarizeCall(transcription: string, model?: string): Promise<string> {
   try {
     const normalizedTranscription = normalizeSummaryTranscript(transcription);
 
@@ -450,7 +489,8 @@ export async function summarizeCall(transcription: string): Promise<string> {
 
     const response = await generateResponse(
       [{ role: 'user', content: buildSummaryPrompt(normalizedTranscription) }],
-      systemPrompt
+      systemPrompt,
+      { model: model || undefined }
     );
 
     return response;

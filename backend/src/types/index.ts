@@ -22,17 +22,26 @@ export interface Company {
 export interface BbisAgentSettings {
   systemPrompt?: string;
   temperature?: number;
-  llmProvider?: 'openai' | 'mistral';
+  llmProvider?: 'mistral';
   llmModel?: string;
   maxCompletionTokens?: number;
   silenceThresholdMs?: number;
   minSpeechMs?: number;
   bargeInMinSpeechMs?: number;
-  sttProvider?: 'deepgram' | 'mistral';
+  sttProvider?: 'mistral' | 'gladia';
   sttModel?: string;
-  ttsProvider?: 'deepgram' | 'mistral';
+  ttsProvider?: 'mistral';
   ttsModel?: string;
   ttsVoice?: string;
+}
+
+export interface AiModelsSettings {
+  offerBLlmModel?: string;
+  transcriptionSttModel?: string;
+  summaryLlmModel?: string;
+  intentLlmModel?: string;
+  greetingTtsModel?: string;
+  greetingTtsVoice?: string;
 }
 
 export interface OfferBSettings {
@@ -48,6 +57,7 @@ export interface OfferBSettings {
   routingQuestion?: string;
   transferMessage?: string;
   bbisAgent?: BbisAgentSettings;
+  aiModels?: AiModelsSettings;
 }
 
 export interface User {

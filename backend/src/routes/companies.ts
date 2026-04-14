@@ -10,17 +10,26 @@ const router = Router();
 const bbisAgentSettingsSchema = z.object({
   systemPrompt: z.string().max(10000).optional(),
   temperature: z.number().min(0).max(2).optional(),
-  llmProvider: z.enum(['openai', 'mistral']).optional(),
+  llmProvider: z.enum(['mistral']).optional(),
   llmModel: z.string().max(200).optional(),
   maxCompletionTokens: z.number().int().min(20).max(500).optional(),
   silenceThresholdMs: z.number().int().min(60).max(1500).optional(),
   minSpeechMs: z.number().int().min(40).max(1500).optional(),
   bargeInMinSpeechMs: z.number().int().min(40).max(1000).optional(),
-  sttProvider: z.enum(['deepgram', 'mistral']).optional(),
+  sttProvider: z.enum(['mistral', 'gladia']).optional(),
   sttModel: z.string().max(200).optional(),
-  ttsProvider: z.enum(['deepgram', 'mistral']).optional(),
+  ttsProvider: z.enum(['mistral']).optional(),
   ttsModel: z.string().max(200).optional(),
   ttsVoice: z.string().max(200).optional(),
+});
+
+const aiModelsSettingsSchema = z.object({
+  offerBLlmModel: z.string().max(200).optional(),
+  transcriptionSttModel: z.string().max(200).optional(),
+  summaryLlmModel: z.string().max(200).optional(),
+  intentLlmModel: z.string().max(200).optional(),
+  greetingTtsModel: z.string().max(200).optional(),
+  greetingTtsVoice: z.string().max(200).optional(),
 });
 
 const offerBSettingsSchema = z.object({
@@ -34,6 +43,7 @@ const offerBSettingsSchema = z.object({
   appointmentIntegrationEnabled: z.boolean().optional(),
   transferMessage: z.string().max(500).optional(),
   bbisAgent: bbisAgentSettingsSchema.optional(),
+  aiModels: aiModelsSettingsSchema.optional(),
 });
 
 const updateCompanySchema = z.object({
@@ -99,6 +109,12 @@ router.patch('/me', authenticateToken, async (req: AuthRequest, res: Response, n
             ...data.settings.bbisAgent,
           }
           : currentSettings.bbisAgent,
+        aiModels: data.settings.aiModels
+          ? {
+            ...(currentSettings.aiModels || {}),
+            ...data.settings.aiModels,
+          }
+          : currentSettings.aiModels,
       };
       updates.push(`settings = $${paramCount++}`);
       values.push(mergedSettings);

@@ -4,14 +4,11 @@ import { RawData, WebSocket, WebSocketServer } from 'ws';
 import { query } from '../config/database';
 import { OfferBSettings } from '../types';
 import { buildKnowledgeBaseContext, getBbisAgentSettings, getCompanyOfferBSettings } from './offerB';
-import { textToSpeech as deepgramTextToSpeech, transcribeAudioBuffer as deepgramTranscribeAudioBuffer } from './deepgram';
 import { generateResponse as mistralGenerateResponse, summarizeCall as mistralSummarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
-import { generateResponse, summarizeCall, transcribeAudioBuffer } from './openai';
+import { transcribeAudioBuffer as gladiaTranscribeAudioBuffer } from './gladia';
 import logger from '../utils/logger';
 import Twilio from 'twilio';
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -36,16 +33,16 @@ interface StreamSessionState {
   assistantPlaybackUntil: number;
   bbisBargeInMinSpeechMs: number;
   bbisLlmModel: string;
-  bbisLlmProvider: 'openai' | 'mistral';
+  bbisLlmProvider: 'mistral';
   bbisMaxCompletionTokens: number;
   bbisMinSpeechMs: number;
   bbisSilenceThresholdMs: number;
   bbisSttModel: string;
-  bbisSttProvider: 'deepgram' | 'mistral';
+  bbisSttProvider: 'mistral' | 'gladia';
   bbisSystemPrompt: string;
   bbisTemperature: number;
   bbisTtsModel: string;
-  bbisTtsProvider: 'deepgram' | 'mistral';
+  bbisTtsProvider: 'mistral';
   bbisTtsVoice: string;
   callId: string;
   callSid: string;
@@ -103,7 +100,7 @@ interface TwilioStreamStopEvent {
 interface AssistantPlaybackMetrics {
   audioDurationMs: number;
   playbackStartedAt: number;
-  ttsProvider: 'deepgram' | 'mistral' | 'openai';
+  ttsProvider: 'mistral';
   ttsDurationMs: number;
 }
 
@@ -326,11 +323,7 @@ async function processOutboundTrackUtterance(state: OutboundStreamState, track: 
     const pcmBuffer = decodeULawToPcm16(utteranceBuffer);
     const wavBuffer = wrapPcm16AsWav(pcmBuffer, ULaw_SAMPLE_RATE, 1);
 
-    const transcription = DEEPGRAM_API_KEY
-      ? await deepgramTranscribeAudioBuffer(wavBuffer, { language: 'fr', mimeType: 'audio/wav' })
-      : OPENAI_API_KEY
-        ? await transcribeAudioBuffer(wavBuffer, { fileName: 'outbound.wav', language: 'fr', mimeType: 'audio/wav' })
-        : null;
+    const transcription = await mistralTranscribeAudioBuffer(wavBuffer, { fileName: 'outbound.wav', language: 'fr', mimeType: 'audio/wav' });
 
     if (transcription && transcription.text.trim()) {
       const text = transcription.text.trim();
@@ -383,10 +376,7 @@ export function shouldUseOfferBStreamingPipeline(settings: OfferBSettings): bool
   }
 
   const bbisAgentSettings = getBbisAgentSettings(settings);
-  const hasSttProvider = bbisAgentSettings.sttProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
-  const hasTtsProvider = bbisAgentSettings.ttsProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(DEEPGRAM_API_KEY);
-  const hasLlmProvider = bbisAgentSettings.llmProvider === 'mistral' ? Boolean(MISTRAL_API_KEY) : Boolean(OPENAI_API_KEY);
-  return hasSttProvider && hasTtsProvider && hasLlmProvider;
+  return Boolean(MISTRAL_API_KEY);
 }
 
 async function handleTwilioConnection(twilioSocket: WebSocket, request: IncomingMessage) {
@@ -401,16 +391,16 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     assistantPlaybackUntil: 0,
     bbisBargeInMinSpeechMs: BBIS_BARGE_IN_MIN_SPEECH_MS,
     bbisLlmModel: '',
-    bbisLlmProvider: 'openai',
+    bbisLlmProvider: 'mistral',
     bbisMaxCompletionTokens: STREAMING_RESPONSE_MAX_TOKENS,
     bbisMinSpeechMs: BBIS_MIN_SPEECH_MS,
     bbisSilenceThresholdMs: BBIS_SILENCE_THRESHOLD_MS,
     bbisSttModel: '',
-    bbisSttProvider: 'deepgram',
+    bbisSttProvider: 'mistral',
     bbisSystemPrompt: '',
     bbisTemperature: 0.4,
     bbisTtsModel: '',
-    bbisTtsProvider: 'deepgram',
+    bbisTtsProvider: 'mistral',
     bbisTtsVoice: '',
     callId,
     callSid: '',
@@ -503,8 +493,7 @@ async function handleTwilioMessage(
           logger.warn('Twilio media stream rejected', {
             callId: resolvedCallId,
             companyId: resolvedCompanyId,
-            hasOpenAiKey: Boolean(OPENAI_API_KEY),
-            hasDeepgramKey: Boolean(DEEPGRAM_API_KEY),
+            hasMistralKey: Boolean(MISTRAL_API_KEY),
           });
           twilioSocket.close();
           return;
@@ -663,28 +652,12 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
     throw new Error('Streaming session requested for non-agent mode');
   }
 
-  if (bbisAgentSettings.llmProvider === 'mistral' && !MISTRAL_API_KEY) {
-    throw new Error('MISTRAL_API_KEY not configured for LLM');
+  if (!MISTRAL_API_KEY) {
+    throw new Error('MISTRAL_API_KEY not configured');
   }
 
-  if (bbisAgentSettings.llmProvider === 'openai' && !OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY not configured for LLM');
-  }
-
-  if (bbisAgentSettings.sttProvider === 'mistral' && !MISTRAL_API_KEY) {
-    throw new Error('MISTRAL_API_KEY not configured for STT');
-  }
-
-  if (bbisAgentSettings.sttProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
-    throw new Error('DEEPGRAM_API_KEY not configured for STT');
-  }
-
-  if (bbisAgentSettings.ttsProvider === 'mistral' && !MISTRAL_API_KEY) {
-    throw new Error('MISTRAL_API_KEY not configured for TTS');
-  }
-
-  if (bbisAgentSettings.ttsProvider === 'deepgram' && !DEEPGRAM_API_KEY) {
-    throw new Error('DEEPGRAM_API_KEY not configured for TTS');
+  if (bbisAgentSettings.sttProvider === 'gladia' && !process.env.GLADIA_API_KEY) {
+    throw new Error('GLADIA_API_KEY not configured for STT');
   }
 
   const knowledgeContext = offerBSettings.knowledgeBaseEnabled
@@ -760,14 +733,14 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
     const pcmBuffer = decodeULawToPcm16(utteranceBuffer);
     const wavBuffer = wrapPcm16AsWav(pcmBuffer, ULaw_SAMPLE_RATE, 1);
     const sttStartedAt = Date.now();
-    const transcription = state.bbisSttProvider === 'mistral'
-      ? await mistralTranscribeAudioBuffer(wavBuffer, {
-        fileName: 'twilio-stream.wav',
+    const transcription = state.bbisSttProvider === 'gladia'
+      ? await gladiaTranscribeAudioBuffer(wavBuffer, {
         language: 'fr',
         mimeType: 'audio/wav',
         model: state.bbisSttModel || undefined,
       })
-      : await deepgramTranscribeAudioBuffer(wavBuffer, {
+      : await mistralTranscribeAudioBuffer(wavBuffer, {
+        fileName: 'twilio-stream.wav',
         language: 'fr',
         mimeType: 'audio/wav',
         model: state.bbisSttModel || undefined,
@@ -1000,7 +973,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
       bargeInTriggered,
       inputAudioMs,
       llmDurationMs,
-      llmModel: state.bbisLlmModel || process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano',
+      llmModel: state.bbisLlmModel || process.env.MISTRAL_LLM_MODEL || 'mistral-small-latest',
       replyLength: responseText.length,
       replyText: responseText,
       silenceDurationMs: capturedSilenceDurationMs,
@@ -1107,17 +1080,11 @@ async function generateStreamingReply(state: StreamSessionState, callerText: str
     { role: 'user', content: callerText },
   ].map((message) => ({ role: message.role, content: message.content }));
 
-  const response = state.bbisLlmProvider === 'mistral'
-    ? await mistralGenerateResponse(messages, systemPrompt, {
-      model: state.bbisLlmModel || undefined,
-      maxCompletionTokens: state.bbisMaxCompletionTokens,
-      temperature: state.bbisTemperature,
-    })
-    : await generateResponse(messages, systemPrompt, {
-      model: state.bbisLlmModel || undefined,
-      maxCompletionTokens: state.bbisMaxCompletionTokens,
-      temperature: state.bbisTemperature,
-    });
+  const response = await mistralGenerateResponse(messages, systemPrompt, {
+    model: state.bbisLlmModel || undefined,
+    maxCompletionTokens: state.bbisMaxCompletionTokens,
+    temperature: state.bbisTemperature,
+  });
   return response.trim();
 }
 
@@ -1133,7 +1100,7 @@ async function speakAssistantText(
   }
 ): Promise<AssistantPlaybackMetrics | null> {
   const cleanText = text.trim();
-  let effectiveTtsProvider: 'deepgram' | 'mistral' | 'openai' = state.bbisTtsProvider;
+  const effectiveTtsProvider: 'mistral' = 'mistral';
 
   if (!cleanText || !state.streamSid || twilioSocket.readyState !== WebSocket.OPEN) {
     return null;
@@ -1163,32 +1130,10 @@ async function speakAssistantText(
     const ttsStartedAt = Date.now();
     let wavAudio: Buffer;
 
-    if (state.bbisTtsProvider === 'mistral') {
-      try {
-        wavAudio = await mistralTextToSpeech(cleanText, 'wav', 'fr', {
-          model: state.bbisTtsModel || undefined,
-          voice: state.bbisTtsVoice || undefined,
-        });
-      } catch (error: any) {
-        if (!DEEPGRAM_API_KEY) {
-          throw error;
-        }
-
-        logger.warn('Mistral TTS failed, falling back to Deepgram TTS', {
-          callId: state.callId,
-          error: error.message,
-          source: options.source,
-        });
-
-        effectiveTtsProvider = 'deepgram';
-        wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr');
-      }
-    } else {
-      wavAudio = await deepgramTextToSpeech(cleanText, 'wav', 'fr', {
-        model: state.bbisTtsModel || undefined,
-        voice: state.bbisTtsVoice || undefined,
-      });
-    }
+    wavAudio = await mistralTextToSpeech(cleanText, 'wav', 'fr', {
+      model: state.bbisTtsModel || undefined,
+      voice: state.bbisTtsVoice || undefined,
+    });
 
     const ttsDurationMs = Date.now() - ttsStartedAt;
     const ulawAudio = convertWavToULaw(wavAudio);
@@ -1394,7 +1339,7 @@ async function appendBbisTurnEvent(
   }
 
   await appendCallEvent(state.callId, eventType, {
-    llmModel: state.bbisLlmModel || (state.bbisLlmProvider === 'mistral' ? 'mistral-small-latest' : process.env.OPENAI_LLM_MODEL || 'gpt-5.4-nano'),
+    llmModel: state.bbisLlmModel || process.env.MISTRAL_LLM_MODEL || 'mistral-small-latest',
     providerLlm: state.bbisLlmProvider,
     providerStt: state.bbisSttProvider,
     providerTts: state.bbisTtsProvider,
@@ -1435,23 +1380,21 @@ async function finalizeStreamingCall(state: StreamSessionState, reason: string) 
     ['completed', durationSeconds, state.callId]
   );
 
-  await persistFinalSummary(state.callId, state.lastIntent, state.bbisLlmProvider);
+  await persistFinalSummary(state.callId, state.lastIntent);
   await appendCallEvent(state.callId, 'twilio.media_stream.finalized', {
     durationSeconds,
     reason,
   });
 }
 
-async function persistFinalSummary(callId: string, intent: string, llmProvider: 'openai' | 'mistral') {
+async function persistFinalSummary(callId: string, intent: string) {
   const [summaryResult, transcriptionResult] = await Promise.all([
     query('SELECT id, summary, actions FROM call_summaries WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1', [callId]),
     query('SELECT text FROM transcriptions WHERE call_id = $1 ORDER BY created_at ASC LIMIT 1', [callId]),
   ]);
 
   const transcriptionText = String(transcriptionResult.rows[0]?.text || '').trim();
-  const summary = llmProvider === 'mistral'
-    ? await mistralSummarizeCall(transcriptionText)
-    : await summarizeCall(transcriptionText);
+  const summary = await mistralSummarizeCall(transcriptionText);
 
   if (summaryResult.rows.length === 0) {
     await query(

@@ -1,5 +1,5 @@
 import { query } from '../config/database';
-import { BbisAgentSettings, KnowledgeBaseEntry, OfferBSettings } from '../types';
+import { AiModelsSettings, BbisAgentSettings, KnowledgeBaseEntry, OfferBSettings } from '../types';
 import logger from '../utils/logger';
 
 export interface TelephonyProvider {
@@ -29,6 +29,15 @@ export interface EscalationPolicy {
   }): EscalationDecision;
 }
 
+const defaultAiModelsSettings: Required<AiModelsSettings> = {
+  offerBLlmModel: '',
+  transcriptionSttModel: '',
+  summaryLlmModel: '',
+  intentLlmModel: '',
+  greetingTtsModel: '',
+  greetingTtsVoice: '',
+};
+
 const defaultOfferBSettings: Required<OfferBSettings> = {
   voicePipelineEnabled: false,
   agentEnabled: false,
@@ -44,32 +53,33 @@ const defaultOfferBSettings: Required<OfferBSettings> = {
   bbisAgent: {
     systemPrompt: '',
     temperature: 0.4,
-    llmProvider: 'openai',
+    llmProvider: 'mistral',
     llmModel: '',
     maxCompletionTokens: 120,
     silenceThresholdMs: 260,
     minSpeechMs: 120,
     bargeInMinSpeechMs: 80,
-    sttProvider: 'deepgram',
+    sttProvider: 'mistral',
     sttModel: '',
-    ttsProvider: 'deepgram',
+    ttsProvider: 'mistral',
     ttsModel: '',
     ttsVoice: '',
   },
+  aiModels: defaultAiModelsSettings,
 };
 
 const defaultBbisAgentSettings: Required<BbisAgentSettings> = {
   systemPrompt: '',
   temperature: 0.4,
-  llmProvider: 'openai',
+  llmProvider: 'mistral',
   llmModel: '',
   maxCompletionTokens: 120,
   silenceThresholdMs: 260,
   minSpeechMs: 120,
   bargeInMinSpeechMs: 80,
-  sttProvider: 'deepgram',
+  sttProvider: 'mistral',
   sttModel: '',
-  ttsProvider: 'deepgram',
+  ttsProvider: 'mistral',
   ttsModel: '',
   ttsVoice: '',
 };
@@ -93,6 +103,10 @@ export async function getCompanyOfferBSettings(companyId: string): Promise<Requi
       ...defaultBbisAgentSettings,
       ...(settings.bbisAgent || {}),
     },
+    aiModels: {
+      ...defaultAiModelsSettings,
+      ...(settings.aiModels || {}),
+    },
   };
 }
 
@@ -100,6 +114,13 @@ export function getBbisAgentSettings(settings: OfferBSettings): Required<BbisAge
   return {
     ...defaultBbisAgentSettings,
     ...(settings.bbisAgent || {}),
+  };
+}
+
+export function getAiModelsSettings(settings: OfferBSettings): Required<AiModelsSettings> {
+  return {
+    ...defaultAiModelsSettings,
+    ...(settings.aiModels || {}),
   };
 }
 

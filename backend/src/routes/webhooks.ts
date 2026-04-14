@@ -1,11 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { sendTranscriptionEmail } from '../services/email';
-import { textToSpeech as deepgramTextToSpeech } from '../services/deepgram';
-import { textToSpeech as mistralTextToSpeech } from '../services/mistral';
-import { detectIntent, generateResponse, summarizeCall, transcribeAudio } from '../services/openai';
-import { transcribeAudioUrlWithDiarization } from '../services/mistral';
-import { buildKnowledgeBaseContext, defaultEscalationPolicy, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
+import { detectIntent, generateResponse, summarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioUrlWithDiarization } from '../services/mistral';
+import { buildKnowledgeBaseContext, defaultEscalationPolicy, getAiModelsSettings, getCompanyOfferBSettings, shouldUseRealtimeOfferAgent } from '../services/offerB';
 import { resolveDispatchTarget } from '../services/dispatchService';
 import { shouldUseOfferBStreamingPipeline } from '../services/twilioMediaStreams';
 import logger from '../utils/logger';
@@ -127,11 +124,12 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
     }
 
     const company = result.rows[0];
+    const aiModels = getAiModelsSettings(company.settings || {});
     const greetingText = company.settings?.twilioGreetingText || company.settings?.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
     const fullText = isRouting ? `${greetingText} ${routingQuestion}` : greetingText;
     const audio = await mistralTextToSpeech(fullText, 'mp3', 'fr', {
-      model: 'voxtral-mini-tts-2603',
-      voice: 'c9cc6578-7734-4604-b2d3-51ce694f3afc',
+      model: aiModels.greetingTtsModel || 'voxtral-mini-tts-2603',
+      voice: aiModels.greetingTtsVoice || 'c9cc6578-7734-4604-b2d3-51ce694f3afc',
     });
 
     res.setHeader('Content-Type', 'audio/mpeg');
@@ -169,12 +167,13 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
       setImmediate(async () => {
         try {
           const callRow = await query(
-            `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email
+            `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email, co.settings AS company_settings
              FROM calls c LEFT JOIN companies co ON co.id = c.company_id WHERE c.id = $1`,
             [callId]
           );
           if (callRow.rows.length === 0) return;
           const call = callRow.rows[0];
+          const aiModelsGather = getAiModelsSettings(call.company_settings || {});
 
           const existing = await query('SELECT id FROM transcriptions WHERE call_id = $1', [callId]);
           if (existing.rows.length === 0) {
@@ -185,8 +184,8 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
           }
 
           const [summary, intentData] = await Promise.all([
-            summarizeCall(speechResult),
-            detectIntent(speechResult, companyId),
+            summarizeCall(speechResult, aiModelsGather.summaryLlmModel || undefined),
+            detectIntent(speechResult, companyId, aiModelsGather.intentLlmModel || undefined),
           ]);
 
           const existingSummary = await query('SELECT id, summary FROM call_summaries WHERE call_id = $1', [callId]);
@@ -259,7 +258,7 @@ router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
       return;
     }
 
-    const audio = await deepgramTextToSpeech(promptText.slice(0, 500), 'wav');
+    const audio = await mistralTextToSpeech(promptText.slice(0, 500), 'wav');
 
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'audio/wav');
@@ -295,6 +294,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
     };
     const baseUrl = getBaseUrl(req);
     const offerBSettings = await getCompanyOfferBSettings(company.id);
+    const aiModelsOfferB = getAiModelsSettings(offerBSettings);
 
     if (!shouldUseRealtimeOfferAgent(offerBSettings)) {
       const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
@@ -399,6 +399,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
       callerInput: speechResult,
       knowledgeContext,
       humanTransferNumber: offerBSettings.humanTransferNumber,
+      model: aiModelsOfferB.offerBLlmModel || undefined,
     });
 
     if (agentReply === '__TRANSFER__') {
@@ -512,7 +513,7 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
     const recordingUrl = String(rawRecordingUrl).endsWith('.mp3') ? String(rawRecordingUrl) : `${String(rawRecordingUrl)}.mp3`;
     const callResult = await query(
-      `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email
+      `SELECT c.id, c.caller_number, c.created_at, c.company_id, co.email AS company_email, co.settings AS company_settings
        FROM calls c
        LEFT JOIN companies co ON co.id = c.company_id
        WHERE c.call_sid = $1`,
@@ -542,6 +543,8 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
 
     // Respond immediately — transcription runs async
     res.status(200).send('ok');
+
+    const aiModelsRec = getAiModelsSettings(call.company_settings || {});
 
     setImmediate(async () => {
       try {
@@ -592,7 +595,7 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
         // 3. Diarisation de l'enregistrement audio (fallback)
         if (!segments) {
           logger.info('recording-complete: running diarized transcription', { callId: call.id });
-          const diarized = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent');
+          const diarized = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr', 'agent', aiModelsRec.transcriptionSttModel || undefined);
           segments = diarized.segments ?? null;
           lang = diarized.language;
           confidence = diarized.confidence;
@@ -624,8 +627,8 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
         }
 
         const [summary, intentData] = await Promise.all([
-          summarizeCall(fullText),
-          detectIntent(fullText, call.company_id),
+          summarizeCall(fullText, aiModelsRec.summaryLlmModel || undefined),
+          detectIntent(fullText, call.company_id, aiModelsRec.intentLlmModel || undefined),
         ]);
 
         const existingSummary = await query('SELECT id, summary FROM call_summaries WHERE call_id = $1', [call.id]);
@@ -1087,6 +1090,7 @@ async function generateOfferBReply(params: {
   callerInput: string;
   knowledgeContext: string;
   humanTransferNumber?: string;
+  model?: string;
 }) {
   const systemPrompt = [
     `Tu es le réceptionniste téléphonique de ${params.companyName}.`,
@@ -1100,7 +1104,8 @@ async function generateOfferBReply(params: {
 
   const response = await generateResponse(
     [{ role: 'user', content: params.callerInput }],
-    systemPrompt
+    systemPrompt,
+    { model: params.model || undefined }
   );
 
   return response.trim();
@@ -1243,7 +1248,7 @@ async function handleRecordingSaved(payload: any) {
 
     if (recordingUrl) {
       try {
-        const transcription = await transcribeAudio(recordingUrl, 'fr');
+        const transcription = await transcribeAudioUrlWithDiarization(recordingUrl, 'fr');
         const [summary, intentData] = await Promise.all([
           summarizeCall(transcription.text),
           detectIntent(transcription.text, call.company_id),

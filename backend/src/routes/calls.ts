@@ -4,7 +4,8 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-import { summarizeCall } from '../services/openai';
+import { summarizeCall } from '../services/mistral';
+import { getAiModelsSettings } from '../services/offerB';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -101,7 +102,9 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
     const transcriptionText = typeof callRow.transcription_text === 'string' ? callRow.transcription_text.trim() : '';
     if (isUnavailableSummary(callRow.summary) && transcriptionText) {
       try {
-        const regeneratedSummary = await summarizeCall(transcriptionText);
+        const companySettingsResult = await query('SELECT settings FROM companies WHERE id = $1', [companyId]);
+        const aiModels = getAiModelsSettings(companySettingsResult.rows[0]?.settings || {});
+        const regeneratedSummary = await summarizeCall(transcriptionText, aiModels.summaryLlmModel || undefined);
         if (!isUnavailableSummary(regeneratedSummary)) {
           await query('UPDATE call_summaries SET summary = $1 WHERE call_id = $2', [regeneratedSummary, id]);
           callRow.summary = regeneratedSummary;

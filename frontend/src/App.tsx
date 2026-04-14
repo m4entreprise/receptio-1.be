@@ -9,6 +9,7 @@ import CallDetail from './pages/CallDetail';
 import CallQAReport from './pages/CallQAReport';
 import MonitoringBbis from './pages/MonitoringBbis';
 import SettingsAgentIA from './pages/SettingsAgentIA';
+import SettingsModelsIA from './pages/SettingsModelsIA';
 import SettingsOfferB from './pages/SettingsOfferB';
 import Staff from './pages/Staff';
 import OutboundCall from './pages/OutboundCall';
@@ -38,6 +39,7 @@ function App() {
           <Route path="/staff" element={<PrivateRoute><Staff /></PrivateRoute>} />
           <Route path="/monitoring/bbis" element={<PrivateRoute><MonitoringBbis /></PrivateRoute>} />
           <Route path="/settings/agent-ia" element={<PrivateRoute><SettingsAgentIA /></PrivateRoute>} />
+          <Route path="/settings/ai-models" element={<PrivateRoute><SettingsModelsIA /></PrivateRoute>} />
           <Route path="/settings" element={<PrivateRoute><SettingsOfferB /></PrivateRoute>} />
           <Route path="/outbound" element={<PrivateRoute><OutboundCall /></PrivateRoute>} />
           <Route path="/outbound/:id" element={<PrivateRoute><OutboundCall /></PrivateRoute>} />
