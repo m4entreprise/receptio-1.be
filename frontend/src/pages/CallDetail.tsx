@@ -84,6 +84,7 @@ export default function CallDetail() {
   const [deleting, setDeleting] = useState(false);
   const [recordingBlobUrl, setRecordingBlobUrl] = useState<string | null>(null);
   const [recordingLoading, setRecordingLoading] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -189,14 +190,17 @@ export default function CallDetail() {
       setRecordingLoading(true);
 
       try {
+        setRecordingError(null);
         const response = await axios.get(`/api/calls/${id}/recording`, {
           responseType: 'blob',
         });
 
         objectUrl = URL.createObjectURL(response.data);
         setRecordingBlobUrl(objectUrl);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error fetching call recording:', error);
+        const msg = error?.response?.data?.error || error?.message || 'Erreur de chargement';
+        setRecordingError(msg);
         setRecordingBlobUrl(null);
       } finally {
         setRecordingLoading(false);
@@ -544,7 +548,9 @@ export default function CallDetail() {
                 || parseTranscriptSegments(call.live_transcript)
                 || parseTranscriptTextWithPrefixes(call.transcription_text);
               const plainText = call.transcription_text;
-              if (!segments && !plainText) return null;
+              // Show section if we have segments OR if transcription_text exists (even if empty)
+              const hasTranscription = segments || plainText !== undefined && plainText !== null;
+              if (!hasTranscription) return null;
               return (
                 <div className="rounded-[28px] border border-[#344453]/10 bg-white p-5 shadow-sm sm:p-6">
                   <h2 className="text-xl font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: "var(--font-title)" }}>Transcription</h2>
@@ -570,7 +576,11 @@ export default function CallDetail() {
                       </div>
                     ) : (
                       <div className="rounded-[24px] border border-[#344453]/8 bg-[#344453]/4 p-4 sm:p-5">
-                        <p className="whitespace-pre-wrap text-sm leading-7 text-[#344453]/65">{plainText}</p>
+                        {plainText && plainText.trim() ? (
+                          <p className="whitespace-pre-wrap text-sm leading-7 text-[#344453]/65">{plainText}</p>
+                        ) : (
+                          <p className="text-sm leading-7 text-[#344453]/45 italic">Aucune parole détectée dans l'enregistrement.</p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -585,11 +595,18 @@ export default function CallDetail() {
                   {recordingLoading && (
                     <div className="flex items-center gap-3 rounded-2xl border border-[#344453]/8 bg-white px-4 py-4 text-sm text-[#344453]/60">
                       <Loader2 className="h-4 w-4 animate-spin text-[#344453]" />
-                      Chargement de l’enregistrement...
+                      Chargement de l’enregistrement…
                     </div>
                   )}
 
-                  {!recordingLoading && recordingBlobUrl && (
+                  {!recordingLoading && recordingError && (
+                    <div className="rounded-2xl border border-[#D94052]/20 bg-[#D94052]/10 px-4 py-4 text-sm text-[#D94052]">
+                      <p className="font-medium">Erreur de chargement de l'enregistrement</p>
+                      <p className="mt-1 text-xs opacity-80">{recordingError}</p>
+                    </div>
+                  )}
+
+                  {!recordingLoading && !recordingError && recordingBlobUrl && (
                     <>
                       <audio
                         ref={audioRef}

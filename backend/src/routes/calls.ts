@@ -150,12 +150,20 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
     }
 
     const isTwilioRecording = /twilio\.com/i.test(recordingUrl);
-    const auth = isTwilioRecording && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
-      ? {
-          username: process.env.TWILIO_ACCOUNT_SID,
-          password: process.env.TWILIO_AUTH_TOKEN,
-        }
+    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+    const hasTwilioCreds = !!(twilioSid && twilioToken);
+    const auth = isTwilioRecording && hasTwilioCreds
+      ? { username: twilioSid!, password: twilioToken! }
       : undefined;
+
+    logger.info('Recording proxy request', {
+      callId: id,
+      isTwilioRecording,
+      hasTwilioCreds,
+      willAuthenticate: !!auth,
+      recordingUrl: recordingUrl.substring(0, 60) + '...',
+    });
 
     const response = await axios.get(recordingUrl, {
       responseType: 'stream',
