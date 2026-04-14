@@ -177,7 +177,9 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       callId: id,
       isTwilioRecording,
       hasTwilioCreds,
-      recordingUrl: recordingUrl.substring(0, 60) + '...',
+      sidPresent: !!twilioSid,
+      tokenPresent: !!twilioToken,
+      recordingUrl,
     });
 
     let finalUrl = recordingUrl;
@@ -191,11 +193,13 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       logger.info('Recording proxy: resolved URL', { callId: id, isSameDomain: finalUrl === recordingUrl, finalUrl: finalUrl.substring(0, 80) });
     }
 
-    // Stream the final URL — no auth if it's a CDN, auth only if still on Twilio origin
+    // Stream the fully-resolved URL.
+    // maxRedirects: 0 — the URL is already resolved; no further redirects expected.
+    // Auth only if we're still on a Twilio origin (CDN URLs must NOT get auth).
     const isFinalUrlTwilio = /twilio\.com/i.test(finalUrl);
     const response = await axios.get(finalUrl, {
       responseType: 'stream',
-      maxRedirects: 5,
+      maxRedirects: 0,
       validateStatus: (s) => s >= 200 && s < 300,
       ...(isFinalUrlTwilio && hasTwilioCreds
         ? { auth: { username: twilioSid!, password: twilioToken! } }
@@ -386,35 +390,55 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response,
 });
 
 /**
- * Follow Twilio recording redirects manually.
- * Twilio's recording URL requires Basic auth but redirects to a CDN URL that
- * must NOT receive the Authorization header (CDN rejects it with 403).
- * We follow redirects step by step: send auth only while still on twilio.com,
- * stop as soon as we hit a non-Twilio Location or a 2xx response.
+ * Resolve a Twilio recording URL to the final streamable CDN URL.
+ *
+ * Twilio's recording API requires Basic auth and may redirect (302) to a CDN.
+ * The CDN rejects Authorization headers (403). We resolve the redirect chain
+ * manually: send auth only on twilio.com hops, stop at non-Twilio locations.
+ * Use responseType:'stream' + immediate destroy to avoid downloading the body.
  */
-async function resolveTwilioRecordingUrl(url: string, sid: string, token: string, hops = 0): Promise<string> {
-  if (hops > 10) return url;
+async function resolveTwilioRecordingUrl(url: string, sid: string, token: string): Promise<string> {
+  let currentUrl = url;
 
-  const isTwilio = /twilio\.com/i.test(url);
-  const resp = await axios.get(url, {
-    maxRedirects: 0,
-    validateStatus: (s) => s < 400,
-    responseType: 'stream',
-    ...(isTwilio ? { auth: { username: sid, password: token } } : {}),
-  });
+  for (let hop = 0; hop < 10; hop++) {
+    const isTwilio = /twilio\.com/i.test(currentUrl);
+    const resp = await axios.head(currentUrl, {
+      maxRedirects: 0,
+      validateStatus: () => true,
+      ...(isTwilio ? { auth: { username: sid, password: token } } : {}),
+    });
 
-  // Consume / destroy the stream to free the socket
-  resp.data.destroy?.();
+    logger.info('resolveTwilioRecordingUrl hop', {
+      hop,
+      status: resp.status,
+      currentUrl,
+      location: resp.headers['location'] || null,
+    });
 
-  if (resp.status >= 300 && resp.status < 400) {
-    const location = resp.headers['location'] as string | undefined;
-    if (location) {
-      return resolveTwilioRecordingUrl(location, sid, token, hops + 1);
+    if (resp.status === 200) {
+      return currentUrl;
     }
+
+    if (resp.status >= 301 && resp.status <= 308) {
+      const location = resp.headers['location'] as string | undefined;
+      if (location) {
+        currentUrl = location;
+        continue;
+      }
+    }
+
+    if (resp.status === 401 || resp.status === 403) {
+      throw new AppError('Accès à l\'enregistrement refusé (authentification Twilio)', 502);
+    }
+
+    if (resp.status === 404) {
+      throw new AppError('Enregistrement introuvable sur Twilio', 404);
+    }
+
+    throw new AppError(`Twilio a répondu avec le statut ${resp.status}`, 502);
   }
 
-  // 2xx — this is the final URL (may be the original if Twilio serves directly)
-  return url;
+  return currentUrl;
 }
 
 export default router;
