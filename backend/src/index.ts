@@ -27,6 +27,16 @@ import intentsRoutes from './routes/intents';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+// Verify critical environment variables on startup
+const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+logger.info('Environment check', {
+  hasTwilioSid: !!twilioSid,
+  hasTwilioToken: !!twilioToken,
+  twilioSidPrefix: twilioSid ? twilioSid.substring(0, 10) : 'missing',
+  envPath: path.resolve(__dirname, '../../.env'),
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
