@@ -7,7 +7,7 @@ import { buildKnowledgeBaseContext, getBbisAgentSettings, getCompanyOfferBSettin
 import { generateResponse as mistralGenerateResponse, summarizeCall as mistralSummarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
 import { transcribeAudioBuffer as gladiaTranscribeAudioBuffer } from './gladia';
 import logger from '../utils/logger';
-import Twilio from 'twilio';
+import { getTwilioClient, getTwilioApiBase } from './twilioClient';
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
@@ -1442,7 +1442,7 @@ async function redirectTwilioCall(callSid: string, twiml: string) {
   const body = new URLSearchParams({ Twiml: twiml });
 
   await axios.post(
-    `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls/${callSid}.json`,
+    `${getTwilioApiBase()}/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls/${callSid}.json`,
     body.toString(),
     {
       auth: {
@@ -1771,7 +1771,7 @@ async function startTwilioRecording(callSid: string, baseUrl: string, callId: st
     const httpsBaseUrl = baseUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
     const recordingCallbackUrl = `${httpsBaseUrl.replace(/\/$/, '')}/api/webhooks/twilio/streaming-recording?callId=${encodeURIComponent(callId)}`;
     logger.info('Starting Twilio recording with callback', { callSid, callId, recordingCallbackUrl });
-    const client = Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const client = getTwilioClient();
 
     const recording = await client.calls(callSid).recordings.create({
       recordingStatusCallback: recordingCallbackUrl,

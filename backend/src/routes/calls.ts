@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { getTwilioClient } from '../services/twilioClient';
 import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
@@ -258,8 +259,8 @@ router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Res
       const authToken = process.env.TWILIO_AUTH_TOKEN;
       if (accountSid && authToken) {
         try {
-          const twilio = require('twilio')(accountSid, authToken);
-          await twilio.calls(callSid).update({ status: 'completed' });
+          const twilioClient = getTwilioClient();
+          await twilioClient.calls(callSid).update({ status: 'completed' });
         } catch {
         }
       }
@@ -333,9 +334,9 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
       ? ` record="record-from-answer" recordingStatusCallback="${recordingCallbackUrl}" recordingStatusCallbackMethod="POST"`
       : '';
 
-    const twilio = require('twilio')(accountSid, authToken);
+    const twilioClient = getTwilioClient();
 
-    await twilio.calls(callSid).update({
+    await twilioClient.calls(callSid).update({
       twiml: `<Response><Say language="fr-FR">Nous vous transférons maintenant. Veuillez patienter.</Say><Dial${recordAttr}><Number>${staffPhone}</Number></Dial></Response>`,
     });
 

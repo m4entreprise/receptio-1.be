@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import twilio from 'twilio';
+import { getTwilioClient } from '../services/twilioClient';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -144,17 +144,13 @@ router.post('/:staffId/call/:callId', authenticateToken, async (req: AuthRequest
     const fromNumber = company.phone_number;
     if (!fromNumber) throw new AppError('Company has no Twilio phone number configured', 400);
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!accountSid || !authToken) throw new AppError('Twilio credentials not configured', 500);
-
     const baseUrl = getBaseUrl(req);
     const transferUrl = `${baseUrl}/api/webhooks/twilio/transfer?staffPhone=${encodeURIComponent(staffMember.phone_number)}`;
     const voicemailMessage = staffMember.voicemail_message ||
       `Bonjour, ${staffMember.first_name} ${staffMember.last_name} de ${company.name} a essayé de vous joindre. N'hésitez pas à nous recontacter.`;
     const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/call-status?callId=${callId}&staffId=${staffId}&voicemailMessage=${encodeURIComponent(voicemailMessage)}`;
 
-    const client = twilio(accountSid, authToken);
+    const client = getTwilioClient();
     const call = await client.calls.create({
       to: callerNumber,
       from: fromNumber,

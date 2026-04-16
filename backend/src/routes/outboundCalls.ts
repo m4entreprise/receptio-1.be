@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import twilio from 'twilio';
+import { getTwilioClient, getTwilioApiBase } from '../services/twilioClient';
 import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
@@ -78,13 +78,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     const answerUrl = `${baseUrl}/api/webhooks/twilio/outbound-answer?callId=${encodeURIComponent(callId)}&destNumber=${encodeURIComponent(destinationNumber)}&companyId=${encodeURIComponent(companyId)}`;
     const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/outbound-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`;
 
-    // Build the Twilio REST API URL directly — bypasses SDK region routing issues.
-    // TWILIO_REGION=ie1 → api.ie1.twilio.com, empty → api.twilio.com (US1 default)
-    const twilioRegion = (process.env.TWILIO_REGION || '').trim();
-    const twilioApiBase = twilioRegion
-      ? `https://api.${twilioRegion}.twilio.com`
-      : 'https://api.twilio.com';
-    const callsUrl = `${twilioApiBase}/2010-04-01/Accounts/${accountSid}/Calls.json`;
+    const callsUrl = `${getTwilioApiBase()}/2010-04-01/Accounts/${accountSid}/Calls.json`;
 
     logger.info('Outbound call: creating Twilio call via REST', {
       from: company.phone_number,
@@ -249,7 +243,7 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (!accountSid || !authToken) throw new AppError('Twilio credentials not configured', 500);
 
-    const client = twilio(accountSid, authToken);
+    const client = getTwilioClient();
     await client.calls(callSid).update({
       twiml: `<Response><Say language="fr-FR">Nous vous transférons vers un autre collaborateur. Veuillez patienter.</Say><Dial><Number>${staff.phone_number}</Number></Dial></Response>`,
     });
@@ -293,7 +287,7 @@ router.post('/:id/hangup', authenticateToken, async (req: AuthRequest, res: Resp
       const authToken = process.env.TWILIO_AUTH_TOKEN;
       if (accountSid && authToken) {
         try {
-          const client = twilio(accountSid, authToken);
+          const client = getTwilioClient();
           await client.calls(callSid).update({ status: 'completed' });
         } catch (e: any) {
           logger.warn('Twilio hangup error (may already be completed)', { callId: id, error: e.message });
