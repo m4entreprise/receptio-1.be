@@ -1,10 +1,12 @@
 import { Router, Response } from 'express';
+import { getTwilioClient } from '../services/twilioClient';
 import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-import { summarizeCall } from '../services/openai';
+import { summarizeCall } from '../services/mistral';
+import { getAiModelsSettings } from '../services/offerB';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -101,13 +103,34 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
     const transcriptionText = typeof callRow.transcription_text === 'string' ? callRow.transcription_text.trim() : '';
     if (isUnavailableSummary(callRow.summary) && transcriptionText) {
       try {
-        const regeneratedSummary = await summarizeCall(transcriptionText);
+        const companySettingsResult = await query('SELECT settings FROM companies WHERE id = $1', [companyId]);
+        const aiModels = getAiModelsSettings(companySettingsResult.rows[0]?.settings || {});
+        const regeneratedSummary = await summarizeCall(transcriptionText, aiModels.summaryLlmModel || undefined);
         if (!isUnavailableSummary(regeneratedSummary)) {
           await query('UPDATE call_summaries SET summary = $1 WHERE call_id = $2', [regeneratedSummary, id]);
           callRow.summary = regeneratedSummary;
         }
       } catch (summaryError: any) {
         logger.warn('Call summary regeneration failed on detail fetch', { callId: id, error: summaryError.message });
+      }
+    }
+
+    // If a summary exists but no transcription, create a minimal transcription row
+    // so the frontend transcription section is visible (e.g. short calls with no recording)
+    if (!transcriptionText && callRow.summary && typeof callRow.summary === 'string') {
+      try {
+        const existing = await query('SELECT id FROM transcriptions WHERE call_id = $1', [id]);
+        if (existing.rows.length === 0) {
+          const fallbackText = callRow.summary as string;
+          await query(
+            `INSERT INTO transcriptions (call_id, text, language, confidence) VALUES ($1, $2, $3, $4)`,
+            [id, fallbackText, 'fr', 1.0]
+          );
+          callRow.transcription_text = fallbackText;
+          logger.info('Call detail: fallback transcription synthesized from summary', { callId: id });
+        }
+      } catch (transcriptionError: any) {
+        logger.warn('Call detail: fallback transcription creation failed', { callId: id, error: transcriptionError.message });
       }
     }
 
@@ -146,46 +169,70 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       throw new AppError('Recording not found', 404);
     }
 
+    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
     const isTwilioRecording = /twilio\.com/i.test(recordingUrl);
-    const auth = isTwilioRecording && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
-      ? {
-          username: process.env.TWILIO_ACCOUNT_SID,
-          password: process.env.TWILIO_AUTH_TOKEN,
-        }
+
+    logger.info('Recording proxy request', {
+      callId: id,
+      isTwilioRecording,
+      hasTwilioCreds: !!(twilioSid && twilioToken),
+      recordingUrl,
+    });
+
+    // Stream the recording directly from the stored URL.
+    // For Twilio URLs: use Basic auth + beforeRedirect to strip auth header
+    // before any CDN redirect (otherwise CDN rejects with 403).
+    const streamAuth = isTwilioRecording && twilioSid && twilioToken
+      ? { username: twilioSid, password: twilioToken }
       : undefined;
+
+    logger.info('Recording proxy: streaming', { callId: id, isTwilioRecording, hasAuth: !!streamAuth });
 
     const response = await axios.get(recordingUrl, {
       responseType: 'stream',
-      auth,
+      maxRedirects: 10,
+      validateStatus: (s) => s >= 200 && s < 300,
+      ...(streamAuth ? { auth: streamAuth } : {}),
+      beforeRedirect: (options: any) => {
+        // Strip Authorization header when redirected to a non-Twilio host (CDN)
+        if (options.hostname && !/twilio\.com$/i.test(options.hostname)) {
+          delete options.headers['Authorization'];
+          delete options.headers['authorization'];
+        }
+      },
     });
 
-    const contentType = typeof response.headers['content-type'] === 'string'
-      ? response.headers['content-type']
-      : 'audio/mpeg';
-    const contentLength = response.headers['content-length'];
-
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', `inline; filename="call-${id}.mp3"`);
-
-    if (typeof contentLength === 'string') {
-      res.setHeader('Content-Length', contentLength);
+    if (typeof response.headers['content-length'] === 'string') {
+      res.setHeader('Content-Length', response.headers['content-length']);
     }
-
     response.data.on('error', (streamError: Error) => {
       logger.error('Recording stream error', { callId: id, error: streamError.message });
-      if (!res.headersSent) {
-        next(streamError);
-      }
+      if (!res.headersSent) next(streamError);
     });
-
     response.data.pipe(res);
   } catch (error: any) {
+    // Twilio SDK errors use error.status; axios errors use error.response?.status
+    const upstreamStatus = error.status ?? error.response?.status ?? error.statusCode;
     logger.error('Recording proxy error', {
       callId: req.params.id,
       error: error.message,
-      status: error.response?.status,
+      status: upstreamStatus,
     });
-    next(error);
+    console.error('[RECORDING PROXY ERROR]', error.message);
+    if (error instanceof AppError) {
+      next(error);
+    } else if (upstreamStatus === 404) {
+      // Clear the stale recording_url so the player doesn't appear on future loads
+      query('UPDATE calls SET recording_url = NULL WHERE id = $1', [req.params.id]).catch(() => {});
+      next(new AppError('Enregistrement introuvable sur Twilio', 404));
+    } else if (upstreamStatus === 401 || upstreamStatus === 403) {
+      next(new AppError('Accès à l\'enregistrement refusé (authentification Twilio)', 502));
+    } else {
+      next(error);
+    }
   }
 });
 
@@ -212,8 +259,8 @@ router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Res
       const authToken = process.env.TWILIO_AUTH_TOKEN;
       if (accountSid && authToken) {
         try {
-          const twilio = require('twilio')(accountSid, authToken);
-          await twilio.calls(callSid).update({ status: 'completed' });
+          const twilioClient = getTwilioClient();
+          await twilioClient.calls(callSid).update({ status: 'completed' });
         } catch {
         }
       }
@@ -287,9 +334,9 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
       ? ` record="record-from-answer" recordingStatusCallback="${recordingCallbackUrl}" recordingStatusCallbackMethod="POST"`
       : '';
 
-    const twilio = require('twilio')(accountSid, authToken);
+    const twilioClient = getTwilioClient();
 
-    await twilio.calls(callSid).update({
+    await twilioClient.calls(callSid).update({
       twiml: `<Response><Say language="fr-FR">Nous vous transférons maintenant. Veuillez patienter.</Say><Dial${recordAttr}><Number>${staffPhone}</Number></Dial></Response>`,
     });
 
@@ -333,5 +380,6 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response,
     next(error);
   }
 });
+
 
 export default router;

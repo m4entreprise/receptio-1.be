@@ -14,6 +14,14 @@ export const errorHandler = (
     method: req.method,
   });
 
+  // Ensure CORS headers are present on error responses so the browser can read the error body
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
+
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Internal Server Error';
 

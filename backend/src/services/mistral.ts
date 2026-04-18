@@ -1,5 +1,6 @@
 import axios from 'axios';
 import logger from '../utils/logger';
+import { query } from '../config/database';
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1';
@@ -182,7 +183,27 @@ async function downloadAudioForMistral(audioUrl: string): Promise<{ buffer: Buff
   };
 }
 
-export async function transcribeAudioUrlWithDiarization(audioUrl: string, language: string = 'fr', firstSpeakerRole: 'agent' | 'client' = 'agent'): Promise<{
+export async function transcribeAudioUrl(
+  audioUrl: string,
+  options: {
+    language?: string;
+    model?: string;
+  } = {}
+): Promise<{
+  text: string;
+  confidence: number;
+  language: string;
+}> {
+  const audio = await downloadAudioForMistral(audioUrl);
+  return transcribeAudioBuffer(audio.buffer, {
+    fileName: audio.fileName,
+    language: options.language,
+    mimeType: audio.mimeType,
+    model: options.model,
+  });
+}
+
+export async function transcribeAudioUrlWithDiarization(audioUrl: string, language: string = 'fr', firstSpeakerRole: 'agent' | 'client' = 'agent', model?: string): Promise<{
   text: string;
   confidence: number;
   language: string;
@@ -192,29 +213,57 @@ export async function transcribeAudioUrlWithDiarization(audioUrl: string, langua
     ensureMistralConfigured();
 
     const audio = await downloadAudioForMistral(audioUrl);
-    const formData = new FormData();
-    formData.append('file', new Blob([audio.buffer], { type: audio.mimeType }), audio.fileName);
-    formData.append('model', MISTRAL_DIARIZATION_MODEL);
-    formData.append('language', language);
-    formData.append('diarize', 'true');
-    formData.append('timestamp_granularities', 'segment');
-    formData.append('prompt', 'Appel téléphonique professionnel en français entre un client et un agent de réception. Transcription verbatim fidèle, y compris hésitations.');
+    const transcribeWithModel = async (modelName: string) => {
+      const formData = new FormData();
+      formData.append('file', new Blob([audio.buffer], { type: audio.mimeType }), audio.fileName);
+      formData.append('model', modelName);
+      formData.append('language', language);
+      formData.append('diarize', 'true');
+      formData.append('timestamp_granularities', 'segment');
+      formData.append('prompt', 'Appel téléphonique professionnel en français entre un client et un agent de réception. Transcription verbatim fidèle, y compris hésitations.');
 
-    const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` },
-      body: formData,
-    });
+      const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` },
+        body: formData,
+      });
 
-    const data = await response.json() as {
+      const data = await response.json() as {
+        text?: string;
+        language?: string;
+        segments?: Array<{ text: string; start: number; end: number; speaker_id?: string }>;
+        error?: { message?: string };
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || 'Mistral diarized transcription failed');
+      }
+
+      return data;
+    };
+
+    const requestedModel = model || MISTRAL_DIARIZATION_MODEL;
+    let data: {
       text?: string;
       language?: string;
       segments?: Array<{ text: string; start: number; end: number; speaker_id?: string }>;
       error?: { message?: string };
     };
 
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Mistral diarized transcription failed');
+    try {
+      data = await transcribeWithModel(requestedModel);
+    } catch (error: any) {
+      if (requestedModel !== MISTRAL_DIARIZATION_MODEL) {
+        logger.warn('Configured diarization model failed, retrying with fallback model', {
+          requestedModel,
+          fallbackModel: MISTRAL_DIARIZATION_MODEL,
+          error: error.message,
+          audioUrl,
+        });
+        data = await transcribeWithModel(MISTRAL_DIARIZATION_MODEL);
+      } else {
+        throw error;
+      }
     }
 
     const rawSegments = data.segments || [];
@@ -241,6 +290,7 @@ export async function transcribeAudioUrlWithDiarization(audioUrl: string, langua
 
     logger.info('Audio transcribed with Mistral Voxtral diarization', {
       audioUrl,
+      model: requestedModel,
       segmentsCount: segments?.length ?? 0,
       hasDiarization: !!segments,
     });
@@ -272,38 +322,63 @@ export async function transcribeAudioBuffer(
 }> {
   try {
     ensureMistralConfigured();
-
-    const formData = new FormData();
     const language = options.language || 'fr';
     const mimeType = options.mimeType || 'audio/wav';
     const fileName = options.fileName || 'audio.wav';
+    const transcribeWithModel = async (modelName: string) => {
+      const formData = new FormData();
+      formData.append('file', new Blob([audioBuffer], { type: mimeType }), fileName);
+      formData.append('model', modelName);
+      formData.append('language', language);
+      formData.append('diarize', 'false');
 
-    formData.append('file', new Blob([audioBuffer], { type: mimeType }), fileName);
-    formData.append('model', options.model || DEFAULT_MISTRAL_STT_MODEL);
-    formData.append('language', language);
-    formData.append('diarize', 'false');
+      const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${MISTRAL_API_KEY}`,
+        },
+        body: formData,
+      });
 
-    const response = await fetch(`${MISTRAL_API_URL}/audio/transcriptions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${MISTRAL_API_KEY}`,
-      },
-      body: formData,
-    });
+      const data = await response.json() as {
+        text?: string;
+        language?: string;
+        segments?: Array<{ avg_logprob?: number }>;
+        error?: { message?: string };
+      };
 
-    const data = await response.json() as {
+      if (!response.ok) {
+        throw new Error(data.error?.message || 'Mistral transcription failed');
+      }
+
+      return data;
+    };
+
+    const requestedModel = options.model || DEFAULT_MISTRAL_STT_MODEL;
+    let data: {
       text?: string;
       language?: string;
       segments?: Array<{ avg_logprob?: number }>;
       error?: { message?: string };
     };
 
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Mistral transcription failed');
+    try {
+      data = await transcribeWithModel(requestedModel);
+    } catch (error: any) {
+      if (requestedModel !== DEFAULT_MISTRAL_STT_MODEL) {
+        logger.warn('Configured STT model failed, retrying with fallback model', {
+          requestedModel,
+          fallbackModel: DEFAULT_MISTRAL_STT_MODEL,
+          error: error.message,
+        });
+        data = await transcribeWithModel(DEFAULT_MISTRAL_STT_MODEL);
+      } else {
+        throw error;
+      }
     }
 
     logger.info('Audio buffer transcribed with Mistral', {
-      model: options.model || DEFAULT_MISTRAL_STT_MODEL,
+      model: requestedModel,
       mimeType,
       textLength: data.text?.length || 0,
     });
@@ -407,18 +482,60 @@ export async function textToSpeech(
   }
 }
 
-export async function detectIntent(transcription: string): Promise<{
+export async function detectIntent(
+  transcription: string,
+  companyId?: string,
+  model?: string
+): Promise<{
   intent: string;
   confidence: number;
-  entities: Record<string, any>;
+  entities: Record<string, unknown>;
 }> {
   try {
-    const systemPrompt = `Tu es un assistant qui analyse les intentions des appelants.
-Retourne un JSON avec: intent (rdv|info|urgence|reclamation|autre), confidence (0-1), entities (données extraites).`;
+    if (!hasMeaningfulTranscription(transcription)) {
+      return { intent: 'autre', confidence: 0, entities: {} };
+    }
+
+    let intentList: string;
+    if (companyId) {
+      try {
+        const result = await query(
+          `SELECT label, description, keywords
+           FROM call_intents
+           WHERE company_id = $1 AND is_active = true
+           ORDER BY position ASC, created_at ASC`,
+          [companyId]
+        );
+  
+        if (result.rows.length > 0) {
+          const lines = result.rows.map((r: Record<string, unknown>) => {
+            let line = String(r.label);
+            if (r.description) line += ` (${String(r.description)})`;
+            if (r.keywords) line += ` — mots-clés : ${String(r.keywords)}`;
+            return line;
+          });
+          intentList = lines.join(', ') + ', autre';
+        } else {
+          intentList = 'rdv, info, urgence, reclamation, autre';
+        }
+      } catch (dbError: any) {
+        if ((dbError as any)?.code === '42P01') {
+          logger.warn('call_intents table missing, using default intents', { companyId });
+        } else {
+          logger.error('Failed to load custom intents', { companyId, error: (dbError as any)?.message });
+        }
+        intentList = 'rdv, info, urgence, reclamation, autre';
+      }
+    } else {
+      intentList = 'rdv, info, urgence, reclamation, autre';
+    }
+
+    const systemPrompt = `Tu analyses des appels entrants pour une PME. Retourne uniquement un JSON valide avec les clés intent, confidence et entities. intent doit être EXACTEMENT l'un de ces labels (sans modification) : ${intentList}.`;
 
     const response = await generateResponse(
-      [{ role: 'user', content: `Analyse cette transcription: "${transcription}"` }],
-      systemPrompt
+      [{ role: 'user', content: `Analyse cette transcription : ${transcription}` }],
+      systemPrompt,
+      { model: model || undefined }
     );
 
     const parsed = JSON.parse(response);
@@ -429,16 +546,12 @@ Retourne un JSON avec: intent (rdv|info|urgence|reclamation|autre), confidence (
       entities: parsed.entities || {},
     };
   } catch (error: any) {
-    logger.error('Intent detection error', { error: error.message });
-    return {
-      intent: 'autre',
-      confidence: 0,
-      entities: {},
-    };
+    logger.error('Mistral intent detection error', { error: error.message });
+    return { intent: 'autre', confidence: 0, entities: {} };
   }
 }
 
-export async function summarizeCall(transcription: string): Promise<string> {
+export async function summarizeCall(transcription: string, model?: string): Promise<string> {
   try {
     const normalizedTranscription = normalizeSummaryTranscript(transcription);
 
@@ -450,7 +563,8 @@ export async function summarizeCall(transcription: string): Promise<string> {
 
     const response = await generateResponse(
       [{ role: 'user', content: buildSummaryPrompt(normalizedTranscription) }],
-      systemPrompt
+      systemPrompt,
+      { model: model || undefined }
     );
 
     return response;
