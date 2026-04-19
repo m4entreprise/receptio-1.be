@@ -64,7 +64,7 @@ router.post('/auth/bootstrap', async (req, res: Response, next) => {
 
 // ── Companies ─────────────────────────────────────────────────────────────────
 
-router.get('/companies', authenticateSuperAdmin, async (req: SuperAdminRequest, res: Response, next) => {
+router.get('/companies', authenticateSuperAdmin, async (_req: SuperAdminRequest, res: Response, next) => {
   try {
     const result = await query(`
       SELECT
@@ -282,7 +282,7 @@ router.get('/billing/export', authenticateSuperAdmin, async (req: SuperAdminRequ
       'Durée totale (s)',
       'Manqués',
     ];
-    const rows = result.rows.map((r) => [
+    const rows = result.rows.map((r: Record<string, any>) => [
       r.company_id,
       r.company_name,
       r.company_email,
@@ -295,7 +295,7 @@ router.get('/billing/export', authenticateSuperAdmin, async (req: SuperAdminRequ
     ]);
 
     const csv = [headers, ...rows]
-      .map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .map((row) => row.map((v: any) => `"${String(v).replace(/"/g, '""')}"`).join(','))
       .join('\n');
 
     const filename = `billing_${dateFrom.toISOString().slice(0, 10)}_${dateTo.toISOString().slice(0, 10)}.csv`;
