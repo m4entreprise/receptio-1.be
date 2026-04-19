@@ -182,7 +182,7 @@ router.post('/invite', authenticateToken, async (req: AuthRequest, res: Response
     );
 
     const publicUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const inviteUrl = `${publicUrl.replace(/\/$/, '')}/accept-invitation?token=${encodeURIComponent(token)}`;
+    const inviteUrl = `${publicUrl.replace(/\/$/, '')}/?inviteToken=${encodeURIComponent(token)}`;
 
     await writeAuditLogFromRequest(req, {
       action: 'member.invited',

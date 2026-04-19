@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -180,6 +180,15 @@ const plans = [
 
 export default function LandingPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const inviteToken = searchParams.get('inviteToken');
+    if (inviteToken) {
+      navigate(`/accept-invitation?token=${encodeURIComponent(inviteToken)}`, { replace: true });
+    }
+  }, [navigate, searchParams]);
 
   useEffect(() => {
     const elements = Array.from(
