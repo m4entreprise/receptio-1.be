@@ -23,6 +23,7 @@ import AdminLogin from './pages/admin/AdminLogin';
 import AdminTenants from './pages/admin/AdminTenants';
 import AdminTenantDetail from './pages/admin/AdminTenantDetail';
 import AdminBilling from './pages/admin/AdminBilling';
+import AdminPricing from './pages/admin/AdminPricing';
 import AdminLogs from './pages/admin/AdminLogs';
 
 function App() {
@@ -61,6 +62,7 @@ function App() {
             <Route path="/admin/tenants" element={<PrivateAdminRoute><AdminTenants /></PrivateAdminRoute>} />
             <Route path="/admin/tenants/:id" element={<PrivateAdminRoute><AdminTenantDetail /></PrivateAdminRoute>} />
             <Route path="/admin/billing" element={<PrivateAdminRoute><AdminBilling /></PrivateAdminRoute>} />
+            <Route path="/admin/pricing" element={<PrivateAdminRoute><AdminPricing /></PrivateAdminRoute>} />
             <Route path="/admin/logs" element={<PrivateAdminRoute><AdminLogs /></PrivateAdminRoute>} />
             <Route path="/admin" element={<Navigate to="/admin/tenants" replace />} />
 

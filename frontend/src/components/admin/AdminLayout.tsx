@@ -1,11 +1,12 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Building2, CreditCard, LogOut, PhoneCall, History } from 'lucide-react';
+import { Building2, CreditCard, LogOut, PhoneCall, History, Tag } from 'lucide-react';
 import { useSuperAuth } from '../../contexts/SuperAuthContext';
 import clsx from 'clsx';
 
 const nav = [
   { to: '/admin/tenants', label: 'Tenants', icon: Building2 },
   { to: '/admin/billing', label: 'Facturation', icon: CreditCard },
+  { to: '/admin/pricing', label: 'Tarifs', icon: Tag },
   { to: '/admin/logs', label: 'Audit', icon: History },
 ];
 
