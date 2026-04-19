@@ -1,4 +1,4 @@
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -181,14 +181,17 @@ const plans = [
 export default function LandingPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    const inviteToken = searchParams.get('inviteToken');
+    const inviteToken = new URLSearchParams(window.location.search).get('inviteToken');
     if (inviteToken) {
+      if (import.meta.env.PROD) {
+        window.location.replace(`${window.location.origin}/#/accept-invitation?token=${encodeURIComponent(inviteToken)}`);
+        return;
+      }
       navigate(`/accept-invitation?token=${encodeURIComponent(inviteToken)}`, { replace: true });
     }
-  }, [navigate, searchParams]);
+  }, [navigate]);
 
   useEffect(() => {
     const elements = Array.from(

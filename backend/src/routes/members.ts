@@ -181,8 +181,10 @@ router.post('/invite', authenticateToken, async (req: AuthRequest, res: Response
       [actor.companyId, data.email.toLowerCase(), data.role, data.staffId || null, tokenHash, actor.id, expiresAt.toISOString()]
     );
 
-    const publicUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const inviteUrl = `${publicUrl.replace(/\/$/, '')}/?inviteToken=${encodeURIComponent(token)}`;
+    const publicUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const inviteUrl = process.env.NODE_ENV === 'production'
+      ? `${publicUrl}/#/accept-invitation?token=${encodeURIComponent(token)}`
+      : `${publicUrl}/?inviteToken=${encodeURIComponent(token)}`;
 
     await writeAuditLogFromRequest(req, {
       action: 'member.invited',
