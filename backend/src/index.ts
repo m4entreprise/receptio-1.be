@@ -24,6 +24,7 @@ import dispatchRulesRoutes from './routes/dispatchRules';
 import analyticsRoutes from './routes/analytics';
 import qaRoutes from './routes/qa';
 import intentsRoutes from './routes/intents';
+import superRoutes from './routes/super';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -46,10 +47,13 @@ app.use(helmet());
 
 const allowedOrigins = new Set([
   process.env.FRONTEND_URL,
+  process.env.ADMIN_URL,
   'https://receptio.be',
   'https://www.receptio.be',
+  'https://admin.receptio.eu',
   'http://localhost:5173',
   'http://localhost:4173',
+  'http://localhost:5174',
 ].filter(Boolean) as string[]);
 
 app.use(cors({
@@ -106,6 +110,7 @@ app.use('/api/dispatch-rules', dispatchRulesRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/qa', qaRoutes);
 app.use('/api/intents', intentsRoutes);
+app.use('/api/super', superRoutes);
 
 app.use(errorHandler);
 

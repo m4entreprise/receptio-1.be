@@ -322,6 +322,30 @@ BEGIN
     END IF;
 END $$;
 
+-- Super admins table (platform-level, no company_id)
+CREATE TABLE IF NOT EXISTS super_admins (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_login_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Audit log for impersonation sessions
+CREATE TABLE IF NOT EXISTS impersonation_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    super_admin_id UUID REFERENCES super_admins(id) ON DELETE SET NULL,
+    super_admin_email VARCHAR(255) NOT NULL,
+    company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
+    company_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_impersonation_logs_super_admin ON impersonation_logs(super_admin_id);
+CREATE INDEX IF NOT EXISTS idx_impersonation_logs_company ON impersonation_logs(company_id);
+CREATE INDEX IF NOT EXISTS idx_impersonation_logs_created_at ON impersonation_logs(created_at DESC);
+
 -- Insert demo company for testing
 INSERT INTO companies (name, email, phone_number, settings) VALUES
 ('Demo Company', 'demo@receptio.be', '+32470123456', '{"timezone": "Europe/Brussels", "language": "fr"}')
