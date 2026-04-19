@@ -3,7 +3,7 @@ import axios from 'axios';
 import { format, subDays, startOfMonth } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import {
-  Download, PhoneCall, PhoneIncoming, PhoneOutgoing, Clock,
+  Download, PhoneIncoming, PhoneOutgoing,
   PhoneOff, ChevronDown, ChevronRight, Receipt, Tag,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
