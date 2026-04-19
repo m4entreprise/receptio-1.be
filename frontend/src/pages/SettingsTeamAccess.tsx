@@ -353,7 +353,7 @@ export default function SettingsTeamAccess() {
                       >
                         {member.role === 'agent' ? 'Promouvoir admin' : 'Rétrograder agent'}
                       </button>
-                      {user?.role === 'owner' && member.role !== 'admin' && (
+                      {user?.role === 'owner' && member.id !== user.id && (
                         <button
                           onClick={() => void handleMemberUpdate(member.id, { role: 'owner' })}
                           className="rounded-full bg-[#141F28] px-4 py-2 text-sm font-semibold text-white"

@@ -41,13 +41,15 @@ CREATE TABLE IF NOT EXISTS user_invitations (
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   accepted_at TIMESTAMP WITH TIME ZONE,
   revoked_at TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(company_id, email, status)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_invitations_company_id ON user_invitations(company_id);
 CREATE INDEX IF NOT EXISTS idx_user_invitations_email ON user_invitations(email);
 CREATE INDEX IF NOT EXISTS idx_user_invitations_status ON user_invitations(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_invitations_pending_unique
+  ON user_invitations(company_id, lower(email))
+  WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

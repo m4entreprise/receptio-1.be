@@ -152,17 +152,18 @@ router.post('/invite', authenticateToken, async (req: AuthRequest, res: Response
     requirePermission(req, 'memberManage');
     const actor = req.user!;
     const data = inviteSchema.parse(req.body);
+    const normalizedEmail = data.email.trim().toLowerCase();
 
     if (data.role === 'admin' && actor.role !== 'owner') {
       throw new AppError('Seul le propriétaire peut inviter un administrateur', 403);
     }
 
-    const existingUser = await query('SELECT id FROM users WHERE email = $1', [data.email]);
+    const existingUser = await query('SELECT id FROM users WHERE lower(email) = $1', [normalizedEmail]);
     if (existingUser.rows.length > 0) throw new AppError('Un utilisateur existe déjà avec cet email', 400);
 
     const pendingInvitation = await query(
-      `SELECT id FROM user_invitations WHERE company_id = $1 AND email = $2 AND status = 'pending'`,
-      [actor.companyId, data.email]
+      `SELECT id FROM user_invitations WHERE company_id = $1 AND lower(email) = $2 AND status = 'pending'`,
+      [actor.companyId, normalizedEmail]
     );
     if (pendingInvitation.rows.length > 0) throw new AppError('Une invitation en attente existe déjà', 400);
 
@@ -178,7 +179,7 @@ router.post('/invite', authenticateToken, async (req: AuthRequest, res: Response
       `INSERT INTO user_invitations (company_id, email, role, staff_id, token_hash, invited_by_user_id, expires_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, email, role, staff_id, status, expires_at, created_at`,
-      [actor.companyId, data.email.toLowerCase(), data.role, data.staffId || null, tokenHash, actor.id, expiresAt.toISOString()]
+      [actor.companyId, normalizedEmail, data.role, data.staffId || null, tokenHash, actor.id, expiresAt.toISOString()]
     );
 
     const publicUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -190,7 +191,7 @@ router.post('/invite', authenticateToken, async (req: AuthRequest, res: Response
       action: 'member.invited',
       entityType: 'user_invitation',
       entityId: invitationResult.rows[0].id,
-      targetLabel: data.email,
+      targetLabel: normalizedEmail,
       after: invitationResult.rows[0],
       metadata: { inviteUrl, role: data.role, staffId: data.staffId || null },
     });
