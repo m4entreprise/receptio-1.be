@@ -522,7 +522,7 @@ router.get('/billing/export', authenticateSuperAdmin, async (req: SuperAdminRequ
       'Total (€)',
     ];
 
-    const csvRows = rows.map((r) => [
+    const csvRows = rows.map((r: Record<string, any>) => [
       r.company_id,
       r.company_name,
       r.company_email,
