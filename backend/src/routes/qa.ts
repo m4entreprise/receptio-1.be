@@ -3,6 +3,7 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../types';
+import { requirePermission } from '../utils/authz';
 import {
   analyzeCall,
   createNewTemplateVersion,
@@ -200,6 +201,7 @@ async function ensureTemplateOwnership(templateId: string, companyId: string) {
 
 router.get('/templates', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const result = await query(
       `SELECT t.*,
@@ -225,6 +227,7 @@ router.get('/templates', authenticateToken, async (req: AuthRequest, res: Respon
 
 router.post('/templates', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const {
       name,
@@ -261,6 +264,7 @@ router.post('/templates', authenticateToken, async (req: AuthRequest, res: Respo
 
 router.get('/templates/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const template = await ensureTemplateOwnership(id, companyId);
@@ -276,6 +280,7 @@ router.get('/templates/:id', authenticateToken, async (req: AuthRequest, res: Re
 
 router.patch('/templates/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const { name, callType, promptTemplate, systemPrompt, flagDefinitions, isActive, outputSchema } = req.body;
@@ -333,6 +338,7 @@ router.patch('/templates/:id', authenticateToken, async (req: AuthRequest, res: 
 
 router.delete('/templates/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     await ensureTemplateOwnership(id, companyId);
@@ -353,6 +359,7 @@ router.delete('/templates/:id', authenticateToken, async (req: AuthRequest, res:
 
 router.get('/templates/:id/criteria', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     await ensureTemplateOwnership(id, companyId);
@@ -365,6 +372,7 @@ router.get('/templates/:id/criteria', authenticateToken, async (req: AuthRequest
 
 router.post('/templates/:id/criteria', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const { label, description = null, weight = 10, type = 'boolean', required = false, position = 0 } = req.body;
@@ -384,6 +392,7 @@ router.post('/templates/:id/criteria', authenticateToken, async (req: AuthReques
 
 router.patch('/criteria/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
 
@@ -422,6 +431,7 @@ router.patch('/criteria/:id', authenticateToken, async (req: AuthRequest, res: R
 
 router.delete('/criteria/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
 
@@ -442,6 +452,7 @@ router.delete('/criteria/:id', authenticateToken, async (req: AuthRequest, res: 
 
 router.post('/analyze/:callId', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { callId } = req.params;
     const { templateId, force = false } = req.body;
@@ -463,6 +474,7 @@ router.post('/analyze/:callId', authenticateToken, async (req: AuthRequest, res:
 
 router.get('/results', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const periodParam = typeof req.query.period === 'string' ? req.query.period : '30d';
     const templateId = typeof req.query.templateId === 'string' ? req.query.templateId : null;
@@ -559,6 +571,7 @@ router.get('/results', authenticateToken, async (req: AuthRequest, res: Response
 
 router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { callId } = req.params;
 
@@ -662,6 +675,7 @@ router.get('/results/:callId', authenticateToken, async (req: AuthRequest, res: 
 
 router.get('/agents/:staffId/profile', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { staffId } = req.params;
     const period = typeof req.query.period === 'string' ? req.query.period : '30d';
@@ -768,6 +782,7 @@ router.get('/agents/:staffId/profile', authenticateToken, async (req: AuthReques
 
 router.get('/alerts', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const acknowledged = req.query.acknowledged === 'true';
     const result = await query(
@@ -790,6 +805,7 @@ router.get('/alerts', authenticateToken, async (req: AuthRequest, res: Response,
 
 router.post('/alerts/:id/acknowledge', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const result = await query(
@@ -808,6 +824,7 @@ router.post('/alerts/:id/acknowledge', authenticateToken, async (req: AuthReques
 
 router.get('/batch-eligible', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'qaManage');
     const { companyId } = req.user!;
     const templateId = typeof req.query.templateId === 'string' ? req.query.templateId : null;
     const periodParam = typeof req.query.period === 'string' ? req.query.period : '30d';

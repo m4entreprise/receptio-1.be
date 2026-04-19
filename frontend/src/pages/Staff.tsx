@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import Layout from '../components/Layout';
+import { useAuth } from '../contexts/AuthContext';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -1005,7 +1006,19 @@ function DispatchTab() {
 type Tab = 'membres' | 'groupes' | 'dispatch';
 
 export default function Staff() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('membres');
+
+  if (!user?.permissions?.staffManage && user?.role !== 'owner' && user?.role !== 'admin') {
+    return (
+      <Layout>
+        <div className="rounded-[28px] border border-[#344453]/10 bg-white p-8 text-center shadow-sm">
+          <h1 className="text-2xl font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Accès restreint</h1>
+          <p className="mt-3 text-sm text-[#344453]/55">Vous n’avez pas les droits nécessaires pour gérer l’équipe et le dispatch.</p>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>

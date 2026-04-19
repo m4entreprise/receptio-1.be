@@ -3,6 +3,7 @@ import { Bot, Brain, Building2, Database, ExternalLink, Pencil, PhoneForwarded, 
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
+import { useAuth } from '../contexts/AuthContext';
 
 interface OfferBSettings {
   voicePipelineEnabled: boolean;
@@ -87,9 +88,19 @@ const modules = [
     description: "Grilles d'évaluation QA",
     color: '#7B61FF',
   },
+  {
+    to: '/settings/team-access',
+    icon: ShieldCheck,
+    label: 'Équipe & accès',
+    description: 'Membres, invitations, rôles, audit',
+    color: '#141F28',
+  },
 ];
 
 export default function SettingsOfferB() {
+  const { user } = useAuth();
+  const canManageSettings = user?.permissions?.settingsManage ?? true;
+  const canManageKnowledgeBase = user?.permissions?.knowledgeBaseManage ?? true;
   const [company, setCompany] = useState<Company | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -104,17 +115,24 @@ export default function SettingsOfferB() {
   const [savingKnowledge, setSavingKnowledge] = useState(false);
   const [message, setMessage] = useState('');
   const [knowledgeMessage, setKnowledgeMessage] = useState('');
+  const visibleModules = modules.filter((module) => {
+    if (module.to === '/settings/ai-models' || module.to === '/settings/agent-ia') return user?.permissions?.settingsManage ?? true;
+    if (module.to === '/settings/intents') return user?.permissions?.intentsManage ?? true;
+    if (module.to === '/settings/qa') return user?.permissions?.qaManage ?? true;
+    if (module.to === '/settings/team-access') return user?.permissions?.memberManage ?? true;
+    return true;
+  });
 
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        await Promise.all([fetchCompany(), fetchKnowledgeBase()]);
+        await Promise.all([fetchCompany(), canManageKnowledgeBase ? fetchKnowledgeBase() : Promise.resolve()]);
       } finally {
         setLoading(false);
       }
     };
     fetchInitialData();
-  }, []);
+  }, [canManageKnowledgeBase]);
 
   const fetchCompany = async () => {
     try {
@@ -296,7 +314,7 @@ export default function SettingsOfferB() {
             </div>
           </div>
           <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
-            {modules.map((mod) => {
+            {visibleModules.map((mod) => {
               const Icon = mod.icon;
               return (
                 <Link
@@ -355,6 +373,7 @@ export default function SettingsOfferB() {
                   id="name"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  disabled={!canManageSettings}
                   className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition focus:border-[#344453]/25 focus:bg-white"
                 />
               </div>
@@ -368,6 +387,7 @@ export default function SettingsOfferB() {
                   value={formData.phoneNumber}
                   onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
                   placeholder="+32 470 12 34 56"
+                  disabled={!canManageSettings}
                   className="mt-2 block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/25 focus:bg-white"
                 />
               </div>
@@ -590,7 +610,7 @@ export default function SettingsOfferB() {
               <p className="text-sm text-[#344453]/55">Les modifications sont enregistrées directement sur votre compte entreprise.</p>
               <button
                 type="submit"
-                disabled={saving}
+                disabled={saving || !canManageSettings}
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-[#C7601D] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(199,96,29,0.28)] transition hover:bg-[#b35519] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
@@ -601,6 +621,7 @@ export default function SettingsOfferB() {
         </section>
 
         {/* ── Base de connaissances ─────────────────────────────────────── */}
+        {canManageKnowledgeBase && (
         <section className="rounded-[28px] border border-[#344453]/10 bg-white shadow-sm">
           <div className="flex items-center gap-3 border-b border-[#344453]/8 px-4 py-5 sm:px-6">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#344453]/8 text-[#344453]">
@@ -781,6 +802,7 @@ export default function SettingsOfferB() {
             </div>
           </div>
         </section>
+        )}
       </div>
     </Layout>
   );

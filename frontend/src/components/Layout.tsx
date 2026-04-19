@@ -43,15 +43,25 @@ export default function Layout({ children }: LayoutProps) {
     navigate('/login');
   };
 
+  const hasAnySettingsAccess = (
+    user?.permissions?.settingsManage ||
+    user?.permissions?.knowledgeBaseManage ||
+    user?.permissions?.intentsManage ||
+    user?.permissions?.qaManage ||
+    user?.permissions?.memberManage ||
+    user?.role === 'owner' ||
+    user?.role === 'admin'
+  );
+
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/calls', icon: Phone, label: 'Appels' },
-    { path: '/outbound', icon: PhoneOutgoing, label: 'Sortant' },
-    { path: '/staff', icon: Users, label: 'Équipe' },
+    { path: '/calls', icon: Phone, label: 'Appels', visible: user?.permissions?.callsRead ?? true },
+    { path: '/outbound', icon: PhoneOutgoing, label: 'Sortant', visible: user?.permissions?.outboundRead ?? true },
+    { path: '/staff', icon: Users, label: 'Équipe', visible: user?.permissions?.staffManage ?? true },
     { path: '/monitoring/bbis', icon: Gauge, label: 'Monitoring' },
-    { path: '/analytics', icon: BarChart2, label: 'Analytics', badge: unacknowledgedAlertCount },
-    { path: '/settings', icon: Settings, label: 'Paramètres' },
-  ];
+    { path: '/analytics', icon: BarChart2, label: 'Analytics', badge: unacknowledgedAlertCount, visible: user?.permissions?.analyticsRead ?? true },
+    { path: '/settings', icon: Settings, label: 'Paramètres', visible: hasAnySettingsAccess },
+  ].filter((item) => item.visible !== false);
 
   return (
     <div className="min-h-screen bg-[#F8F9FB] text-[#141F28]" style={{ fontFamily: "var(--font-body)" }}>

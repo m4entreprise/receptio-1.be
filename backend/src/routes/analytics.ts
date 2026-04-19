@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { requirePermission } from '../utils/authz';
 
 const router = Router();
 
@@ -90,6 +91,7 @@ function isProvenAgentInteraction(row: Record<string, unknown>): boolean {
 // GET /api/analytics/kpis?period=today|7d|30d
 router.get('/kpis', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'analyticsRead');
     const { companyId } = req.user!;
     const rawPeriod = typeof req.query.period === 'string' ? req.query.period : 'today';
     const period: Period = ['today', '7d', '30d'].includes(rawPeriod) ? (rawPeriod as Period) : 'today';
@@ -256,6 +258,7 @@ router.get('/kpis', authenticateToken, async (req: AuthRequest, res: Response, n
 // GET /api/analytics/qa/weak-criteria?templateId=&period=7d|30d
 router.get('/qa/weak-criteria', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'analyticsRead');
     const { companyId } = req.user!;
     const rawPeriod = typeof req.query.period === 'string' ? req.query.period : '30d';
     const period: Period = ['today', '7d', '30d'].includes(rawPeriod) ? (rawPeriod as Period) : '30d';
@@ -342,6 +345,7 @@ router.get('/qa/weak-criteria', authenticateToken, async (req: AuthRequest, res:
 // GET /api/analytics/qa/flags/trend?period=7d|30d&flagType=
 router.get('/qa/flags/trend', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'analyticsRead');
     const { companyId } = req.user!;
     const rawPeriod = typeof req.query.period === 'string' ? req.query.period : '30d';
     const period: Period = ['today', '7d', '30d'].includes(rawPeriod) ? (rawPeriod as Period) : '30d';
@@ -402,6 +406,7 @@ router.get('/qa/flags/trend', authenticateToken, async (req: AuthRequest, res: R
 // GET /api/analytics/qa/score-distribution?templateId=&period=
 router.get('/qa/score-distribution', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'analyticsRead');
     const { companyId } = req.user!;
     const rawPeriod = typeof req.query.period === 'string' ? req.query.period : '30d';
     const period: Period = ['today', '7d', '30d'].includes(rawPeriod) ? (rawPeriod as Period) : '30d';

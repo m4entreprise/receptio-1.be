@@ -1,11 +1,37 @@
 import { Request } from 'express';
 
+export interface UserPermissions {
+  callsRead: boolean;
+  callDetailRead: boolean;
+  callRecordingsRead: boolean;
+  callTransfer: boolean;
+  callDelete: boolean;
+  outboundRead: boolean;
+  outboundCreate: boolean;
+  outboundManage: boolean;
+  outboundAllRead: boolean;
+  analyticsRead: boolean;
+  staffManage: boolean;
+  knowledgeBaseManage: boolean;
+  settingsManage: boolean;
+  intentsManage: boolean;
+  qaManage: boolean;
+  auditLogsRead: boolean;
+  memberManage: boolean;
+  outboundScope: 'own' | 'all';
+}
+
 export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
     companyId: string;
     role: string;
+    status: 'invited' | 'active' | 'disabled';
+    staffId?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    permissions: UserPermissions;
   };
 }
 
@@ -68,6 +94,15 @@ export interface User {
   firstName?: string;
   lastName?: string;
   role: string;
+  status: 'invited' | 'active' | 'disabled';
+  staffId?: string | null;
+  invitedByUserId?: string | null;
+  invitedAt?: Date | null;
+  activatedAt?: Date | null;
+  disabledAt?: Date | null;
+  disabledByUserId?: string | null;
+  deactivationReason?: string | null;
+  lastLoginAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

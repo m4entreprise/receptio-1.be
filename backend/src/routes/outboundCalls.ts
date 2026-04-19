@@ -5,6 +5,7 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
+import { canAccessOutboundForStaff, requireLinkedStaff, requirePermission } from '../utils/authz';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -30,13 +31,20 @@ function getBaseUrl(req: Request): string {
 // ---------------------------------------------------------------------------
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    const { companyId } = req.user!;
+    requirePermission(req, 'outboundCreate');
+    const { companyId, role, staffId: actorStaffId, permissions } = req.user!;
     const { destinationNumber, staffId } = req.body as { destinationNumber?: string; staffId?: string };
 
     if (!destinationNumber || !staffId) {
       throw new AppError('destinationNumber and staffId are required', 400);
     }
     assertUuid(staffId, 'staffId');
+    if (role === 'agent' && permissions.outboundScope !== 'all') {
+      requireLinkedStaff(req);
+      if (staffId !== actorStaffId) {
+        throw new AppError('Un agent ne peut initier que ses propres appels sortants', 403);
+      }
+    }
 
     const [staffResult, companyResult] = await Promise.all([
       query('SELECT * FROM staff WHERE id = $1 AND company_id = $2 AND enabled = true', [staffId, companyId]),
@@ -151,8 +159,14 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
 // ---------------------------------------------------------------------------
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    const { companyId } = req.user!;
+    requirePermission(req, 'outboundRead');
+    const { companyId, role, staffId, permissions } = req.user!;
     const { limit = 50, offset = 0 } = req.query;
+
+    const scopedToOwn = role === 'agent' && !permissions.outboundAllRead && permissions.outboundScope !== 'all';
+    if (scopedToOwn) {
+      requireLinkedStaff(req);
+    }
 
     const result = await query(
       `SELECT c.*, cs.summary AS ai_summary, cs.intent,
@@ -162,10 +176,10 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
        LEFT JOIN call_summaries cs ON cs.call_id = c.id
        LEFT JOIN staff s ON s.id = c.initiated_by_staff_id
        LEFT JOIN transcriptions t ON t.call_id = c.id
-       WHERE c.company_id = $1 AND c.direction = 'outbound'
+       WHERE c.company_id = $1 AND c.direction = 'outbound'${scopedToOwn ? ' AND c.initiated_by_staff_id = $4' : ''}
        ORDER BY c.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [companyId, limit, offset]
+      scopedToOwn ? [companyId, limit, offset, staffId] : [companyId, limit, offset]
     );
 
     res.json({ calls: result.rows });
@@ -179,6 +193,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
 // ---------------------------------------------------------------------------
 router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'outboundRead');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertUuid(id);
@@ -196,6 +211,9 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
     );
 
     if (result.rows.length === 0) throw new AppError('Outbound call not found', 404);
+    if (!canAccessOutboundForStaff(req, result.rows[0].initiated_by_staff_id || null)) {
+      throw new AppError('Accès refusé à cet appel sortant', 403);
+    }
 
     const eventsResult = await query(
       'SELECT * FROM call_events WHERE call_id = $1 ORDER BY timestamp ASC',
@@ -214,6 +232,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
 // ---------------------------------------------------------------------------
 router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'outboundManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertUuid(id);
@@ -224,7 +243,7 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
 
     const [callResult, staffResult] = await Promise.all([
       query(
-        `SELECT c.call_sid, c.status FROM calls WHERE id = $1 AND company_id = $2 AND direction = 'outbound'`,
+        `SELECT c.call_sid, c.status, c.initiated_by_staff_id FROM calls WHERE id = $1 AND company_id = $2 AND direction = 'outbound'`,
         [id, companyId]
       ),
       query('SELECT * FROM staff WHERE id = $1 AND company_id = $2 AND enabled = true', [staffId, companyId]),
@@ -232,6 +251,9 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
 
     if (callResult.rows.length === 0) throw new AppError('Outbound call not found', 404);
     if (staffResult.rows.length === 0) throw new AppError('Staff member not found', 404);
+    if (!canAccessOutboundForStaff(req, callResult.rows[0].initiated_by_staff_id || null)) {
+      throw new AppError('Accès refusé à cet appel sortant', 403);
+    }
 
     const { call_sid: callSid, status } = callResult.rows[0];
     const staff = staffResult.rows[0];
@@ -270,16 +292,20 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
 // ---------------------------------------------------------------------------
 router.post('/:id/hangup', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'outboundManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertUuid(id);
 
     const callResult = await query(
-      `SELECT call_sid FROM calls WHERE id = $1 AND company_id = $2 AND direction = 'outbound'`,
+      `SELECT call_sid, initiated_by_staff_id FROM calls WHERE id = $1 AND company_id = $2 AND direction = 'outbound'`,
       [id, companyId]
     );
 
     if (callResult.rows.length === 0) throw new AppError('Outbound call not found', 404);
+    if (!canAccessOutboundForStaff(req, callResult.rows[0].initiated_by_staff_id || null)) {
+      throw new AppError('Accès refusé à cet appel sortant', 403);
+    }
     const { call_sid: callSid } = callResult.rows[0];
 
     if (callSid) {

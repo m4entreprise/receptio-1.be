@@ -17,6 +17,8 @@ import OutboundCall from './pages/OutboundCall';
 import Analytics from './pages/Analytics';
 import SettingsQA from './pages/SettingsQA';
 import SettingsIntents from './pages/SettingsIntents';
+import SettingsTeamAccess from './pages/SettingsTeamAccess';
+import AcceptInvitation from './pages/AcceptInvitation';
 import PrivateRoute from './components/PrivateRoute';
 import PrivateAdminRoute from './components/admin/PrivateAdminRoute';
 import AdminLogin from './pages/admin/AdminLogin';
@@ -42,6 +44,7 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/accept-invitation" element={<AcceptInvitation />} />
             <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
             <Route path="/calls" element={<PrivateRoute><Calls /></PrivateRoute>} />
             <Route path="/calls/:id" element={<PrivateRoute><CallDetail /></PrivateRoute>} />
@@ -56,6 +59,7 @@ function App() {
             <Route path="/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
             <Route path="/settings/qa" element={<PrivateRoute><SettingsQA /></PrivateRoute>} />
             <Route path="/settings/intents" element={<PrivateRoute><SettingsIntents /></PrivateRoute>} />
+            <Route path="/settings/team-access" element={<PrivateRoute><SettingsTeamAccess /></PrivateRoute>} />
 
             {/* ── Super Admin routes ── */}
             <Route path="/admin/login" element={<AdminLogin />} />

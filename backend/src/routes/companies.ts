@@ -4,6 +4,8 @@ import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { z } from 'zod';
+import { requirePermission } from '../utils/authz';
+import { writeAuditLogFromRequest } from '../utils/audit';
 
 const router = Router();
 
@@ -73,10 +75,11 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response, nex
 
 router.patch('/me', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'settingsManage');
     const { companyId } = req.user!;
     const data = updateCompanySchema.parse(req.body);
     const currentCompanyResult = await query(
-      'SELECT settings FROM companies WHERE id = $1',
+      'SELECT name, phone_number, settings FROM companies WHERE id = $1',
       [companyId]
     );
 
@@ -132,6 +135,22 @@ router.patch('/me', authenticateToken, async (req: AuthRequest, res: Response, n
        RETURNING id, name, phone_number, email, settings`,
       values
     );
+
+    await writeAuditLogFromRequest(req, {
+      action: 'company.settings_updated',
+      entityType: 'company_settings',
+      entityId: companyId,
+      targetLabel: result.rows[0].name,
+      before: {
+        name: currentCompanyResult.rows[0].name,
+        phone_number: currentCompanyResult.rows[0].phone_number,
+        settings: currentCompanyResult.rows[0].settings || {},
+      },
+      after: result.rows[0],
+      metadata: {
+        updatedFields: Object.keys(data),
+      },
+    });
 
     res.json({ company: result.rows[0] });
   } catch (error) {

@@ -25,6 +25,7 @@ import analyticsRoutes from './routes/analytics';
 import qaRoutes from './routes/qa';
 import intentsRoutes from './routes/intents';
 import superRoutes from './routes/super';
+import membersRoutes from './routes/members';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
@@ -110,6 +111,7 @@ app.use('/api/dispatch-rules', dispatchRulesRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/qa', qaRoutes);
 app.use('/api/intents', intentsRoutes);
+app.use('/api/members', membersRoutes);
 app.use('/api/super', superRoutes);
 
 app.use(errorHandler);

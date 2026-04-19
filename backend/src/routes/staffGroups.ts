@@ -4,6 +4,7 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
+import { requirePermission } from '../utils/authz';
 
 const router = Router();
 
@@ -69,7 +70,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
 // POST /api/staff-groups — create a new group (admin only)
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
 
     const { companyId } = req.user!;
     const data = groupSchema.parse(req.body);
@@ -97,7 +98,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
 // PATCH /api/staff-groups/:id — update group (admin only)
 router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
 
     const { companyId } = req.user!;
     const { id } = req.params;
@@ -137,7 +138,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
 // DELETE /api/staff-groups/:id — delete group (admin only)
 router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
 
     const { companyId } = req.user!;
     const { id } = req.params;
@@ -158,7 +159,7 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response,
 // POST /api/staff-groups/:id/members — add a staff member to the group
 router.post('/:id/members', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
 
     const { companyId } = req.user!;
     const { id: groupId } = req.params;
@@ -192,7 +193,7 @@ router.post('/:id/members', authenticateToken, async (req: AuthRequest, res: Res
 // DELETE /api/staff-groups/:id/members/:staffId — remove a staff member from the group
 router.delete('/:id/members/:staffId', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
 
     const { companyId } = req.user!;
     const { id: groupId, staffId } = req.params;
