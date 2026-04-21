@@ -4,6 +4,7 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
+import { requirePermission } from '../utils/authz';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ const ruleSchema = z.object({
 // POST /api/dispatch-rules/reorder — must be before /:id routes
 router.post('/reorder', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
     const { companyId } = req.user!;
     const { order } = z.object({ order: z.array(z.string().uuid()) }).parse(req.body);
 
@@ -73,7 +74,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
 // POST /api/dispatch-rules
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
     const { companyId } = req.user!;
     const data = ruleSchema.parse(req.body);
 
@@ -111,7 +112,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
 // PATCH /api/dispatch-rules/:id
 router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const data = ruleSchema.partial().parse(req.body);
@@ -152,7 +153,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
 // DELETE /api/dispatch-rules/:id
 router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    if (req.user!.role !== 'admin') throw new AppError('Forbidden', 403);
+    requirePermission(req, 'staffManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const result = await query(

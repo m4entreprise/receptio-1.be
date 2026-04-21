@@ -4,6 +4,7 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../types';
+import { requirePermission } from '../utils/authz';
 
 const router = Router();
 
@@ -19,6 +20,7 @@ const knowledgeBaseEntryUpdateSchema = knowledgeBaseEntrySchema.partial();
 
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'knowledgeBaseManage');
     const { companyId } = req.user!;
     const result = await query(
       `SELECT id, company_id, title, category, content, priority, enabled, created_at, updated_at
@@ -36,6 +38,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
 
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'knowledgeBaseManage');
     const { companyId } = req.user!;
     const data = knowledgeBaseEntrySchema.parse(req.body);
 
@@ -61,6 +64,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
 
 router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'knowledgeBaseManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const data = knowledgeBaseEntryUpdateSchema.parse(req.body);
@@ -119,6 +123,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
 
 router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'knowledgeBaseManage');
     const { companyId } = req.user!;
     const { id } = req.params;
     const result = await query(

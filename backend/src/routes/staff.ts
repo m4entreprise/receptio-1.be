@@ -5,6 +5,8 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
+import { isTenantAdminRole, requirePermission } from '../utils/authz';
+import { writeAuditLogFromRequest } from '../utils/audit';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -26,11 +28,14 @@ const getBaseUrl = (req: Request): string => {
 // GET /api/staff - list all staff for the tenant
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    const { companyId } = req.user!;
+    const { companyId, staffId } = req.user!;
+    const canManage = isTenantAdminRole(req.user!.role) || req.user!.permissions.staffManage;
     const result = await query(
       `SELECT id, first_name, last_name, phone_number, role, voicemail_message, enabled, created_at
-       FROM staff WHERE company_id = $1 ORDER BY first_name, last_name`,
-      [companyId]
+       FROM staff
+       WHERE company_id = $1${canManage ? '' : ' AND id = $2'}
+       ORDER BY first_name, last_name`,
+      canManage ? [companyId] : [companyId, staffId || null]
     );
     res.json({ staff: result.rows });
   } catch (error) {
@@ -41,8 +46,8 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
 // POST /api/staff - create a staff member
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    const { companyId, role } = req.user!;
-    if (role !== 'admin') throw new AppError('Admin only', 403);
+    requirePermission(req, 'staffManage');
+    const { companyId } = req.user!;
 
     const data = staffSchema.parse(req.body);
 
@@ -53,6 +58,13 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
       [companyId, data.firstName, data.lastName, data.phoneNumber, data.role || 'secrétaire', data.voicemailMessage || null]
     );
 
+    await writeAuditLogFromRequest(req, {
+      action: 'staff.created',
+      entityType: 'staff',
+      entityId: result.rows[0].id,
+      targetLabel: `${result.rows[0].first_name} ${result.rows[0].last_name}`,
+      after: result.rows[0],
+    });
     logger.info('Staff created', { companyId, staffId: result.rows[0].id });
     res.status(201).json({ staff: result.rows[0] });
   } catch (error) {
@@ -63,11 +75,13 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
 // PATCH /api/staff/:id - update a staff member
 router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    const { companyId, role } = req.user!;
-    if (role !== 'admin') throw new AppError('Admin only', 403);
+    requirePermission(req, 'staffManage');
+    const { companyId } = req.user!;
 
     const { id } = req.params;
     const data = staffSchema.partial().parse(req.body);
+    const beforeResult = await query('SELECT * FROM staff WHERE id = $1 AND company_id = $2', [id, companyId]);
+    if (beforeResult.rows.length === 0) throw new AppError('Staff member not found', 404);
 
     const fields: string[] = [];
     const params: any[] = [];
@@ -88,6 +102,14 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
     );
 
     if (result.rows.length === 0) throw new AppError('Staff member not found', 404);
+    await writeAuditLogFromRequest(req, {
+      action: 'staff.updated',
+      entityType: 'staff',
+      entityId: id,
+      targetLabel: `${result.rows[0].first_name} ${result.rows[0].last_name}`,
+      before: beforeResult.rows[0],
+      after: result.rows[0],
+    });
     res.json({ staff: result.rows[0] });
   } catch (error) {
     next(error);
@@ -97,15 +119,23 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
 // DELETE /api/staff/:id
 router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
-    const { companyId, role } = req.user!;
-    if (role !== 'admin') throw new AppError('Admin only', 403);
+    requirePermission(req, 'staffManage');
+    const { companyId } = req.user!;
 
     const { id } = req.params;
+    const beforeResult = await query('SELECT * FROM staff WHERE id = $1 AND company_id = $2', [id, companyId]);
     const result = await query(
       'DELETE FROM staff WHERE id = $1 AND company_id = $2 RETURNING id',
       [id, companyId]
     );
     if (result.rows.length === 0) throw new AppError('Staff member not found', 404);
+    await writeAuditLogFromRequest(req, {
+      action: 'staff.deleted',
+      entityType: 'staff',
+      entityId: id,
+      targetLabel: beforeResult.rows[0] ? `${beforeResult.rows[0].first_name} ${beforeResult.rows[0].last_name}` : id,
+      before: beforeResult.rows[0] || null,
+    });
     res.json({ message: 'Staff member deleted' });
   } catch (error) {
     next(error);

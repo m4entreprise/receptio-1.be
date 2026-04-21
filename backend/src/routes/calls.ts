@@ -7,6 +7,8 @@ import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { summarizeCall } from '../services/mistral';
 import { getAiModelsSettings } from '../services/offerB';
+import { requirePermission } from '../utils/authz';
+import { writeAuditLogFromRequest } from '../utils/audit';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -25,6 +27,7 @@ function assertValidCallId(id: string) {
 
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'callsRead');
     const { companyId } = req.user!;
     const { status, limit = 50, offset = 0 } = req.query;
 
@@ -65,6 +68,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
 
 router.get('/queued', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'callTransfer');
     const { companyId } = req.user!;
     const result = await query(
       `SELECT c.id, c.caller_number, c.caller_name, c.call_sid, c.queue_reason, c.queued_at, c.status
@@ -81,6 +85,7 @@ router.get('/queued', authenticateToken, async (req: AuthRequest, res: Response,
 
 router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'callDetailRead');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertValidCallId(id);
@@ -150,6 +155,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res: Response, ne
 
 router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'callRecordingsRead');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertValidCallId(id);
@@ -238,6 +244,7 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
 
 router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'callTransfer');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertValidCallId(id);
@@ -286,6 +293,7 @@ router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Res
 
 router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'callTransfer');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertValidCallId(id);
@@ -360,9 +368,15 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
 
 router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'callDelete');
     const { companyId } = req.user!;
     const { id } = req.params;
     assertValidCallId(id);
+
+    const beforeResult = await query(
+      'SELECT id, caller_number, status, direction, created_at FROM calls WHERE id = $1 AND company_id = $2',
+      [id, companyId]
+    );
 
     const result = await query(
       'DELETE FROM calls WHERE id = $1 AND company_id = $2 RETURNING id',
@@ -374,6 +388,14 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response,
     }
 
     logger.info('Call deleted', { callId: id, companyId });
+
+    await writeAuditLogFromRequest(req, {
+      action: 'call.deleted',
+      entityType: 'call',
+      entityId: id,
+      targetLabel: beforeResult.rows[0]?.caller_number || id,
+      before: beforeResult.rows[0] || null,
+    });
 
     res.json({ message: 'Call deleted successfully' });
   } catch (error) {

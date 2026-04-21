@@ -6,8 +6,30 @@ interface User {
   email: string;
   companyId: string;
   role: string;
+  status: 'invited' | 'active' | 'disabled';
+  staffId?: string | null;
   firstName?: string;
   lastName?: string;
+  permissions?: {
+    callsRead: boolean;
+    callDetailRead: boolean;
+    callRecordingsRead: boolean;
+    callTransfer: boolean;
+    callDelete: boolean;
+    outboundRead: boolean;
+    outboundCreate: boolean;
+    outboundManage: boolean;
+    outboundAllRead: boolean;
+    analyticsRead: boolean;
+    staffManage: boolean;
+    knowledgeBaseManage: boolean;
+    settingsManage: boolean;
+    intentsManage: boolean;
+    qaManage: boolean;
+    auditLogsRead: boolean;
+    memberManage: boolean;
+    outboundScope: 'own' | 'all';
+  };
 }
 
 interface AuthContextType {
@@ -42,6 +64,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (storedUser) {
         setUser(JSON.parse(storedUser));
       }
+      axios.get('/api/auth/me')
+        .then((response) => {
+          const refreshedUser = response.data.user;
+          setUser(refreshedUser);
+          localStorage.setItem('user', JSON.stringify(refreshedUser));
+        })
+        .catch(() => {
+        });
     }
     setIsLoading(false);
   }, [token]);

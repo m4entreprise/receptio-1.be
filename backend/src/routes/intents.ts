@@ -3,12 +3,14 @@ import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../types';
+import { requirePermission } from '../utils/authz';
 
 const router = Router();
 
 // GET /api/intents
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'intentsManage');
     const { companyId } = req.user!;
     const result = await query(
       `SELECT id, company_id, label, description, keywords, color, position, is_active, created_at
@@ -26,6 +28,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
 // POST /api/intents
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'intentsManage');
     const { companyId } = req.user!;
     const { label, description = null, keywords = null, color = '#344453', position = 0 } = req.body;
 
@@ -46,6 +49,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
 // PATCH /api/intents/:id
 router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'intentsManage');
     const { companyId } = req.user!;
     const { id } = req.params;
 
@@ -87,6 +91,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
 // DELETE /api/intents/:id
 router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
+    requirePermission(req, 'intentsManage');
     const { companyId } = req.user!;
     const { id } = req.params;
 
