@@ -157,9 +157,23 @@
   display: none;
 }
 
+/* GPU-accelerated waveform bars — no JS state needed */
 @keyframes waveform-bar {
-  0%, 100% { transform: scaleY(0.15); }
-  50% { transform: scaleY(1); }
+  from { transform: scaleY(0.06); }
+  to   { transform: scaleY(1); }
+}
+
+.waveform-bar-el {
+  height: 100%;
+  transform-origin: center;
+  transform: scaleY(0.06);
+  animation: waveform-bar
+    var(--wf-dur, 0.85s)
+    ease-in-out
+    var(--wf-delay, 0s)
+    infinite
+    alternate;
+  animation-play-state: var(--wf-play, running);
 }
 
 @media (prefers-reduced-motion: reduce) {

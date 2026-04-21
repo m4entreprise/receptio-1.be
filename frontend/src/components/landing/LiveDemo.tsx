@@ -11,36 +11,23 @@ interface Message {
   text: string;
 }
 
+// Pure CSS waveform — no JS state, animation-play-state toggles on/off
 function WaveformBars({ active }: { active: boolean }) {
-  const [bars, setBars] = useState(() => Array.from({ length: 24 }, () => 0.15));
-
-  useEffect(() => {
-    if (!active) {
-      setBars(Array.from({ length: 24 }, () => 0.06));
-      return;
-    }
-    let t = 0;
-    const iv = setInterval(() => {
-      t += 0.12;
-      setBars(Array.from({ length: 24 }, (_, i) => {
-        const v = Math.sin(t + i * 0.45) * 0.28 + 0.35;
-        return Math.max(0.06, Math.min(0.95, v + Math.sin(t * 1.7 + i * 0.8) * 0.12));
-      }));
-    }, 50);
-    return () => clearInterval(iv);
-  }, [active]);
-
   return (
-    <div className="flex items-center gap-0.5 h-8">
-      {bars.map((h, i) => (
-        <div
-          key={i}
-          className="w-0.5 rounded-full transition-all duration-75"
-          style={{
-            height: `${h * 100}%`,
-            background: active ? `rgba(199,96,29,${0.4 + h * 0.6})` : 'rgba(255,255,255,0.12)',
-          }}
-        />
+    <div className="flex items-center gap-0.5 h-8" aria-hidden="true">
+      {Array.from({ length: 20 }, (_, i) => (
+        <div key={i} className="relative h-full flex items-center" style={{ width: 2 }}>
+          <div
+            className="waveform-bar-el w-full rounded-full"
+            style={{
+              '--wf-dur': `${0.5 + (i % 7) * 0.09}s`,
+              '--wf-delay': `${((i * 97) % 140) / 100}s`,
+              '--wf-play': active ? 'running' : 'paused',
+              background: active ? 'rgba(199,96,29,0.65)' : 'rgba(255,255,255,0.12)',
+              transition: 'background 0.3s ease',
+            } as React.CSSProperties}
+          />
+        </div>
       ))}
     </div>
   );

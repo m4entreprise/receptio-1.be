@@ -1,12 +1,13 @@
 import { useEffect, useRef } from 'react';
 
+// Reduced to 3 FBM octaves (was 5) — ~40% fewer GPU operations
 const VERT = `
   attribute vec2 a_pos;
   void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
 `;
 
 const FRAG = `
-  precision mediump float;
+  precision lowp float;
   uniform float u_time;
   uniform vec2 u_res;
 
@@ -35,7 +36,7 @@ const FRAG = `
   float fbm(vec2 p) {
     float v = 0.0;
     float w = 0.5;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 3; i++) {
       v += w * snoise(p);
       p = mat2(1.6, 1.2, -1.2, 1.6) * p;
       w *= 0.5;
@@ -83,13 +84,20 @@ function compileShader(gl: WebGLRenderingContext, type: number, src: string) {
   return s;
 }
 
+const TARGET_FPS = 24;
+const FRAME_MS = 1000 / TARGET_FPS;
+// Render at 50% of display resolution — visually identical at this scale
+const RENDER_SCALE = 0.5;
+
 export default function WebGLBackground() {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
     const canvas = ref.current;
     if (!canvas) return;
-    const gl = canvas.getContext('webgl');
+    const gl = canvas.getContext('webgl', { antialias: false, powerPreference: 'low-power' });
     if (!gl) return;
 
     const vs = compileShader(gl, gl.VERTEX_SHADER, VERT);
@@ -112,27 +120,40 @@ export default function WebGLBackground() {
     const uRes = gl.getUniformLocation(prog, 'u_res');
 
     const resize = () => {
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
+      canvas.width = Math.floor(canvas.offsetWidth * RENDER_SCALE);
+      canvas.height = Math.floor(canvas.offsetHeight * RENDER_SCALE);
       gl.viewport(0, 0, canvas.width, canvas.height);
     };
     resize();
-    window.addEventListener('resize', resize);
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
 
     const t0 = performance.now();
-    let raf = 0;
-    const tick = () => {
-      gl.uniform1f(uTime, (performance.now() - t0) / 1000);
+    let rafId = 0;
+    let lastFrame = 0;
+    let paused = false;
+
+    const tick = (now: number) => {
+      rafId = requestAnimationFrame(tick);
+      if (paused || now - lastFrame < FRAME_MS) return;
+      lastFrame = now;
+      gl.uniform1f(uTime, (now - t0) / 1000);
       gl.uniform2f(uRes, canvas.width, canvas.height);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      raf = requestAnimationFrame(tick);
     };
-    tick();
+    rafId = requestAnimationFrame(tick);
+
+    const onVisibility = () => { paused = document.hidden; };
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', resize);
+      cancelAnimationFrame(rafId);
+      ro.disconnect();
+      document.removeEventListener('visibilitychange', onVisibility);
       gl.deleteProgram(prog);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      gl.deleteBuffer(buf);
     };
   }, []);
 
@@ -140,7 +161,7 @@ export default function WebGLBackground() {
     <canvas
       ref={ref}
       className="absolute inset-0 w-full h-full pointer-events-none"
-      style={{ opacity: 0.95 }}
+      style={{ opacity: 0.95, imageRendering: 'auto' }}
     />
   );
 }

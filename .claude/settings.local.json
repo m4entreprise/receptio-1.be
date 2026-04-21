@@ -17,7 +17,9 @@
       "Bash(npm run:*)",
       "Bash(node fix-mistral.js)",
       "Bash(node fix-detect.js)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(sort -t'│' -k3 -rn)",
+      "Bash(grep -v \"^$\")"
     ]
   },
   "outputStyle": "default"

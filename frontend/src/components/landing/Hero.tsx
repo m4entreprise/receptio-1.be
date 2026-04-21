@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import type React from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { motion, useMotionValue, useSpring } from 'framer-motion';
+import { motion, useMotionValue, useSpring, useReducedMotion } from 'framer-motion';
 import type { Variants } from 'framer-motion';
 import { ArrowRight, Play, ChevronDown } from 'lucide-react';
 import WebGLBackground from './WebGLBackground';
@@ -10,38 +11,23 @@ interface HeroProps {
   isAuthenticated: boolean;
 }
 
-const WAVEFORM_BARS = 40;
+const BARS = 32;
 
+// Pure CSS animation — zero JS state, runs on GPU compositor thread
 function WaveformViz() {
-  const [bars, setBars] = useState(() => Array.from({ length: WAVEFORM_BARS }, () => 0.1));
-
-  useEffect(() => {
-    let t = 0;
-    const iv = setInterval(() => {
-      t += 0.08;
-      setBars(Array.from({ length: WAVEFORM_BARS }, (_, i) => {
-        const base = Math.sin(t + i * 0.35) * 0.3 + 0.35;
-        const noise = Math.sin(t * 2.1 + i * 0.7) * 0.15;
-        const spike = Math.sin(t * 0.5 + i * 0.12) * 0.2;
-        return Math.max(0.04, Math.min(1, base + noise + spike));
-      }));
-    }, 40);
-    return () => clearInterval(iv);
-  }, []);
-
   return (
-    <div className="flex items-center gap-[3px] h-12">
-      {bars.map((h, i) => (
-        <div
-          key={i}
-          className="w-1 rounded-full transition-all duration-75"
-          style={{
-            height: `${h * 100}%`,
-            background: i % 7 === 0
-              ? '#C7601D'
-              : `rgba(255,255,255,${0.15 + h * 0.55})`,
-          }}
-        />
+    <div className="flex items-center gap-[3px] h-12" aria-hidden="true">
+      {Array.from({ length: BARS }, (_, i) => (
+        <div key={i} className="relative h-full flex items-center" style={{ width: 4 }}>
+          <div
+            className="waveform-bar-el w-full rounded-full"
+            style={{
+              '--wf-dur': `${0.65 + (i % 9) * 0.1}s`,
+              '--wf-delay': `${((i * 137) % 160) / 100}s`,
+              background: i % 7 === 0 ? 'rgba(199,96,29,0.7)' : 'rgba(255,255,255,0.3)',
+            } as React.CSSProperties}
+          />
+        </div>
       ))}
     </div>
   );
@@ -63,22 +49,31 @@ const lineVariant: Variants = {
 
 export default function Hero({ isAuthenticated }: HeroProps) {
   const { t } = useTranslation();
+  const shouldReduceMotion = useReducedMotion();
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
-  const springX = useSpring(mouseX, { stiffness: 60, damping: 22 });
-  const springY = useSpring(mouseY, { stiffness: 60, damping: 22 });
+  const springX = useSpring(mouseX, { stiffness: 50, damping: 25 });
+  const springY = useSpring(mouseY, { stiffness: 50, damping: 25 });
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (shouldReduceMotion) return;
+    let ticking = false;
     const onMove = (e: MouseEvent) => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      mouseX.set(((e.clientX - rect.left) / rect.width - 0.5) * 16);
-      mouseY.set(((e.clientY - rect.top) / rect.height - 0.5) * 10);
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          mouseX.set(((e.clientX - rect.left) / rect.width - 0.5) * 14);
+          mouseY.set(((e.clientY - rect.top) / rect.height - 0.5) * 8);
+        }
+        ticking = false;
+      });
     };
-    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mousemove', onMove, { passive: true });
     return () => window.removeEventListener('mousemove', onMove);
-  }, [mouseX, mouseY]);
+  }, [mouseX, mouseY, shouldReduceMotion]);
 
   return (
     <section
