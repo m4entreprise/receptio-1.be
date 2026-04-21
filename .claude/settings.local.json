@@ -19,7 +19,8 @@
       "Bash(node fix-detect.js)",
       "Bash(npm install *)",
       "Bash(sort -t'│' -k3 -rn)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(node -e ' *)"
     ]
   },
   "outputStyle": "default"

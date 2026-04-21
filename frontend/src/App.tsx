@@ -27,6 +27,15 @@ const SettingsQA = lazy(() => import('./pages/SettingsQA'));
 const SettingsIntents = lazy(() => import('./pages/SettingsIntents'));
 const SettingsTeamAccess = lazy(() => import('./pages/SettingsTeamAccess'));
 
+// Static pages — lazy loaded
+const Privacy = lazy(() => import('./pages/Privacy'));
+const Terms = lazy(() => import('./pages/Terms'));
+const Cookies = lazy(() => import('./pages/Cookies'));
+const Blog = lazy(() => import('./pages/Blog'));
+const Changelog = lazy(() => import('./pages/Changelog'));
+const About = lazy(() => import('./pages/About'));
+const Careers = lazy(() => import('./pages/Careers'));
+
 // Admin pages — lazy loaded
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin'));
 const AdminTenants = lazy(() => import('./pages/admin/AdminTenants'));
@@ -61,6 +70,15 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/accept-invitation" element={<AcceptInvitation />} />
+
+              {/* ── Static pages ── */}
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/cookies" element={<Cookies />} />
+              <Route path="/blog" element={<Blog />} />
+              <Route path="/changelog" element={<Changelog />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/careers" element={<Careers />} />
 
               {/* ── Tenant routes (lazy) ── */}
               <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />

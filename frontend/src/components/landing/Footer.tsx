@@ -4,35 +4,41 @@ import { Globe } from 'lucide-react';
 
 const LANGS = ['FR', 'EN', 'NL'] as const;
 
+interface FooterLink {
+  label: string;
+  href?: string;
+  to?: string;
+}
+
 export default function Footer() {
   const { t, i18n } = useTranslation();
   const currentLang = i18n.language?.toUpperCase().slice(0, 2) || 'FR';
 
-  const cols = [
+  const cols: { title: string; links: FooterLink[] }[] = [
     {
       title: t('footer.product'),
       links: [
         { label: t('footer.features'), href: '#features' },
         { label: t('footer.pricing'), href: '#pricing' },
         { label: t('footer.demo'), href: '#demo' },
-        { label: t('footer.changelog'), href: '#' },
+        { label: t('footer.changelog'), to: '/changelog' },
       ],
     },
     {
       title: t('footer.company'),
       links: [
-        { label: t('footer.about'), href: '#' },
+        { label: t('footer.about'), to: '/about' },
         { label: t('footer.story'), href: '#story' },
-        { label: t('footer.blog'), href: '#' },
-        { label: t('footer.careers'), href: '#' },
+        { label: t('footer.blog'), to: '/blog' },
+        { label: t('footer.careers'), to: '/careers' },
       ],
     },
     {
       title: t('footer.legal'),
       links: [
-        { label: t('footer.privacy'), href: '#' },
-        { label: t('footer.terms'), href: '#' },
-        { label: t('footer.cookies'), href: '#' },
+        { label: t('footer.privacy'), to: '/privacy' },
+        { label: t('footer.terms'), to: '/terms' },
+        { label: t('footer.cookies'), to: '/cookies' },
       ],
     },
   ];
@@ -68,12 +74,21 @@ export default function Footer() {
               <ul className="space-y-3">
                 {col.links.map((link) => (
                   <li key={link.label}>
-                    <a
-                      href={link.href}
-                      className="font-body text-sm text-white/25 hover:text-white/60 transition-colors"
-                    >
-                      {link.label}
-                    </a>
+                    {link.to ? (
+                      <Link
+                        to={link.to}
+                        className="font-body text-sm text-white/25 hover:text-white/60 transition-colors"
+                      >
+                        {link.label}
+                      </Link>
+                    ) : (
+                      <a
+                        href={link.href}
+                        className="font-body text-sm text-white/25 hover:text-white/60 transition-colors"
+                      >
+                        {link.label}
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>
