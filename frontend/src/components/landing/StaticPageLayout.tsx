@@ -44,7 +44,7 @@ export default function StaticPageLayout({
           >
             <Link
               to="/"
-              className="inline-flex items-center gap-2 text-white/30 hover:text-white/60 transition-colors text-sm font-body mb-8"
+              className="inline-flex items-center gap-2 text-white/30 hover:text-white/60 transition-colors text-sm font-body mb-8 mr-6"
             >
               <ArrowLeft size={14} />
               Retour à l'accueil
