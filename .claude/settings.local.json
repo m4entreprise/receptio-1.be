@@ -16,7 +16,8 @@
       "Bash(grep -h \"VALUES.*event_type\" /c/Users/filog/Documents/GitHub/receptio-1.be/backend/src/routes/*.ts -B 2)",
       "Bash(npm run:*)",
       "Bash(node fix-mistral.js)",
-      "Bash(node fix-detect.js)"
+      "Bash(node fix-detect.js)",
+      "Bash(npm install *)"
     ]
   },
   "outputStyle": "default"

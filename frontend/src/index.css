@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -135,6 +137,29 @@
     transform: translateY(-6px);
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
   }
+}
+
+/* Landing page specific */
+.bg-radial-glow {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(52,68,83,0.25) 0%, transparent 70%);
+}
+
+.bg-radial-glow-center {
+  background: radial-gradient(ellipse 70% 50% at 50% 50%, rgba(52,68,83,0.2) 0%, transparent 70%);
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes waveform-bar {
+  0%, 100% { transform: scaleY(0.15); }
+  50% { transform: scaleY(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
