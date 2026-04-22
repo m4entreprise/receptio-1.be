@@ -72,8 +72,7 @@ export default function ROISimulator() {
     const monthlyMinutes = callsPerDay * WORKING_DAYS * avgDuration;
     const hoursPerMonth = monthlyMinutes / 60;
     // Fraction d'ETP consacré aux appels
-    const receptionPct = Math.min(1, hoursPerMonth / WORKING_HOURS_PER_MONTH);
-    const fteNeeded = receptionPct;
+    const fteNeeded = Math.min(1, hoursPerMonth / WORKING_HOURS_PER_MONTH);
     const employeeCost = Math.round(fteNeeded * EMPLOYEE_MONTHLY_COST);
     const savings = Math.max(0, employeeCost - receptioCost);
     return {
@@ -82,7 +81,6 @@ export default function ROISimulator() {
       employeeCost,
       savings,
       annualSavings: savings * 12,
-      receptionPct,
     };
   }, [callsPerDay, avgDuration, receptioCost]);
 
