@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import {
   Users, Plus, Trash2, Pencil, Phone, X, Check,
   ChevronDown, ChevronUp, Layers, Clock, UserPlus, GitBranch,
-  ArrowRight, Info,
+  Info,
 } from 'lucide-react';
 import axios from 'axios';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import DispatchFlowBuilder from '../components/DispatchFlowBuilder';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -757,22 +758,6 @@ function DispatchTab() {
     catch { setError('Erreur lors de la suppression.'); }
   };
 
-  const toggleEnabled = async (r: DispatchRule) => {
-    try {
-      await axios.patch(`/api/dispatch-rules/${r.id}`, { enabled: !r.enabled });
-      setRules(prev => prev.map(rl => rl.id === r.id ? { ...rl, enabled: !rl.enabled } : rl));
-    } catch { setError('Erreur lors de la mise à jour.'); }
-  };
-
-  const moveRule = async (idx: number, dir: -1 | 1) => {
-    const swapIdx = idx + dir;
-    if (swapIdx < 0 || swapIdx >= rules.length) return;
-    const newRules = [...rules];
-    [newRules[idx], newRules[swapIdx]] = [newRules[swapIdx], newRules[idx]];
-    setRules(newRules);
-    try { await axios.post('/api/dispatch-rules/reorder', { order: newRules.map(r => r.id) }); }
-    catch { await fetchRules(); }
-  };
 
   const handleGroupChange = (groupId: string) => {
     const grp = groups.find(g => g.id === groupId);
@@ -788,20 +773,6 @@ function DispatchTab() {
     setForm(prev => ({ ...prev, agentOrder: newOrder }));
   };
 
-  const strategyLabel = (s: string) => {
-    if (s === 'sequential') return 'Séquentiel';
-    if (s === 'random') return 'Aléatoire';
-    if (s === 'simultaneous') return 'Simultané';
-    return s;
-  };
-
-  const fallbackLabel = (r: DispatchRule) => {
-    if (r.fallback_type === 'voicemail') return 'Messagerie vocale';
-    if (r.fallback_type === 'none') return 'Raccrocher';
-    if (r.fallback_type === 'group') return r.fallback_group_name || 'Groupe de repli';
-    if (r.fallback_type === 'agent') return `${r.fallback_staff_first_name || ''} ${r.fallback_staff_last_name || ''}`.trim() || 'Agent de repli';
-    return '—';
-  };
 
   if (loading) return <Loader />;
 
@@ -829,159 +800,22 @@ function DispatchTab() {
 
       {error && <ErrorBanner message={error} />}
 
-      {/* Visual flow */}
-      {rules.length === 0 ? (
-        <div className="flex flex-col items-center gap-4 py-6">
-          <div className="inline-flex items-center gap-2 rounded-[16px] border-2 border-[#344453] bg-[#344453] px-5 py-3 text-sm font-semibold text-white shadow-sm">
-            <Phone className="h-4 w-4" />
-            Appel entrant
-          </div>
-          <div className="h-6 w-px border-l-2 border-dashed border-[#344453]/20" />
-          <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-[16px] border-2 border-dashed border-[#344453]/25 bg-white px-5 py-3 text-sm font-medium text-[#344453]/55 transition hover:border-[#C7601D]/40 hover:text-[#C7601D]">
-            <Plus className="h-4 w-4" /> Ajouter la première règle
-          </button>
-        </div>
-      ) : (
-        <div>
-          {/* Incoming call node */}
-          <div className="flex justify-center">
-            <div className="inline-flex items-center gap-2 rounded-[16px] border-2 border-[#344453] bg-[#344453] px-5 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(52,68,83,0.2)]">
-              <Phone className="h-4 w-4" />
-              Appel entrant
-            </div>
-          </div>
-
-          {/* Rules */}
-          {rules.map((rule, idx) => (
-            <div key={rule.id}>
-              {/* Connector */}
-              <div className="flex justify-center py-1.5">
-                <div className="flex flex-col items-center gap-0.5">
-                  <div className="h-5 w-px border-l-2 border-dashed border-[#344453]/20" />
-                  <span className="text-[10px] text-[#344453]/30">▼</span>
-                </div>
-              </div>
-
-              {/* Rule node */}
-              <div className={`overflow-hidden rounded-[20px] border transition ${rule.enabled ? 'border-[#344453]/12 bg-white shadow-sm' : 'border-[#344453]/8 bg-[#344453]/3 opacity-60'}`}>
-                {/* Node header bar */}
-                <div className="flex items-center justify-between border-b border-[#344453]/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#344453]/8 text-[11px] font-bold text-[#344453]" style={{ fontFamily: 'var(--font-mono)' }}>
-                      {idx + 1}
-                    </span>
-                    <span className="text-sm font-semibold text-[#141F28]">{rule.name}</span>
-                    {!rule.enabled && (
-                      <span className="rounded-full bg-[#344453]/10 px-2 py-0.5 text-[10px] font-medium text-[#344453]/50">Désactivée</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => toggleEnabled(rule)} title={rule.enabled ? 'Désactiver' : 'Activer'}
-                      className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${rule.enabled ? 'border-[#2D9D78]/25 bg-[#2D9D78]/8 text-[#2D9D78] hover:bg-[#2D9D78]/15' : 'border-[#344453]/15 bg-white text-[#344453]/40 hover:bg-[#344453]/5'}`}>
-                      <Check className="h-3 w-3" />
-                    </button>
-                    <button onClick={() => openEdit(rule)}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#344453]/15 bg-white text-[#344453] transition hover:bg-[#344453]/5">
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                    <button onClick={() => moveRule(idx, -1)} disabled={idx === 0}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#344453]/15 bg-white text-[#344453] transition hover:bg-[#344453]/5 disabled:opacity-25">
-                      <ChevronUp className="h-3 w-3" />
-                    </button>
-                    <button onClick={() => moveRule(idx, 1)} disabled={idx === rules.length - 1}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#344453]/15 bg-white text-[#344453] transition hover:bg-[#344453]/5 disabled:opacity-25">
-                      <ChevronDown className="h-3 w-3" />
-                    </button>
-                    <button onClick={() => handleDelete(rule.id)}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#D94052]/20 bg-[#D94052]/6 text-[#D94052] transition hover:bg-[#D94052]/12">
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Flow visualization */}
-                <div className="p-4 space-y-3">
-                  {/* Condition → Target → Fallback chain */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* Condition */}
-                    <div className="flex items-center gap-1.5 rounded-[10px] border border-[#344453]/15 bg-[#344453]/5 px-3 py-1.5">
-                      <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[#344453]/40">Si</span>
-                      <span className="text-sm font-medium text-[#344453]">
-                        {rule.condition_type === 'always'
-                          ? 'Toujours'
-                          : (rule.conditions?.intents || []).join(', ') || 'Intent IA'
-                        }
-                      </span>
-                    </div>
-
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#344453]/25" />
-
-                    {/* Target */}
-                    <div className="flex items-center gap-1.5 rounded-[10px] border border-[#C7601D]/20 bg-[#C7601D]/8 px-3 py-1.5">
-                      <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[#C7601D]/50">Vers</span>
-                      <span className="text-sm font-medium text-[#C7601D]">
-                        {rule.target_type === 'group'
-                          ? (rule.target_group_name || 'Groupe')
-                          : `${rule.target_staff_first_name || ''} ${rule.target_staff_last_name || ''}`.trim() || 'Agent'
-                        }
-                      </span>
-                      {rule.target_type === 'group' && (
-                        <span className="rounded-full bg-[#C7601D]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[#C7601D]">
-                          {strategyLabel(rule.distribution_strategy)}
-                        </span>
-                      )}
-                    </div>
-
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#344453]/25" />
-
-                    {/* Fallback */}
-                    <div className="flex items-center gap-1.5 rounded-[10px] border border-[#2D9D78]/20 bg-[#2D9D78]/8 px-3 py-1.5">
-                      <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[#2D9D78]/50">Sinon</span>
-                      <span className="text-sm font-medium text-[#2D9D78]">{fallbackLabel(rule)}</span>
-                    </div>
-                  </div>
-
-                  {/* Sequential agent order */}
-                  {rule.target_type === 'group' && rule.distribution_strategy === 'sequential' && rule.agent_order?.length > 0 && (
-                    <div className="flex items-center gap-2 overflow-x-auto">
-                      <span className="shrink-0 text-[10px] uppercase tracking-[0.15em] text-[#344453]/35" style={{ fontFamily: 'var(--font-mono)' }}>Ordre :</span>
-                      {rule.agent_order.map((agentId, i) => {
-                        const grp = groups.find(g => g.id === rule.target_group_id);
-                        const member = grp?.members.find(m => m.id === agentId) || allStaff.find(s => s.id === agentId);
-                        return (
-                          <div key={agentId} className="flex shrink-0 items-center gap-1.5">
-                            {i > 0 && <ArrowRight className="h-3 w-3 text-[#344453]/20" />}
-                            <div className="flex items-center gap-1.5 rounded-xl border border-[#344453]/10 bg-[#F8F9FB] px-2.5 py-1">
-                              <span className="text-[9px] font-bold text-[#344453]/30" style={{ fontFamily: 'var(--font-mono)' }}>{i + 1}</span>
-                              <span className="text-xs font-medium text-[#344453]">
-                                {member ? `${member.first_name} ${member.last_name}` : '?'}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {rule.description && (
-                    <p className="text-xs text-[#344453]/40 italic">{rule.description}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {/* Bottom connector + add button */}
-          <div className="flex flex-col items-center pt-1.5">
-            <div className="flex flex-col items-center gap-0.5">
-              <div className="h-5 w-px border-l-2 border-dashed border-[#344453]/15" />
-            </div>
-            <button onClick={openCreate} className="mt-1 inline-flex items-center gap-2 rounded-[16px] border-2 border-dashed border-[#344453]/20 bg-white px-5 py-3 text-sm font-medium text-[#344453]/50 transition hover:border-[#C7601D]/40 hover:text-[#C7601D]">
-              <Plus className="h-4 w-4" /> Ajouter une règle
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Dispatch Flow Builder */}
+      <DispatchFlowBuilder
+        rules={rules}
+        groups={groups}
+        staff={allStaff}
+        onRuleClick={openEdit}
+        onCreateRule={openCreate}
+        onDeleteRule={handleDelete}
+        onUpdatePositions={async (updates) => {
+          await Promise.all(
+            updates.map(({ id, x, y }) =>
+              axios.patch(`/api/dispatch-rules/${id}`, { position_x: x, position_y: y })
+            )
+          );
+        }}
+      />
 
       {/* Right-side drawer for create/edit */}
       {showDrawer && (

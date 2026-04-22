@@ -63,15 +63,19 @@ interface DispatchRule {
   target_group_id: string | null;
   target_staff_id: string | null;
   distribution_strategy: 'sequential' | 'random' | 'simultaneous';
+  agent_order: string[];
   fallback_type: 'voicemail' | 'none' | 'group' | 'agent';
   fallback_group_id: string | null;
   fallback_staff_id: string | null;
   position_x?: number;
   position_y?: number;
-  target_group_name?: string | null;
-  target_staff_first_name?: string | null;
-  target_staff_last_name?: string | null;
-  fallback_group_name?: string | null;
+  target_group_name: string | null;
+  target_group_role: string | null;
+  target_staff_first_name: string | null;
+  target_staff_last_name: string | null;
+  fallback_group_name: string | null;
+  fallback_staff_first_name: string | null;
+  fallback_staff_last_name: string | null;
 }
 
 interface DispatchFlowBuilderProps {
