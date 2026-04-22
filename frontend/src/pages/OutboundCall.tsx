@@ -53,104 +53,251 @@ interface CallEvent {
 
 const ACTIVE_STATUSES = new Set(['initiated', 'ringing', 'answered', 'in-progress']);
 
+// DTMF frequencies [row, col] per digit
+const DTMF_FREQS: Record<string, [number, number]> = {
+  '1': [697, 1209], '2': [697, 1336], '3': [697, 1477],
+  '4': [770, 1209], '5': [770, 1336], '6': [770, 1477],
+  '7': [852, 1209], '8': [852, 1336], '9': [852, 1477],
+  '*': [941, 1209], '0': [941, 1336], '#': [941, 1633],
+};
+
+const KEYPAD_ROWS = [
+  [{ d: '1', s: '' },    { d: '2', s: 'ABC' }, { d: '3', s: 'DEF' }],
+  [{ d: '4', s: 'GHI' }, { d: '5', s: 'JKL' }, { d: '6', s: 'MNO' }],
+  [{ d: '7', s: 'PQRS'},{ d: '8', s: 'TUV' }, { d: '9', s: 'WXYZ'}],
+  [{ d: '*', s: '' },    { d: '0', s: '+' },   { d: '#', s: '' }],
+];
+
 // ---------------------------------------------------------------------------
-// Initiation panel — shown when no callId in URL
+// Initiation panel — phone dialer UI
 // ---------------------------------------------------------------------------
 function InitiatePanel({ staff, onCallStarted }: { staff: StaffMember[]; onCallStarted: (id: string) => void }) {
-  const [destinationNumber, setDestinationNumber] = useState('');
+  const [number, setNumber] = useState('');
   const [staffId, setStaffId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressDidFireRef = useRef(false);
 
   useEffect(() => {
-    if (staff.length > 0 && !staffId) {
-      setStaffId(staff[0].id);
-    }
+    if (staff.length > 0 && !staffId) setStaffId(staff[0].id);
   }, [staff]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!destinationNumber.trim() || !staffId) return;
+  // ── DTMF tone ─────────────────────────────────────────────────────────────
+  const playTone = (digit: string) => {
+    const freqs = DTMF_FREQS[digit];
+    if (!freqs) return;
+    try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new AudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') void ctx.resume();
+      const now = ctx.currentTime;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.07, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+      gain.connect(ctx.destination);
+      freqs.forEach(freq => {
+        const osc = ctx.createOscillator();
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.13);
+      });
+    } catch { /* Web Audio not available */ }
+  };
+
+  // ── Digit input ───────────────────────────────────────────────────────────
+  const pushDigit = (d: string) => {
+    if (number.length >= 16) return;
+    playTone(d);
+    setFlashKey(d);
+    setTimeout(() => setFlashKey(null), 110);
+    setNumber(p => p + d);
+    setError('');
+  };
+
+  const pushPlus = () => {
+    if (number.length === 0) { setNumber('+'); setError(''); }
+  };
+
+  const backspace = () => setNumber(p => p.slice(0, -1));
+  const clearAll  = () => setNumber('');
+
+  // ── Keyboard support ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLSelectElement) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (/^[0-9*#]$/.test(e.key))             { e.preventDefault(); pushDigit(e.key); }
+      else if (e.key === '+' && !number)        { e.preventDefault(); pushPlus(); }
+      else if (e.key === 'Backspace')           { e.preventDefault(); backspace(); }
+      else if (e.key === 'Delete')              { e.preventDefault(); clearAll(); }
+      else if (e.key === 'Enter' && canCall)    { e.preventDefault(); void handleCall(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [number, staffId]);
+
+  // ── Long-press 0 → '+' ────────────────────────────────────────────────────
+  const onZeroDown = () => {
+    longPressDidFireRef.current = false;
+    longPressRef.current = setTimeout(() => {
+      longPressDidFireRef.current = true;
+      longPressRef.current = null;
+      setNumber(p => (p === '' ? '+' : p + '+'));
+      setError('');
+    }, 600);
+  };
+
+  const onZeroUp = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+    if (!longPressDidFireRef.current) pushDigit('0');
+  };
+
+  const onZeroLeave = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+      if (!longPressDidFireRef.current) pushDigit('0');
+    }
+  };
+
+  // ── Call ──────────────────────────────────────────────────────────────────
+  const handleCall = async () => {
+    if (!number.trim() || !staffId) return;
     setError('');
     setLoading(true);
     try {
-      const res = await axios.post('/api/outbound-calls', { destinationNumber: destinationNumber.trim(), staffId });
+      const res = await axios.post('/api/outbound-calls', { destinationNumber: number.trim(), staffId });
       onCallStarted(res.data.callId);
-    } catch (err: any) {
-      setError(err?.response?.data?.error || 'Erreur lors de l\'initiation de l\'appel.');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e?.response?.data?.error || "Erreur lors de l'initiation de l'appel.");
     } finally {
       setLoading(false);
     }
   };
 
+  const canCall = number.replace(/[^0-9+]/g, '').length >= 6 && !!staffId;
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-xl">
-      <div className="overflow-hidden rounded-[28px] border border-[#344453]/15 bg-[#141F28] p-6 text-white shadow-[0_24px_60px_rgba(20,31,40,0.18)] sm:p-8">
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50" style={{ fontFamily: 'var(--font-mono)' }}>
-          <Phone className="h-3.5 w-3.5" />
-          Appel sortant
-        </div>
-        <h1 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-white sm:text-3xl" style={{ fontFamily: 'var(--font-title)' }}>
-          Passer un appel
-        </h1>
-        <p className="mt-2 text-sm leading-7 text-white/55">
-          Entrez le numéro à appeler et choisissez le membre de l'équipe qui sera mis en relation.
-        </p>
-      </div>
+    <div className="mx-auto max-w-xs">
+      <div className="overflow-hidden rounded-3xl border border-[#344453]/12 bg-white shadow-[0_8px_32px_rgba(52,68,83,0.12)]">
 
-      <form onSubmit={handleSubmit} className="mt-5 space-y-4 rounded-[28px] border border-[#344453]/10 bg-white p-6 shadow-sm sm:p-7">
-        <div>
-          <label className="block text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 mb-2" style={{ fontFamily: 'var(--font-mono)' }}>
-            Numéro de destination
-          </label>
-          <input
-            type="tel"
-            value={destinationNumber}
-            onChange={(e) => setDestinationNumber(e.target.value)}
-            placeholder="+32 470 12 34 56"
-            required
-            className="w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-base text-[#141F28] outline-none transition placeholder:text-[#344453]/30 focus:border-[#344453]/30 focus:bg-white"
-          />
+        {/* Screen — number display */}
+        <div className="relative bg-[#141F28] px-6 pt-10 pb-7">
+          <p
+            className="min-h-[2.75rem] text-center text-[1.75rem] font-light tracking-[0.12em] text-white transition-all"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            {number || <span className="text-white/15 text-2xl">_ _ _ _ _ _ _ _ _ _</span>}
+          </p>
+          {/* Backspace */}
+          <div className="absolute right-5 top-1/2 -translate-y-1/2">
+            {number.length > 0 && (
+              <button
+                onClick={backspace}
+                onDoubleClick={clearAll}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-white/40 hover:bg-white/8 hover:text-white/70 transition-colors"
+                title="Supprimer · double-clic pour tout effacer"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                  <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" />
+                  <line x1="18" y1="9" x2="12" y2="15" />
+                  <line x1="12" y1="9" x2="18" y2="15" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
 
-        <div>
-          <label className="block text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 mb-2" style={{ fontFamily: 'var(--font-mono)' }}>
-            Agent mis en relation
-          </label>
+        {/* Keypad */}
+        <div className="grid grid-cols-3 border-t border-[#344453]/8">
+          {KEYPAD_ROWS.flat().map(({ d, s }) => {
+            const isZero = d === '0';
+            const isFlashing = flashKey === d;
+
+            return (
+              <button
+                key={d}
+                onClick={isZero ? undefined : () => pushDigit(d)}
+                onMouseDown={isZero ? onZeroDown : undefined}
+                onMouseUp={isZero ? onZeroUp : undefined}
+                onMouseLeave={isZero ? onZeroLeave : undefined}
+                onTouchStart={isZero ? onZeroDown : undefined}
+                onTouchEnd={isZero ? onZeroUp : undefined}
+                className={`
+                  relative flex flex-col items-center justify-center py-4 select-none
+                  border-b border-r border-[#344453]/8 last:border-r-0
+                  transition-colors duration-75
+                  ${isFlashing ? 'bg-[#344453]/12' : 'hover:bg-[#344453]/5 active:bg-[#344453]/10'}
+                `}
+              >
+                <span className="text-[1.35rem] font-medium text-[#141F28] leading-none">{d}</span>
+                <span className={`mt-1 text-[9px] font-semibold tracking-[0.18em] ${s ? 'text-[#344453]/35' : 'invisible'}`}>
+                  {s || 'X'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Agent + Call button */}
+        <div className="space-y-3 border-t border-[#344453]/8 p-4">
           {staff.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-[#344453]/15 px-4 py-3 text-sm text-[#344453]/55">
-              Aucun agent disponible — ajoutez du staff dans l'onglet Équipe.
+            <p className="text-center text-xs text-[#344453]/45">
+              Aucun agent disponible.{' '}
+              <a href="/staff" className="text-[#C7601D] hover:underline">Configurer →</a>
             </p>
           ) : (
-            <select
-              value={staffId}
-              onChange={(e) => setStaffId(e.target.value)}
-              required
-              className="w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm text-[#141F28] outline-none transition focus:border-[#344453]/30 focus:bg-white"
-            >
-              <option value="">— Choisir un agent —</option>
-              {staff.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.first_name} {s.last_name} {s.role ? `(${s.role})` : ''}
-                </option>
-              ))}
-            </select>
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#344453]/35" style={{ fontFamily: 'var(--font-mono)' }}>
+                Agent mis en relation
+              </p>
+              <select
+                value={staffId}
+                onChange={e => setStaffId(e.target.value)}
+                className="w-full rounded-xl border border-[#344453]/15 bg-white px-3 py-2 text-sm text-[#141F28] outline-none focus:border-[#344453]/30"
+              >
+                {staff.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.first_name} {s.last_name}{s.role ? ` (${s.role})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
+
+          {error && (
+            <p className="rounded-xl bg-[#D94052]/8 px-3 py-2 text-xs font-medium text-[#D94052]">{error}</p>
+          )}
+
+          {/* Green call button */}
+          <button
+            onClick={() => void handleCall()}
+            disabled={!canCall || loading}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#2D9D78] py-4 text-sm font-semibold text-white shadow-[0_4px_16px_rgba(45,157,120,0.32)] transition-all hover:bg-[#268a6a] hover:shadow-[0_6px_20px_rgba(45,157,120,0.40)] disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none"
+          >
+            {loading
+              ? <><Loader2 className="h-5 w-5 animate-spin" /> Connexion…</>
+              : <><Phone className="h-5 w-5" /> Appeler</>
+            }
+          </button>
+
+          <p className="text-center text-[10px] text-[#344453]/30">
+            Maintenez <kbd className="rounded bg-[#344453]/8 px-1 py-0.5 font-mono">0</kbd> pour saisir +
+          </p>
         </div>
-
-        {error && (
-          <p className="rounded-2xl bg-[#D94052]/8 px-4 py-3 text-sm font-medium text-[#D94052]">{error}</p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading || !destinationNumber.trim() || !staffId}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#C7601D] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#a84e17] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
-          {loading ? 'Initiation en cours…' : 'Lancer l\'appel'}
-        </button>
-      </form>
+      </div>
     </div>
   );
 }
