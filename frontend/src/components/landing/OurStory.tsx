@@ -25,7 +25,7 @@ export default function OurStory() {
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.5 }}
           className="max-w-2xl mb-20"
         >
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-white/10 bg-white/4 mb-5">
@@ -47,7 +47,7 @@ export default function OurStory() {
             className="hidden lg:block absolute left-1/2 top-0 w-px bg-gradient-to-b from-[#C7601D] to-transparent -translate-x-1/2"
             initial={{ height: 0 }}
             animate={inView ? { height: '100%' } : { height: 0 }}
-            transition={{ duration: 2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 1.5 }}
           />
 
           <div className="space-y-16 lg:space-y-0">
@@ -59,7 +59,7 @@ export default function OurStory() {
                   initial={{ opacity: 0, x: isLeft ? -30 : 30 }}
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true, margin: '-60px' }}
-                  transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ duration: 0.5 }}
                   className={`relative lg:grid lg:grid-cols-2 lg:gap-16 lg:mb-20 ${isLeft ? '' : 'lg:direction-rtl'}`}
                 >
                   {/* Center dot (desktop) */}

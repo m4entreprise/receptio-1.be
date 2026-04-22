@@ -132,10 +132,11 @@ export default function WebGLBackground() {
     let rafId = 0;
     let lastFrame = 0;
     let paused = false;
+    let outOfView = false;
 
     const tick = (now: number) => {
       rafId = requestAnimationFrame(tick);
-      if (paused || now - lastFrame < FRAME_MS) return;
+      if (paused || outOfView || now - lastFrame < FRAME_MS) return;
       lastFrame = now;
       gl.uniform1f(uTime, (now - t0) / 1000);
       gl.uniform2f(uRes, canvas.width, canvas.height);
@@ -143,12 +144,16 @@ export default function WebGLBackground() {
     };
     rafId = requestAnimationFrame(tick);
 
+    const io = new IntersectionObserver(([entry]) => { outOfView = !entry.isIntersecting; }, { threshold: 0 });
+    io.observe(canvas);
+
     const onVisibility = () => { paused = document.hidden; };
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       cancelAnimationFrame(rafId);
       ro.disconnect();
+      io.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
       gl.deleteProgram(prog);
       gl.deleteShader(vs);

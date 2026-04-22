@@ -25,7 +25,7 @@ export default function HowItWorks() {
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.5 }}
           className="max-w-2xl mb-20"
         >
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-[#344453]/15 bg-[#344453]/5 mb-5">
@@ -46,7 +46,7 @@ export default function HowItWorks() {
             className="hidden lg:block absolute top-10 left-0 h-px bg-[#C7601D]"
             initial={{ width: '0%' }}
             animate={inView ? { width: '100%' } : { width: '0%' }}
-            transition={{ duration: 1.5, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 1.2, delay: 0.2 }}
           />
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-10 lg:gap-6 relative">
@@ -56,7 +56,7 @@ export default function HowItWorks() {
                 initial={{ opacity: 0, y: 36 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ delay: i * 0.15, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ delay: i * 0.1, duration: 0.5 }}
                 className="relative flex flex-col"
               >
                 {/* Step indicator */}
