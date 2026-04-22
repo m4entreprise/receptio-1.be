@@ -165,8 +165,8 @@ function EndNode({ data }: { data: any }) {
 
 export default function DispatchFlowBuilder({
   rules,
-  groups,
-  staff,
+  groups: _groups,
+  staff: _staff,
   onRuleClick,
   onCreateRule,
   onDeleteRule,
