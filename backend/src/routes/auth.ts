@@ -17,6 +17,15 @@ const registerSchema = z.object({
   lastName: z.string().optional(),
   companyName: z.string().min(2),
   companyPhone: z.string().optional(),
+  onboarding: z.object({
+    sector: z.string().optional(),
+    companySize: z.string().optional(),
+    openDays: z.array(z.string()).optional(),
+    openFrom: z.string().optional(),
+    openUntil: z.string().optional(),
+    agentCount: z.number().int().min(1).max(200).optional(),
+    offer: z.enum(['a', 'b']).optional(),
+  }).optional(),
 });
 
 const loginSchema = z.object({
@@ -60,11 +69,15 @@ router.post('/register', async (req: Request, res: Response, next) => {
 
     const passwordHash = await bcrypt.hash(data.password, 10);
 
+    const initialSettings = data.onboarding
+      ? { onboarding: { ...data.onboarding, completedAt: new Date().toISOString() } }
+      : {};
+
     const companyResult = await query(
-      `INSERT INTO companies (name, email, phone_number, settings) 
-       VALUES ($1, $2, $3, $4) 
+      `INSERT INTO companies (name, email, phone_number, settings)
+       VALUES ($1, $2, $3, $4)
        RETURNING id`,
-      [data.companyName, data.email, data.companyPhone || null, {}]
+      [data.companyName, data.email, data.companyPhone || null, initialSettings]
     );
 
     const companyId = companyResult.rows[0].id;
