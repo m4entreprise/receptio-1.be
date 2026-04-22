@@ -8,118 +8,175 @@ import { requirePermission } from '../utils/authz';
 
 const router = Router();
 
+// ─── Schémas Zod V2 ──────────────────────────────────────────────────────────
+
+const conditionSchema = z.discriminatedUnion('type', [
+  z.object({ id: z.string(), type: z.literal('always') }),
+  z.object({
+    id: z.string(),
+    type: z.literal('schedule'),
+    days: z.array(z.enum(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'])),
+    time_start: z.string().regex(/^\d{2}:\d{2}$/),
+    time_end: z.string().regex(/^\d{2}:\d{2}$/),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('holiday'),
+    country: z.enum(['BE','FR','LU','NL','DE','CH']),
+    match: z.enum(['on_holiday','not_on_holiday']),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('language'),
+    languages: z.array(z.string().min(2).max(5)),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('caller_number'),
+    mode: z.enum(['equals','starts_with','contains']),
+    patterns: z.array(z.string()),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('intent'),
+    intents: z.array(z.string()),
+    match_mode: z.enum(['any','all']),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('agent_availability'),
+    group_id: z.string().uuid(),
+    check: z.enum(['any_available','all_unavailable']),
+  }),
+]);
+
+const retrySchema = z.object({
+  max_attempts: z.number().int().min(0).max(99),
+  ring_duration: z.number().int().min(5).max(120),
+  between_attempts_delay: z.number().int().min(0).max(30),
+});
+
+const actionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('route_group'),
+    group_id: z.string().uuid(),
+    distribution_strategy: z.enum(['sequential','simultaneous','random','round_robin']),
+    agent_order: z.array(z.string().uuid()).optional(),
+    retry: retrySchema,
+  }),
+  z.object({
+    type: z.literal('route_agent'),
+    agent_id: z.string().uuid(),
+    ring_duration: z.number().int().min(5).max(120),
+  }),
+  z.object({
+    type: z.literal('route_external'),
+    phone_number: z.string().min(6),
+    label: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('play_message'),
+    message_text: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal('voicemail'),
+    greeting_text: z.string().optional(),
+  }),
+]);
+
+const fallbackStepSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  action: actionSchema,
+  delay: z.number().int().min(0).optional(),
+});
+
 const ruleSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   priority: z.number().int().optional(),
   enabled: z.boolean().optional(),
-  conditionType: z.enum(['always', 'intent']).optional(),
-  conditions: z.record(z.any()).optional(),
-  targetType: z.enum(['group', 'agent']).optional(),
-  targetGroupId: z.string().uuid().nullable().optional(),
-  targetStaffId: z.string().uuid().nullable().optional(),
-  distributionStrategy: z.enum(['sequential', 'random', 'simultaneous']).optional(),
-  agentOrder: z.array(z.string().uuid()).optional(),
-  fallbackType: z.enum(['voicemail', 'none', 'group', 'agent']).optional(),
-  fallbackGroupId: z.string().uuid().nullable().optional(),
-  fallbackStaffId: z.string().uuid().nullable().optional(),
-  position_x: z.number().optional(),
-  position_y: z.number().optional(),
-  node_positions: z.record(z.object({
-    x: z.number(),
-    y: z.number(),
-  })).optional(),
+  condition_operator: z.enum(['AND','OR','ALWAYS']).optional(),
+  conditions: z.array(conditionSchema).optional(),
+  action: actionSchema.optional(),
+  fallback_chain: z.array(fallbackStepSchema).optional(),
+  node_positions: z.record(z.object({ x: z.number(), y: z.number() })).optional(),
 });
 
-// POST /api/dispatch-rules/reorder — must be before /:id routes
+// ─── Reorder — avant /:id ────────────────────────────────────────────────────
 router.post('/reorder', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     requirePermission(req, 'staffManage');
     const { companyId } = req.user!;
     const { order } = z.object({ order: z.array(z.string().uuid()) }).parse(req.body);
-
     await Promise.all(
       order.map((id, idx) =>
-        query(
-          `UPDATE dispatch_rules SET priority = $1 WHERE id = $2 AND company_id = $3`,
-          [idx, id, companyId]
-        )
+        query(`UPDATE dispatch_rules SET priority = $1 WHERE id = $2 AND company_id = $3`, [idx, id, companyId])
       )
     );
     res.json({ message: 'Reordered' });
   } catch (err) { next(err); }
 });
 
-// GET /api/dispatch-rules
+// ─── GET /api/dispatch-rules ──────────────────────────────────────────────────
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     const { companyId } = req.user!;
     const result = await query(
-      `SELECT
-        r.*,
-        tg.name AS target_group_name,
-        tg.role AS target_group_role,
-        ts.first_name AS target_staff_first_name,
-        ts.last_name AS target_staff_last_name,
-        fg.name AS fallback_group_name,
-        fs.first_name AS fallback_staff_first_name,
-        fs.last_name AS fallback_staff_last_name
-       FROM dispatch_rules r
-       LEFT JOIN staff_groups tg ON tg.id = r.target_group_id
-       LEFT JOIN staff ts ON ts.id = r.target_staff_id
-       LEFT JOIN staff_groups fg ON fg.id = r.fallback_group_id
-       LEFT JOIN staff fs ON fs.id = r.fallback_staff_id
-       WHERE r.company_id = $1
-       ORDER BY r.priority ASC, r.created_at ASC`,
+      `SELECT * FROM dispatch_rules
+       WHERE company_id = $1
+       ORDER BY priority ASC, created_at ASC`,
       [companyId]
     );
-    res.json({ rules: result.rows });
+    // Normaliser les champs JSONB (pg renvoie des objets JS natifs)
+    const rules = result.rows.map(normalizeRow);
+    res.json({ rules });
   } catch (err) { next(err); }
 });
 
-// POST /api/dispatch-rules
+// ─── POST /api/dispatch-rules ────────────────────────────────────────────────
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     requirePermission(req, 'staffManage');
     const { companyId } = req.user!;
     const data = ruleSchema.parse(req.body);
 
+    // Calculer la priorité max pour placer la nouvelle règle en dernier
+    const maxResult = await query(
+      `SELECT COALESCE(MAX(priority), -1) + 1 AS next_priority FROM dispatch_rules WHERE company_id = $1`,
+      [companyId]
+    );
+    const nextPriority = data.priority ?? maxResult.rows[0].next_priority;
+
+    const defaultAction = {
+      type: 'voicemail',
+      greeting_text: 'Veuillez laisser votre message après le bip.',
+    };
+
     const result = await query(
       `INSERT INTO dispatch_rules (
         company_id, name, description, priority, enabled,
-        condition_type, conditions,
-        target_type, target_group_id, target_staff_id,
-        distribution_strategy, agent_order,
-        fallback_type, fallback_group_id, fallback_staff_id,
-        position_x, position_y, node_positions
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        condition_operator, conditions, action, fallback_chain, node_positions
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       RETURNING *`,
       [
         companyId,
         data.name,
         data.description ?? null,
-        data.priority ?? 0,
+        nextPriority,
         data.enabled ?? true,
-        data.conditionType ?? 'always',
-        JSON.stringify(data.conditions ?? {}),
-        data.targetType ?? 'group',
-        data.targetGroupId ?? null,
-        data.targetStaffId ?? null,
-        data.distributionStrategy ?? 'sequential',
-        JSON.stringify(data.agentOrder ?? []),
-        data.fallbackType ?? 'voicemail',
-        data.fallbackGroupId ?? null,
-        data.fallbackStaffId ?? null,
-        data.position_x ?? null,
-        data.position_y ?? null,
+        data.condition_operator ?? 'ALWAYS',
+        JSON.stringify(data.conditions ?? []),
+        JSON.stringify(data.action ?? defaultAction),
+        JSON.stringify(data.fallback_chain ?? []),
         JSON.stringify(data.node_positions ?? {}),
       ]
     );
-    res.status(201).json({ rule: result.rows[0] });
+    res.status(201).json({ rule: normalizeRow(result.rows[0]) });
   } catch (err) { next(err); }
 });
 
-// PATCH /api/dispatch-rules/:id
+// ─── PATCH /api/dispatch-rules/:id ───────────────────────────────────────────
 router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     requirePermission(req, 'staffManage');
@@ -133,23 +190,20 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
     const values: any[] = [];
     let idx = 1;
 
-    if (data.name !== undefined) { setClauses.push(`name = $${idx++}`); values.push(data.name); }
-    if (data.description !== undefined) { setClauses.push(`description = $${idx++}`); values.push(data.description); }
-    if (data.priority !== undefined) { setClauses.push(`priority = $${idx++}`); values.push(data.priority); }
-    if (data.enabled !== undefined) { setClauses.push(`enabled = $${idx++}`); values.push(data.enabled); }
-    if (data.conditionType !== undefined) { setClauses.push(`condition_type = $${idx++}`); values.push(data.conditionType); }
-    if (data.conditions !== undefined) { setClauses.push(`conditions = $${idx++}`); values.push(JSON.stringify(data.conditions)); }
-    if (data.targetType !== undefined) { setClauses.push(`target_type = $${idx++}`); values.push(data.targetType); }
-    if (data.targetGroupId !== undefined) { setClauses.push(`target_group_id = $${idx++}`); values.push(data.targetGroupId); }
-    if (data.targetStaffId !== undefined) { setClauses.push(`target_staff_id = $${idx++}`); values.push(data.targetStaffId); }
-    if (data.distributionStrategy !== undefined) { setClauses.push(`distribution_strategy = $${idx++}`); values.push(data.distributionStrategy); }
-    if (data.agentOrder !== undefined) { setClauses.push(`agent_order = $${idx++}`); values.push(JSON.stringify(data.agentOrder)); }
-    if (data.fallbackType !== undefined) { setClauses.push(`fallback_type = $${idx++}`); values.push(data.fallbackType); }
-    if (data.fallbackGroupId !== undefined) { setClauses.push(`fallback_group_id = $${idx++}`); values.push(data.fallbackGroupId); }
-    if (data.fallbackStaffId !== undefined) { setClauses.push(`fallback_staff_id = $${idx++}`); values.push(data.fallbackStaffId); }
-    if (data.position_x !== undefined) { setClauses.push(`position_x = $${idx++}`); values.push(data.position_x); }
-    if (data.position_y !== undefined) { setClauses.push(`position_y = $${idx++}`); values.push(data.position_y); }
-    if (data.node_positions !== undefined) { setClauses.push(`node_positions = $${idx++}`); values.push(JSON.stringify(data.node_positions)); }
+    const addField = (col: string, val: any, serialize = false) => {
+      setClauses.push(`${col} = $${idx++}`);
+      values.push(serialize ? JSON.stringify(val) : val);
+    };
+
+    if (data.name !== undefined)               addField('name', data.name);
+    if (data.description !== undefined)        addField('description', data.description);
+    if (data.priority !== undefined)           addField('priority', data.priority);
+    if (data.enabled !== undefined)            addField('enabled', data.enabled);
+    if (data.condition_operator !== undefined) addField('condition_operator', data.condition_operator);
+    if (data.conditions !== undefined)         addField('conditions', data.conditions, true);
+    if (data.action !== undefined)             addField('action', data.action, true);
+    if (data.fallback_chain !== undefined)     addField('fallback_chain', data.fallback_chain, true);
+    if (data.node_positions !== undefined)     addField('node_positions', data.node_positions, true);
 
     values.push(id, companyId);
     const result = await query(
@@ -159,11 +213,11 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
       values
     );
     if (result.rowCount === 0) throw new AppError('Rule not found', 404);
-    res.json({ rule: result.rows[0] });
+    res.json({ rule: normalizeRow(result.rows[0]) });
   } catch (err) { next(err); }
 });
 
-// DELETE /api/dispatch-rules/:id
+// ─── DELETE /api/dispatch-rules/:id ──────────────────────────────────────────
 router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response, next) => {
   try {
     requirePermission(req, 'staffManage');
@@ -177,5 +231,15 @@ router.delete('/:id', authenticateToken, async (req: AuthRequest, res: Response,
     res.json({ message: 'Rule deleted' });
   } catch (err) { next(err); }
 });
+
+// ─── Utilitaire de normalisation ─────────────────────────────────────────────
+function normalizeRow(row: any) {
+  return {
+    ...row,
+    conditions:    Array.isArray(row.conditions) ? row.conditions : [],
+    fallback_chain: Array.isArray(row.fallback_chain) ? row.fallback_chain : [],
+    node_positions: row.node_positions ?? {},
+  };
+}
 
 export default router;
