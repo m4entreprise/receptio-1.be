@@ -67,7 +67,7 @@ export default function ROISimulator() {
 
   const receptioCost = OFFERS.find((o) => o.id === offer)!.price;
 
-  const { hoursPerMonth, fteNeeded, employeeCost, savings, annualSavings, receptionPct } = useMemo(() => {
+  const { hoursPerMonth, fteNeeded, employeeCost, savings, annualSavings } = useMemo(() => {
     const WORKING_DAYS = 22;
     const monthlyMinutes = callsPerDay * WORKING_DAYS * avgDuration;
     const hoursPerMonth = monthlyMinutes / 60;
