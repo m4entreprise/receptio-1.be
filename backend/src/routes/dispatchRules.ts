@@ -25,6 +25,10 @@ const ruleSchema = z.object({
   fallbackStaffId: z.string().uuid().nullable().optional(),
   position_x: z.number().optional(),
   position_y: z.number().optional(),
+  node_positions: z.record(z.object({
+    x: z.number(),
+    y: z.number(),
+  })).optional(),
 });
 
 // POST /api/dispatch-rules/reorder — must be before /:id routes
@@ -87,8 +91,8 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         target_type, target_group_id, target_staff_id,
         distribution_strategy, agent_order,
         fallback_type, fallback_group_id, fallback_staff_id,
-        position_x, position_y
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        position_x, position_y, node_positions
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
       RETURNING *`,
       [
         companyId,
@@ -108,6 +112,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         data.fallbackStaffId ?? null,
         data.position_x ?? null,
         data.position_y ?? null,
+        JSON.stringify(data.node_positions ?? {}),
       ]
     );
     res.status(201).json({ rule: result.rows[0] });
@@ -144,6 +149,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
     if (data.fallbackStaffId !== undefined) { setClauses.push(`fallback_staff_id = $${idx++}`); values.push(data.fallbackStaffId); }
     if (data.position_x !== undefined) { setClauses.push(`position_x = $${idx++}`); values.push(data.position_x); }
     if (data.position_y !== undefined) { setClauses.push(`position_y = $${idx++}`); values.push(data.position_y); }
+    if (data.node_positions !== undefined) { setClauses.push(`node_positions = $${idx++}`); values.push(JSON.stringify(data.node_positions)); }
 
     values.push(id, companyId);
     const result = await query(

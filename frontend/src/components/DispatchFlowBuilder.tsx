@@ -69,6 +69,7 @@ interface DispatchRule {
   fallback_staff_id: string | null;
   position_x?: number | null;
   position_y?: number | null;
+  node_positions?: Record<string, { x: number; y: number }>;
   target_group_name: string | null;
   target_group_role: string | null;
   target_staff_first_name: string | null;
@@ -85,7 +86,7 @@ interface DispatchFlowBuilderProps {
   onRuleClick: (rule: DispatchRule) => void;
   onCreateRule: (nodeType?: 'condition' | 'action' | 'fallback') => void;
   onDeleteRule: (ruleId: string) => void;
-  onUpdatePositions: (updates: { id: string; x: number; y: number }[]) => void;
+  onUpdatePositions: (updates: { id: string; node_positions: Record<string, { x: number; y: number }> }[]) => void;
 }
 
 function StartNode() {
@@ -294,13 +295,21 @@ export default function DispatchFlowBuilder({
     const xCenter = 400;
 
     rules.forEach((rule, idx) => {
+      // Utiliser node_positions si disponible, sinon fallback sur position_x/position_y
+      const nodePos = rule.node_positions || {};
+      const defaultConditionX = xCenter - 120;
+      const defaultConditionY = yOffset;
+
+      // Position du nœud condition
+      const conditionPos = nodePos.condition || {
+        x: rule.position_x !== undefined && rule.position_x !== null ? rule.position_x : defaultConditionX,
+        y: rule.position_y !== undefined && rule.position_y !== null ? rule.position_y : defaultConditionY,
+      };
+
       const conditionNode: Node<FlowNodeData> = {
         id: `${rule.id}-condition`,
         type: 'condition',
-        position: {
-          x: rule.position_x !== undefined && rule.position_x !== null ? rule.position_x : xCenter - 120,
-          y: rule.position_y !== undefined && rule.position_y !== null ? rule.position_y : yOffset,
-        },
+        position: conditionPos,
         data: {
           type: 'condition',
           label: rule.name,
@@ -314,18 +323,16 @@ export default function DispatchFlowBuilder({
       };
       newNodes.push(conditionNode);
 
-      // Position de l'action relative à la condition
-      const conditionX = rule.position_x !== undefined && rule.position_x !== null ? rule.position_x : xCenter - 120;
-      const conditionY = rule.position_y !== undefined && rule.position_y !== null ? rule.position_y : yOffset;
+      // Position de l'action (depuis node_positions ou relative à condition)
+      const actionPos = nodePos.action || {
+        x: conditionPos.x,
+        y: conditionPos.y + 180,
+      };
 
       const actionNode: Node<FlowNodeData> = {
         id: `${rule.id}-action`,
         type: 'action',
-        draggable: false,
-        position: {
-          x: conditionX,
-          y: conditionY + 180,
-        },
+        position: actionPos,
         data: {
           type: 'action',
           label: rule.target_type === 'group' ? (rule.target_group_name || 'Groupe') : 'Agent',
@@ -340,14 +347,16 @@ export default function DispatchFlowBuilder({
       newNodes.push(actionNode);
 
       if (rule.fallback_type !== 'none') {
+        // Position du fallback (depuis node_positions ou relative à condition)
+        const fallbackPos = nodePos.fallback || {
+          x: conditionPos.x + 270,
+          y: conditionPos.y + 180,
+        };
+
         const fallbackNode: Node<FlowNodeData> = {
           id: `${rule.id}-fallback`,
           type: 'fallback',
-          draggable: false,
-          position: {
-            x: conditionX + 270,
-            y: conditionY + 180,
-          },
+          position: fallbackPos,
           data: {
             type: 'fallback',
             label: rule.fallback_type === 'voicemail' ? 'Messagerie' : 'Autre',
@@ -413,7 +422,7 @@ export default function DispatchFlowBuilder({
       }
 
       // Ajuster yOffset pour la prochaine règle en fonction de la position réelle
-      yOffset = conditionY + 360;
+      yOffset = conditionPos.y + 360;
     });
 
     setNodes(newNodes);
@@ -422,22 +431,41 @@ export default function DispatchFlowBuilder({
 
   const handleNodeDragStop = useCallback(
     (_event: any, node: Node) => {
-      // Seuls les nœuds condition peuvent être déplacés et sauvegardés
-      if (node.id === 'start' || node.id === 'end' || !node.id.endsWith('-condition')) return;
+      // Tous les nœuds sauf start peuvent être déplacés
+      if (node.id === 'start' || node.id === 'end') return;
       setHasChanges(true);
     },
     []
   );
 
   const handleSavePositions = useCallback(() => {
-    // Ne sauvegarder que les positions des nœuds condition (qui représentent les règles)
-    const updates = nodes
-      .filter((n) => n.id !== 'start' && n.id !== 'end' && n.id.endsWith('-condition'))
-      .map((n) => ({
-        id: n.id.replace('-condition', ''), // Extraire l'ID de la règle
+    // Regrouper les nœuds par règle
+    const ruleMap = new Map<string, Record<string, { x: number; y: number }>>();
+    
+    nodes.forEach((n) => {
+      if (n.id === 'start' || n.id === 'end') return;
+      
+      // Extraire l'ID de règle et le type de nœud
+      const parts = n.id.split('-');
+      const ruleId = parts[0];
+      const nodeType = parts[1]; // 'condition', 'action', ou 'fallback'
+      
+      if (!ruleMap.has(ruleId)) {
+        ruleMap.set(ruleId, {});
+      }
+      
+      ruleMap.get(ruleId)![nodeType] = {
         x: Math.round(n.position.x),
         y: Math.round(n.position.y),
-      }));
+      };
+    });
+    
+    // Créer les updates avec node_positions
+    const updates = Array.from(ruleMap.entries()).map(([ruleId, positions]) => ({
+      id: ruleId,
+      node_positions: positions,
+    }));
+    
     onUpdatePositions(updates);
     setHasChanges(false);
   }, [nodes, onUpdatePositions]);

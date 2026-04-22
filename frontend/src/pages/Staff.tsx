@@ -60,6 +60,7 @@ interface DispatchRule {
   fallback_staff_last_name: string | null;
   position_x?: number | null;
   position_y?: number | null;
+  node_positions?: Record<string, { x: number; y: number }>;
 }
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
@@ -834,8 +835,8 @@ function DispatchTab() {
         onDeleteRule={handleDelete}
         onUpdatePositions={async (updates) => {
           await Promise.all(
-            updates.map(({ id, x, y }) =>
-              axios.patch(`/api/dispatch-rules/${id}`, { position_x: x, position_y: y })
+            updates.map(({ id, node_positions }) =>
+              axios.patch(`/api/dispatch-rules/${id}`, { node_positions })
             )
           );
         }}
