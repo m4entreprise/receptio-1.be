@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Phone, PhoneIncoming, PhoneOutgoing, Clock, Search, X,
-  ChevronLeft, ChevronRight, FileText, Zap, PhoneForwarded,
+  Phone, PhoneIncoming, PhoneOutgoing, Search, X,
+  ChevronLeft, ChevronRight, FileText, Zap,
   Loader2, UserCheck, RefreshCw, ExternalLink, AlertTriangle,
 } from 'lucide-react';
 import axios from 'axios';
