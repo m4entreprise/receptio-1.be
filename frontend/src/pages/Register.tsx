@@ -547,6 +547,10 @@ export default function Register() {
                       />
                     </div>
                     <p className="mt-1.5 text-xs text-[#344453]/35">En dehors de ces horaires, Receptio gère les appels automatiquement.</p>
+                    <div className="mt-2 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#344453]/5 border border-[#344453]/8">
+                      <span className="text-[10px] text-[#344453]/50">ℹ</span>
+                      <p className="text-[11px] text-[#344453]/50">Les plages hors horaires sont incluses — aucun surcoût.</p>
+                    </div>
                   </div>
 
                   <div>
@@ -571,7 +575,12 @@ export default function Register() {
                         <Plus className="h-4 w-4" />
                       </button>
                     </div>
-                    <p className="mt-2 text-xs text-[#344453]/35">Vous pourrez ajouter leurs profils dans le tableau de bord.</p>
+                    <div className="mt-3 flex items-start gap-1.5 px-3 py-2 rounded-lg bg-[#C7601D]/6 border border-[#C7601D]/12">
+                      <span className="text-[10px] text-[#C7601D]/70 mt-0.5">ℹ</span>
+                      <p className="text-[11px] text-[#C7601D]/70 leading-relaxed">
+                        <span className="font-semibold">14,99 €/mois</span> par agent supplémentaire au-delà du premier. Vous pourrez ajuster à tout moment.
+                      </p>
+                    </div>
                   </div>
 
                   <div className="flex gap-3 pt-1">
