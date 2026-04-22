@@ -692,6 +692,7 @@ function DispatchTab() {
   const [loading, setLoading] = useState(true);
   const [showDrawer, setShowDrawer] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [nodeType, setNodeType] = useState<'condition' | 'action' | 'fallback' | null>(null);
   const [form, setForm] = useState({ ...emptyRuleForm });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -704,7 +705,13 @@ function DispatchTab() {
   const fetchGroups = async () => { const r = await axios.get('/api/staff-groups'); setGroups(r.data.groups || []); };
   const fetchStaff = async () => { const r = await axios.get('/api/staff'); setAllStaff(r.data.staff || []); };
 
-  const openCreate = () => { setEditingId(null); setForm({ ...emptyRuleForm }); setError(''); setShowDrawer(true); };
+  const openCreate = (type?: 'condition' | 'action' | 'fallback') => {
+    setEditingId(null);
+    setNodeType(type || null);
+    setForm({ ...emptyRuleForm });
+    setError('');
+    setShowDrawer(true);
+  };
   const openEdit = (r: DispatchRule) => {
     setEditingId(r.id);
     setForm({
@@ -785,7 +792,7 @@ function DispatchTab() {
         <p className="text-sm text-[#344453]/55">
           {rules.length} règle{rules.length !== 1 ? 's' : ''} · {rules.filter(r => r.enabled).length} active{rules.filter(r => r.enabled).length !== 1 ? 's' : ''}
         </p>
-        <button onClick={openCreate} className="inline-flex items-center gap-2 rounded-full bg-[#C7601D] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(199,96,29,0.28)] transition hover:bg-[#b35519]">
+        <button onClick={() => openCreate()} className="inline-flex items-center gap-2 rounded-full bg-[#C7601D] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(199,96,29,0.28)] transition hover:bg-[#b35519]">
           <Plus className="h-4 w-4" /> Nouvelle règle
         </button>
       </div>
@@ -825,7 +832,15 @@ function DispatchTab() {
             {/* Drawer header */}
             <div className="flex shrink-0 items-center justify-between border-b border-[#344453]/10 px-6 py-4">
               <h2 className="text-lg font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>
-                {editingId ? 'Modifier la règle' : 'Nouvelle règle de dispatch'}
+                {editingId 
+                  ? 'Modifier la règle' 
+                  : nodeType === 'condition' 
+                  ? 'Nouvelle condition'
+                  : nodeType === 'action'
+                  ? 'Nouvelle action'
+                  : nodeType === 'fallback'
+                  ? 'Nouveau fallback'
+                  : 'Nouvelle règle de dispatch'}
               </h2>
               <button onClick={() => setShowDrawer(false)} className="flex h-8 w-8 items-center justify-center rounded-full border border-[#344453]/15 text-[#344453] hover:bg-[#344453]/5">
                 <X className="h-4 w-4" />
@@ -852,10 +867,10 @@ function DispatchTab() {
                 </div>
 
                 {/* Divider */}
-                <div className="border-t border-[#344453]/8" />
+                {(nodeType === null || nodeType === 'condition') && <div className="border-t border-[#344453]/8" />}
 
                 {/* Condition / Déclencheur */}
-                <div>
+                {(nodeType === null || nodeType === 'condition') && <div>
                   <label className="mb-2 block text-sm font-medium text-[#344453]">Déclencheur</label>
                   <div className="flex gap-2">
                     {(['always', 'intent'] as const).map(ct => (
@@ -873,10 +888,10 @@ function DispatchTab() {
                       <p className="mt-1.5 text-xs text-[#344453]/40">L'IA applique cette règle quand l'intention détectée correspond.</p>
                     </div>
                   )}
-                </div>
+                </div>}
 
                 {/* Target */}
-                <div>
+                {(nodeType === null || nodeType === 'action') && <div>
                   <label className="mb-2 block text-sm font-medium text-[#344453]">Cible du transfert</label>
                   <div className="mb-3 flex gap-2">
                     {(['group', 'agent'] as const).map(tt => (
@@ -955,13 +970,13 @@ function DispatchTab() {
                       {allStaff.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} — {s.role}</option>)}
                     </select>
                   )}
-                </div>
+                </div>}
 
                 {/* Divider */}
-                <div className="border-t border-[#344453]/8" />
+                {(nodeType === null || nodeType === 'fallback') && <div className="border-t border-[#344453]/8" />}
 
                 {/* Fallback */}
-                <div>
+                {(nodeType === null || nodeType === 'fallback') && <div>
                   <label className="mb-2 block text-sm font-medium text-[#344453]">Si personne ne répond…</label>
                   <div className="grid grid-cols-2 gap-2">
                     {([
@@ -990,7 +1005,7 @@ function DispatchTab() {
                       {allStaff.filter(s => s.id !== form.targetStaffId).map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} — {s.role}</option>)}
                     </select>
                   )}
-                </div>
+                </div>}
               </form>
             </div>
 
@@ -1000,7 +1015,17 @@ function DispatchTab() {
                 Annuler
               </button>
               <button type="submit" form="rule-form" disabled={saving} className="flex-1 rounded-full bg-[#344453] py-3 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(52,68,83,0.22)] transition hover:bg-[#2a3642] disabled:opacity-50">
-                {saving ? 'Sauvegarde…' : editingId ? 'Enregistrer' : 'Créer la règle'}
+                {saving 
+                  ? 'Sauvegarde…' 
+                  : editingId 
+                  ? 'Enregistrer' 
+                  : nodeType === 'condition' 
+                  ? 'Créer la condition'
+                  : nodeType === 'action'
+                  ? 'Créer l\'action'
+                  : nodeType === 'fallback'
+                  ? 'Créer le fallback'
+                  : 'Créer la règle'}
               </button>
             </div>
           </div>

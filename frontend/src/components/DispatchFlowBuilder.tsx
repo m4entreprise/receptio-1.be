@@ -83,7 +83,7 @@ interface DispatchFlowBuilderProps {
   groups: StaffGroup[];
   staff: StaffMember[];
   onRuleClick: (rule: DispatchRule) => void;
-  onCreateRule: () => void;
+  onCreateRule: (nodeType?: 'condition' | 'action' | 'fallback') => void;
   onDeleteRule: (ruleId: string) => void;
   onUpdatePositions: (updates: { id: string; x: number; y: number }[]) => void;
 }
@@ -435,9 +435,9 @@ export default function DispatchFlowBuilder({
 
   const [showNodeMenu, setShowNodeMenu] = useState(false);
 
-  const handleAddNode = (_type: 'condition' | 'action' | 'fallback') => {
+  const handleAddNode = (type: 'condition' | 'action' | 'fallback') => {
     setShowNodeMenu(false);
-    onCreateRule();
+    onCreateRule(type);
   };
 
   return (
