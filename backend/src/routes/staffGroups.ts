@@ -47,8 +47,10 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
               'last_name', s.last_name,
               'phone_number', s.phone_number,
               'role', s.role,
-              'enabled', s.enabled
-            ) ORDER BY s.first_name
+              'enabled', s.enabled,
+              'custom_schedule', sgm.custom_schedule,
+              'priority', sgm.priority
+            ) ORDER BY sgm.priority ASC NULLS LAST, s.first_name
           ) FILTER (WHERE s.id IS NOT NULL),
           '[]'
         ) AS members
