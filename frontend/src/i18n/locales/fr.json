@@ -171,6 +171,7 @@
     "inbound_calls_label": "Appels entrants / mois",
     "outbound_calls_label": "Appels sortants / mois",
     "avg_duration_label": "Durée moyenne (sortants)",
+    "avg_duration_label_both": "Durée moyenne par appel",
     "inbound_total": "Entrants",
     "outbound_total": "Sortants",
     "variable_total": "Total variable",

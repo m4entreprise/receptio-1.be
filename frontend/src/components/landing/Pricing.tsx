@@ -20,7 +20,7 @@ const MODULE_LIST = [
   { id: 'analytics_micro', Icon: TrendingUp },
 ];
 
-const INBOUND_COST = 0.10;
+const INBOUND_COST_PER_MIN = 0.10;
 const OUTBOUND_COST_PER_MIN = 0.20;
 
 function VariableCostEstimator() {
@@ -30,7 +30,7 @@ function VariableCostEstimator() {
   const [avgDuration, setAvgDuration] = useState(5);
 
   const { inboundTotal, outboundTotal, total } = useMemo(() => {
-    const inboundTotal = inboundCalls * INBOUND_COST;
+    const inboundTotal = inboundCalls * avgDuration * INBOUND_COST_PER_MIN;
     const outboundTotal = outboundCalls * avgDuration * OUTBOUND_COST_PER_MIN;
     return { inboundTotal, outboundTotal, total: inboundTotal + outboundTotal };
   }, [inboundCalls, outboundCalls, avgDuration]);
@@ -61,7 +61,7 @@ function VariableCostEstimator() {
               className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white font-mono text-sm text-[#0B1520] focus:outline-none focus:border-[#344453]/40"
             />
           </div>
-          <p className="font-mono text-xs text-gray-400 mt-1">× {INBOUND_COST.toFixed(2)}€/appel</p>
+          <p className="font-mono text-xs text-gray-400 mt-1">× {INBOUND_COST_PER_MIN.toFixed(2)}€/min</p>
         </div>
 
         {/* Appels sortants */}
@@ -83,7 +83,7 @@ function VariableCostEstimator() {
 
         {/* Durée moyenne */}
         <div>
-          <label className="font-body text-xs text-gray-500 mb-2 block">{t('pricing.avg_duration_label')}</label>
+          <label className="font-body text-xs text-gray-500 mb-2 block">{t('pricing.avg_duration_label_both')}</label>
           <input
             type="number"
             min={1}
@@ -308,7 +308,7 @@ export default function Pricing() {
               <PhoneIncoming size={16} className="text-[#344453] flex-shrink-0" />
               <div>
                 <p className="font-body text-xs text-gray-500">{t('pricing.inbound_rate_label')}</p>
-                <p className="font-mono font-bold text-[#344453] text-lg">{INBOUND_COST.toFixed(2)}€ <span className="text-sm font-normal text-gray-400">{t('pricing.per_call')}</span></p>
+                <p className="font-mono font-bold text-[#344453] text-lg">{INBOUND_COST_PER_MIN.toFixed(2)}€ <span className="text-sm font-normal text-gray-400">{t('pricing.per_minute')}</span></p>
               </div>
             </div>
             <div className="flex items-center gap-3 p-4 rounded-2xl bg-[#C7601D]/4 border border-[#C7601D]/10">
