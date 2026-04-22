@@ -314,12 +314,17 @@ export default function DispatchFlowBuilder({
       };
       newNodes.push(conditionNode);
 
+      // Position de l'action relative à la condition
+      const conditionX = rule.position_x !== undefined && rule.position_x !== null ? rule.position_x : xCenter - 120;
+      const conditionY = rule.position_y !== undefined && rule.position_y !== null ? rule.position_y : yOffset;
+
       const actionNode: Node<FlowNodeData> = {
         id: `${rule.id}-action`,
         type: 'action',
+        draggable: false,
         position: {
-          x: xCenter - 120,
-          y: yOffset + 180,
+          x: conditionX,
+          y: conditionY + 180,
         },
         data: {
           type: 'action',
@@ -338,9 +343,10 @@ export default function DispatchFlowBuilder({
         const fallbackNode: Node<FlowNodeData> = {
           id: `${rule.id}-fallback`,
           type: 'fallback',
+          draggable: false,
           position: {
-            x: xCenter + 150,
-            y: yOffset + 180,
+            x: conditionX + 270,
+            y: conditionY + 180,
           },
           data: {
             type: 'fallback',
@@ -406,7 +412,8 @@ export default function DispatchFlowBuilder({
         });
       }
 
-      yOffset += 360;
+      // Ajuster yOffset pour la prochaine règle en fonction de la position réelle
+      yOffset = conditionY + 360;
     });
 
     setNodes(newNodes);
@@ -415,17 +422,19 @@ export default function DispatchFlowBuilder({
 
   const handleNodeDragStop = useCallback(
     (_event: any, node: Node) => {
-      if (node.id === 'start' || node.id === 'end') return;
+      // Seuls les nœuds condition peuvent être déplacés et sauvegardés
+      if (node.id === 'start' || node.id === 'end' || !node.id.endsWith('-condition')) return;
       setHasChanges(true);
     },
     []
   );
 
   const handleSavePositions = useCallback(() => {
+    // Ne sauvegarder que les positions des nœuds condition (qui représentent les règles)
     const updates = nodes
-      .filter((n) => n.id !== 'start' && n.id !== 'end')
+      .filter((n) => n.id !== 'start' && n.id !== 'end' && n.id.endsWith('-condition'))
       .map((n) => ({
-        id: n.id,
+        id: n.id.replace('-condition', ''), // Extraire l'ID de la règle
         x: Math.round(n.position.x),
         y: Math.round(n.position.y),
       }));
