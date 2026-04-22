@@ -835,8 +835,12 @@ function DispatchTab() {
         onDeleteRule={handleDelete}
         onUpdatePositions={async (updates) => {
           await Promise.all(
-            updates.map(({ id, node_positions }) =>
-              axios.patch(`/api/dispatch-rules/${id}`, { node_positions })
+            updates.map(({ id, node_positions, position_x, position_y }) =>
+              axios.patch(`/api/dispatch-rules/${id}`, { 
+                node_positions,
+                ...(position_x !== undefined && { position_x }),
+                ...(position_y !== undefined && { position_y }),
+              })
             )
           );
         }}

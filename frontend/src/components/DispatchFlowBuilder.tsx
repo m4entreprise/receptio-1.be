@@ -86,7 +86,7 @@ interface DispatchFlowBuilderProps {
   onRuleClick: (rule: DispatchRule) => void;
   onCreateRule: (nodeType?: 'condition' | 'action' | 'fallback') => void;
   onDeleteRule: (ruleId: string) => void;
-  onUpdatePositions: (updates: { id: string; node_positions: Record<string, { x: number; y: number }> }[]) => void;
+  onUpdatePositions: (updates: { id: string; node_positions: Record<string, { x: number; y: number }>; position_x?: number; position_y?: number }[]) => void;
 }
 
 function StartNode() {
@@ -332,6 +332,7 @@ export default function DispatchFlowBuilder({
       const actionNode: Node<FlowNodeData> = {
         id: `${rule.id}-action`,
         type: 'action',
+        draggable: true,
         position: actionPos,
         data: {
           type: 'action',
@@ -356,6 +357,7 @@ export default function DispatchFlowBuilder({
         const fallbackNode: Node<FlowNodeData> = {
           id: `${rule.id}-fallback`,
           type: 'fallback',
+          draggable: true,
           position: fallbackPos,
           data: {
             type: 'fallback',
@@ -460,10 +462,15 @@ export default function DispatchFlowBuilder({
       };
     });
     
-    // Créer les updates avec node_positions
+    // Créer les updates - utiliser à la fois node_positions (si colonne existe) et position_x/y (pour condition)
     const updates = Array.from(ruleMap.entries()).map(([ruleId, positions]) => ({
       id: ruleId,
       node_positions: positions,
+      // Aussi mettre position_x/y pour backward compat
+      ...(positions.condition && {
+        position_x: positions.condition.x,
+        position_y: positions.condition.y,
+      }),
     }));
     
     onUpdatePositions(updates);
