@@ -58,6 +58,8 @@ interface DispatchRule {
   fallback_group_name: string | null;
   fallback_staff_first_name: string | null;
   fallback_staff_last_name: string | null;
+  position_x?: number | null;
+  position_y?: number | null;
 }
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
@@ -734,6 +736,19 @@ function DispatchTab() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true); setError('');
     try {
+      // Calculer une position automatique pour les nouvelles règles
+      const xCenter = 400;
+      let position_x = xCenter - 120;
+      let position_y = 200 + (rules.length * 300);
+
+      // Si on crée un nouveau nœud, calculer la position en bas des règles existantes
+      if (!editingId && rules.length > 0) {
+        const lastRule = rules[rules.length - 1];
+        if (lastRule.position_y !== undefined && lastRule.position_y !== null) {
+          position_y = lastRule.position_y + 300;
+        }
+      }
+
       const payload = {
         name: form.name,
         description: form.description || undefined,
@@ -749,6 +764,8 @@ function DispatchTab() {
         fallbackType: form.fallbackType,
         fallbackGroupId: form.fallbackType === 'group' ? (form.fallbackGroupId || null) : null,
         fallbackStaffId: form.fallbackType === 'agent' ? (form.fallbackStaffId || null) : null,
+        // Ajouter la position pour les nouvelles règles
+        ...(editingId ? {} : { position_x, position_y }),
       };
       if (editingId) await axios.patch(`/api/dispatch-rules/${editingId}`, payload);
       else await axios.post('/api/dispatch-rules', payload);

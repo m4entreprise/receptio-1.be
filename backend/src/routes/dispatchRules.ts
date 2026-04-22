@@ -23,6 +23,8 @@ const ruleSchema = z.object({
   fallbackType: z.enum(['voicemail', 'none', 'group', 'agent']).optional(),
   fallbackGroupId: z.string().uuid().nullable().optional(),
   fallbackStaffId: z.string().uuid().nullable().optional(),
+  position_x: z.number().optional(),
+  position_y: z.number().optional(),
 });
 
 // POST /api/dispatch-rules/reorder — must be before /:id routes
@@ -84,8 +86,9 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         condition_type, conditions,
         target_type, target_group_id, target_staff_id,
         distribution_strategy, agent_order,
-        fallback_type, fallback_group_id, fallback_staff_id
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        fallback_type, fallback_group_id, fallback_staff_id,
+        position_x, position_y
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
       RETURNING *`,
       [
         companyId,
@@ -103,6 +106,8 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         data.fallbackType ?? 'voicemail',
         data.fallbackGroupId ?? null,
         data.fallbackStaffId ?? null,
+        data.position_x ?? null,
+        data.position_y ?? null,
       ]
     );
     res.status(201).json({ rule: result.rows[0] });
@@ -137,6 +142,8 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
     if (data.fallbackType !== undefined) { setClauses.push(`fallback_type = $${idx++}`); values.push(data.fallbackType); }
     if (data.fallbackGroupId !== undefined) { setClauses.push(`fallback_group_id = $${idx++}`); values.push(data.fallbackGroupId); }
     if (data.fallbackStaffId !== undefined) { setClauses.push(`fallback_staff_id = $${idx++}`); values.push(data.fallbackStaffId); }
+    if (data.position_x !== undefined) { setClauses.push(`position_x = $${idx++}`); values.push(data.position_x); }
+    if (data.position_y !== undefined) { setClauses.push(`position_y = $${idx++}`); values.push(data.position_y); }
 
     values.push(id, companyId);
     const result = await query(

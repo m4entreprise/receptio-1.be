@@ -67,8 +67,8 @@ interface DispatchRule {
   fallback_type: 'voicemail' | 'none' | 'group' | 'agent';
   fallback_group_id: string | null;
   fallback_staff_id: string | null;
-  position_x?: number;
-  position_y?: number;
+  position_x?: number | null;
+  position_y?: number | null;
   target_group_name: string | null;
   target_group_role: string | null;
   target_staff_first_name: string | null;
@@ -298,8 +298,8 @@ export default function DispatchFlowBuilder({
         id: `${rule.id}-condition`,
         type: 'condition',
         position: {
-          x: rule.position_x !== undefined ? rule.position_x : xCenter - 120,
-          y: rule.position_y !== undefined ? rule.position_y : yOffset,
+          x: rule.position_x !== undefined && rule.position_x !== null ? rule.position_x : xCenter - 120,
+          y: rule.position_y !== undefined && rule.position_y !== null ? rule.position_y : yOffset,
         },
         data: {
           type: 'condition',
