@@ -13,7 +13,6 @@ import AcceptInvitation from './pages/AcceptInvitation';
 
 // Dashboard pages — lazy loaded (only when user is authenticated)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Calls = lazy(() => import('./pages/Calls'));
 const CallDetail = lazy(() => import('./pages/CallDetail'));
 const CallQAReport = lazy(() => import('./pages/CallQAReport'));
 const MonitoringBbis = lazy(() => import('./pages/MonitoringBbis'));
@@ -82,7 +81,7 @@ function App() {
 
               {/* ── Tenant routes (lazy) ── */}
               <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-              <Route path="/calls" element={<PrivateRoute><Calls /></PrivateRoute>} />
+              <Route path="/calls" element={<Navigate to="/dashboard" replace />} />
               <Route path="/calls/:id" element={<PrivateRoute><CallDetail /></PrivateRoute>} />
               <Route path="/calls/:id/qa" element={<PrivateRoute><CallQAReport /></PrivateRoute>} />
               <Route path="/staff" element={<PrivateRoute><Staff /></PrivateRoute>} />
