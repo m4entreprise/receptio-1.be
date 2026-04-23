@@ -1,10 +1,5 @@
 import Twilio from 'twilio';
 
-/**
- * Returns a Twilio REST client configured for the region specified in
- * TWILIO_REGION (e.g. "ie1" → api.ie1.twilio.com).
- * Falls back to the global US1 endpoint when TWILIO_REGION is unset.
- */
 export function getTwilioClient(): ReturnType<typeof Twilio> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -12,6 +7,12 @@ export function getTwilioClient(): ReturnType<typeof Twilio> {
     throw new Error('Twilio credentials not configured (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)');
   }
   const region = (process.env.TWILIO_REGION || '').trim() || undefined;
+  const apiKeySid = (process.env.TWILIO_API_KEY_SID || '').trim() || undefined;
+  const apiKeySecret = (process.env.TWILIO_API_KEY_SECRET || '').trim() || undefined;
+
+  if (region && apiKeySid && apiKeySecret) {
+    return Twilio(apiKeySid, apiKeySecret, { accountSid, region });
+  }
   return Twilio(accountSid, authToken, region ? { region } : undefined);
 }
 
