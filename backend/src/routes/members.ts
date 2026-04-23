@@ -10,10 +10,20 @@ import { writeAuditLogFromRequest } from '../utils/audit';
 
 const router = Router();
 
+const inviteStaffDataSchema = z.object({
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  phoneNumber: z.string().optional(),
+  role: z.string().optional(),
+});
+
 const inviteSchema = z.object({
   email: z.string().email(),
   role: z.enum(['admin', 'agent']),
   staffId: z.string().uuid().nullable().optional(),
+  staffData: inviteStaffDataSchema.optional(),
+}).refine(data => !(data.staffId && data.staffData), {
+  message: 'staffId et staffData sont mutuellement exclusifs',
 });
 
 const updateMemberSchema = z.object({
@@ -51,11 +61,12 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
     requirePermission(req, 'memberManage');
     const { companyId } = req.user!;
 
-    const [usersResult, invitationsResult] = await Promise.all([
+    const [usersResult, invitationsResult, unlinkedStaffResult] = await Promise.all([
       query(
         `SELECT u.id, u.email, u.role, u.status, u.staff_id, u.first_name, u.last_name, u.invited_at,
                 u.activated_at, u.disabled_at, u.last_login_at, u.created_at,
-                s.first_name AS staff_first_name, s.last_name AS staff_last_name
+                s.first_name AS staff_first_name, s.last_name AS staff_last_name,
+                s.phone_number AS staff_phone, s.role AS staff_role, s.enabled AS staff_enabled
          FROM users u
          LEFT JOIN staff s ON s.id = u.staff_id
          WHERE u.company_id = $1
@@ -69,13 +80,27 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
          FROM user_invitations i
          LEFT JOIN staff s ON s.id = i.staff_id
          LEFT JOIN users u ON u.id = i.invited_by_user_id
-         WHERE i.company_id = $1
+         WHERE i.company_id = $1 AND i.status = 'pending'
          ORDER BY i.created_at DESC`,
+        [companyId]
+      ),
+      query(
+        `SELECT id, first_name, last_name, phone_number, role, enabled, created_at
+         FROM staff
+         WHERE company_id = $1
+           AND id NOT IN (
+             SELECT staff_id FROM users WHERE company_id = $1 AND staff_id IS NOT NULL
+           )
+         ORDER BY first_name, last_name`,
         [companyId]
       ),
     ]);
 
-    res.json({ members: usersResult.rows, invitations: invitationsResult.rows });
+    res.json({
+      members: usersResult.rows,
+      pendingInvitations: invitationsResult.rows,
+      unlinkedStaff: unlinkedStaffResult.rows,
+    });
   } catch (error) {
     next(error);
   }
@@ -167,9 +192,36 @@ router.post('/invite', authenticateToken, async (req: AuthRequest, res: Response
     );
     if (pendingInvitation.rows.length > 0) throw new AppError('Une invitation en attente existe déjà', 400);
 
+    let resolvedStaffId: string | null = data.staffId || null;
+
     if (data.staffId) {
-      const staffResult = await query('SELECT id FROM staff WHERE id = $1 AND company_id = $2', [data.staffId, actor.companyId]);
+      const staffResult = await query(
+        'SELECT id FROM staff WHERE id = $1 AND company_id = $2',
+        [data.staffId, actor.companyId]
+      );
       if (staffResult.rows.length === 0) throw new AppError('Membre du staff introuvable', 404);
+
+      const alreadyLinked = await query(
+        'SELECT id FROM users WHERE staff_id = $1 AND company_id = $2',
+        [data.staffId, actor.companyId]
+      );
+      if (alreadyLinked.rows.length > 0) throw new AppError('Ce membre du staff est déjà assigné à un utilisateur', 400);
+    }
+
+    if (data.staffData) {
+      const createdStaff = await query(
+        `INSERT INTO staff (company_id, first_name, last_name, phone_number, role)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [
+          actor.companyId,
+          data.staffData.firstName,
+          data.staffData.lastName,
+          data.staffData.phoneNumber || null,
+          data.staffData.role || 'secrétaire',
+        ]
+      );
+      resolvedStaffId = createdStaff.rows[0].id;
     }
 
     const token = crypto.randomBytes(24).toString('hex');
@@ -179,7 +231,7 @@ router.post('/invite', authenticateToken, async (req: AuthRequest, res: Response
       `INSERT INTO user_invitations (company_id, email, role, staff_id, token_hash, invited_by_user_id, expires_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, email, role, staff_id, status, expires_at, created_at`,
-      [actor.companyId, normalizedEmail, data.role, data.staffId || null, tokenHash, actor.id, expiresAt.toISOString()]
+      [actor.companyId, normalizedEmail, data.role, resolvedStaffId, tokenHash, actor.id, expiresAt.toISOString()]
     );
 
     const publicUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');

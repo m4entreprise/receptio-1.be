@@ -83,11 +83,25 @@ router.post('/register', async (req: Request, res: Response, next) => {
     const companyId = companyResult.rows[0].id;
 
     const userResult = await query(
-      `INSERT INTO users (company_id, email, password_hash, first_name, last_name, role, status, activated_at) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP) 
+      `INSERT INTO users (company_id, email, password_hash, first_name, last_name, role, status, activated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
        RETURNING id, email, company_id, role, status, staff_id, first_name, last_name`,
       [companyId, data.email, passwordHash, data.firstName || null, data.lastName || null, 'owner', 'active']
     );
+
+    // Auto-create a staff entry for the owner and link it immediately
+    if (data.firstName) {
+      const ownerStaff = await query(
+        `INSERT INTO staff (company_id, first_name, last_name, phone_number)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [companyId, data.firstName, data.lastName || '', data.companyPhone || null]
+      );
+      await query(
+        'UPDATE users SET staff_id = $1 WHERE id = $2',
+        [ownerStaff.rows[0].id, userResult.rows[0].id]
+      );
+    }
 
     const meResult = await query(
       `SELECT u.id, u.email, u.company_id, u.role, u.status, u.staff_id, u.first_name, u.last_name,

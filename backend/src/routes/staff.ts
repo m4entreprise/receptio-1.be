@@ -14,7 +14,7 @@ const router = Router();
 const staffSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
-  phoneNumber: z.string().min(5),
+  phoneNumber: z.string().min(5).optional().or(z.literal('')).transform(v => v || null),
   role: z.string().optional(),
   voicemailMessage: z.string().optional(),
 });
@@ -67,6 +67,27 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     });
     logger.info('Staff created', { companyId, staffId: result.rows[0].id });
     res.status(201).json({ staff: result.rows[0] });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/staff/unlinked - staff members without a linked user account
+router.get('/unlinked', authenticateToken, async (req: AuthRequest, res: Response, next) => {
+  try {
+    requirePermission(req, 'staffManage');
+    const { companyId } = req.user!;
+    const result = await query(
+      `SELECT id, first_name, last_name, phone_number, role, enabled, created_at
+       FROM staff
+       WHERE company_id = $1
+         AND id NOT IN (
+           SELECT staff_id FROM users WHERE company_id = $1 AND staff_id IS NOT NULL
+         )
+       ORDER BY first_name, last_name`,
+      [companyId]
+    );
+    res.json({ staff: result.rows });
   } catch (error) {
     next(error);
   }
