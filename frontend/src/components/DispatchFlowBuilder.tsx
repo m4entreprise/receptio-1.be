@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, createContext, useContext } from 'react';
 import ReactFlow, {
   Node, Edge, Controls, Background, BackgroundVariant,
   useNodesState, useEdgesState, addEdge, Connection,
@@ -27,6 +27,12 @@ import {
   DAYS_FR, DAYS_SHORT, DEFAULT_RETRY, DEFAULT_VOICEMAIL,
   newConditionId, newNodeId, DEFAULT_CONDITIONS,
 } from '../types/dispatch';
+
+// ─── Contexte partagé (évite d'injecter groups/staff dans chaque nœud) ───────
+
+const FlowContext = createContext<{ groups: StaffGroup[]; staff: StaffMember[] }>({
+  groups: [], staff: [],
+});
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -206,8 +212,9 @@ function ConditionNode({ data, selected }: NodeProps<FlowNodeData_Condition>) {
 
 // ─── Nœud : Action ───────────────────────────────────────────────────────────
 
-function ActionNode({ data, selected }: NodeProps<FlowNodeData_Action & { groups: StaffGroup[]; staff: StaffMember[] }>) {
-  const { action, label, groups = [], staff = [] } = data;
+function ActionNode({ data, selected }: NodeProps<FlowNodeData_Action>) {
+  const { groups, staff } = useContext(FlowContext);
+  const { action, label } = data;
   return (
     <div style={{
       width: 260,
@@ -948,23 +955,48 @@ function styledEdge(edge: Edge): Edge {
   };
 }
 
+// ─── Détection de cycle (BFS depuis target, cherche source) ──────────────────
+
+function wouldCreateCycle(source: string, target: string, edges: Edge[]): boolean {
+  const visited = new Set<string>();
+  const queue = [target];
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (current === source) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    edges.filter(e => e.source === current).forEach(e => queue.push(e.target));
+  }
+  return false;
+}
+
 // ─── Composant principal (inner, a besoin de ReactFlowProvider) ───────────────
 
 function FlowBuilderInner({ groups, staff, nodes: initNodes, edges: initEdges, onSave, saving }: Props) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initNodes.map(n => ({
-    ...n,
-    data: { ...n.data, groups, staff },
-  })));
+  const [nodes, setNodes, onNodesChange] = useNodesState(initNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges.map(styledEdge));
   const [selectedId, setSelectedId]       = useState<string | null>(null);
   const [dirty, setDirty]                 = useState(false);
   const { screenToFlowPosition }          = useReactFlow();
   const wrapperRef                        = useRef<HTMLDivElement>(null);
 
-  // Injecter groups/staff dans tous les nœuds quand ils changent
-  useEffect(() => {
-    setNodes(ns => ns.map(n => ({ ...n, data: { ...n.data, groups, staff } })));
-  }, [groups, staff, setNodes]);
+  // ─── Garde-fou : connexions invalides ──────────────────────────────────────
+  const isValidConnection = useCallback((connection: Connection) => {
+    const { source, target, sourceHandle } = connection;
+    if (!source || !target) return false;
+    // Boucle sur soi-même
+    if (source === target) return false;
+    // Le nœud entry ne peut pas être une cible
+    if (target === 'entry') return false;
+    // Un nœud end ne peut pas être une source
+    const sourceNode = nodes.find(n => n.id === source);
+    if (sourceNode?.type === 'end') return false;
+    // La poignée source est déjà utilisée (chaque handle = max 1 arête sortante)
+    if (edges.some(e => e.source === source && e.sourceHandle === sourceHandle)) return false;
+    // Détection de cycle
+    if (wouldCreateCycle(source, target, edges)) return false;
+    return true;
+  }, [nodes, edges]);
 
   const onConnect = useCallback((connection: Connection) => {
     setEdges(eds => addEdge(styledEdge({
@@ -975,7 +1007,6 @@ function FlowBuilderInner({ groups, staff, nodes: initNodes, edges: initEdges, o
   }, [setEdges]);
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    // Empêcher la suppression du nœud entry
     const filtered = changes.filter(c => !(c.type === 'remove' && c.id === 'entry'));
     onNodesChange(filtered);
     if (filtered.some(c => c.type !== 'select')) setDirty(true);
@@ -992,91 +1023,86 @@ function FlowBuilderInner({ groups, staff, nodes: initNodes, edges: initEdges, o
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     const newNode  = makeNode(nodeType, subType, position);
 
-    setNodes(ns => [...ns, { ...newNode, data: { ...newNode.data, groups, staff } }]);
+    setNodes(ns => [...ns, newNode]);
     setDirty(true);
-  }, [screenToFlowPosition, groups, staff, setNodes]);
+  }, [screenToFlowPosition, setNodes]);
 
   const selectedNode = nodes.find(n => n.id === selectedId) ?? null;
 
   const handleSave = useCallback(async () => {
-    // Nettoyer avant de sauvegarder (retirer groups/staff du data)
-    const cleanNodes = nodes.map(({ data, ...rest }) => {
-      const { groups: _g, staff: _s, ...cleanData } = data as Record<string, unknown>;
-      return { ...rest, data: cleanData };
-    });
-    await onSave(cleanNodes, edges);
+    await onSave(nodes, edges);
     setDirty(false);
   }, [nodes, edges, onSave]);
 
   return (
-    <div className="flex" style={{ height: '100%', overflow: 'hidden' }}>
-      <NodePalette />
+    <FlowContext.Provider value={{ groups, staff }}>
+      <div className="flex" style={{ height: '100%', overflow: 'hidden' }}>
+        <NodePalette />
 
-      <div ref={wrapperRef} className="relative flex-1"
-        onDrop={onDrop}
-        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={handleNodesChange}
-          onEdgesChange={(changes) => { onEdgesChange(changes); setDirty(true); }}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onNodeClick={(_, node) => setSelectedId(node.id)}
-          onPaneClick={() => setSelectedId(null)}
-          deleteKeyCode={['Backspace', 'Delete']}
-          fitView
-          fitViewOptions={{ padding: 0.25, maxZoom: 1.2 }}
-        >
-          <Controls />
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(52,68,83,0.08)" />
-          <MiniMap
-            nodeColor={n => n.type === 'condition' ? C.orange : n.type === 'action' ? C.navy : C.grey}
-            style={{ border: `1px solid ${C.border}`, borderRadius: 12 }}
+        <div ref={wrapperRef} className="relative flex-1"
+          onDrop={onDrop}
+          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={(changes) => { onEdgesChange(changes); setDirty(true); }}
+            onConnect={onConnect}
+            isValidConnection={isValidConnection}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodeClick={(_, node) => setSelectedId(node.id)}
+            onPaneClick={() => setSelectedId(null)}
+            deleteKeyCode={['Backspace', 'Delete']}
+            fitView
+            fitViewOptions={{ padding: 0.25, maxZoom: 1.2 }}
+          >
+            <Controls />
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(52,68,83,0.08)" />
+            <MiniMap
+              nodeColor={n => n.type === 'condition' ? C.orange : n.type === 'action' ? C.navy : C.grey}
+              style={{ border: `1px solid ${C.border}`, borderRadius: 12 }}
+            />
+            <Panel position="top-right">
+              <div className="flex items-center gap-2">
+                {dirty && (
+                  <span className="rounded-full bg-[#C7601D]/10 px-2.5 py-1 text-[11px] font-medium text-[#C7601D]">
+                    Modifications non sauvegardées
+                  </span>
+                )}
+                <button
+                  onClick={handleSave}
+                  disabled={!dirty || saving}
+                  className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-40"
+                  style={{ background: dirty && !saving ? C.navy : C.grey }}>
+                  {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Enregistrer
+                </button>
+              </div>
+            </Panel>
+          </ReactFlow>
+        </div>
+
+        {selectedNode && (
+          <NodeEditorPanel
+            node={selectedNode}
+            groups={groups}
+            staff={staff}
+            onUpdate={updated => {
+              setNodes(ns => ns.map(n => n.id === updated.id ? updated : n));
+              setDirty(true);
+            }}
+            onDelete={() => {
+              setNodes(ns => ns.filter(n => n.id !== selectedId));
+              setEdges(es => es.filter(e => e.source !== selectedId && e.target !== selectedId));
+              setSelectedId(null);
+              setDirty(true);
+            }}
+            onClose={() => setSelectedId(null)}
           />
-          <Panel position="top-right">
-            <div className="flex items-center gap-2">
-              {dirty && (
-                <span className="rounded-full bg-[#C7601D]/10 px-2.5 py-1 text-[11px] font-medium text-[#C7601D]">
-                  Modifications non sauvegardées
-                </span>
-              )}
-              <button
-                onClick={handleSave}
-                disabled={!dirty || saving}
-                className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-40"
-                style={{ background: dirty && !saving ? C.navy : C.grey }}>
-                {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                Enregistrer
-              </button>
-            </div>
-          </Panel>
-        </ReactFlow>
+        )}
       </div>
-
-      {selectedNode && (
-        <NodeEditorPanel
-          node={selectedNode}
-          groups={groups}
-          staff={staff}
-          onUpdate={updated => {
-            setNodes(ns => ns.map(n => n.id === updated.id
-              ? { ...updated, data: { ...updated.data, groups, staff } }
-              : n
-            ));
-            setDirty(true);
-          }}
-          onDelete={() => {
-            setNodes(ns => ns.filter(n => n.id !== selectedId));
-            setEdges(es => es.filter(e => e.source !== selectedId && e.target !== selectedId));
-            setSelectedId(null);
-            setDirty(true);
-          }}
-          onClose={() => setSelectedId(null)}
-        />
-      )}
-    </div>
+    </FlowContext.Provider>
   );
 }
 
