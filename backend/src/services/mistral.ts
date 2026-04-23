@@ -1,6 +1,7 @@
 import axios from 'axios';
 import logger from '../utils/logger';
 import { query } from '../config/database';
+import { getTwilioBasicAuth } from './twilioClient';
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_API_URL = 'https://api.mistral.ai/v1';
@@ -158,15 +159,16 @@ export async function generateResponse(
 }
 
 const MISTRAL_DIARIZATION_MODEL = 'voxtral-mini-latest';
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-
 async function downloadAudioForMistral(audioUrl: string): Promise<{ buffer: Buffer; mimeType: string; fileName: string }> {
   const resolvedUrl = audioUrl.endsWith('.mp3') || audioUrl.endsWith('.wav') ? audioUrl : `${audioUrl}.mp3`;
   const headers: Record<string, string> = {};
 
-  if (resolvedUrl.includes('twilio.com') && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-    headers.Authorization = `Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}`;
+  if (resolvedUrl.includes('twilio.com')) {
+    try {
+      const twilioAuth = getTwilioBasicAuth();
+      headers.Authorization = `Basic ${Buffer.from(`${twilioAuth.username}:${twilioAuth.password}`).toString('base64')}`;
+    } catch {
+    }
   }
 
   const response = await fetch(resolvedUrl, { headers });

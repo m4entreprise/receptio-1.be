@@ -7,11 +7,10 @@ import { buildKnowledgeBaseContext, getBbisAgentSettings, getCompanyOfferBSettin
 import { generateResponse as mistralGenerateResponse, summarizeCall as mistralSummarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
 import { transcribeAudioBuffer as gladiaTranscribeAudioBuffer } from './gladia';
 import logger from '../utils/logger';
-import { getTwilioClient, getTwilioApiBase } from './twilioClient';
+import { getTwilioClient, getTwilioApiBase, getTwilioAccountSid, getTwilioBasicAuth } from './twilioClient';
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_CONFIGURED = !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_API_KEY_SID && !!process.env.TWILIO_API_KEY_SECRET;
 const STREAMING_ENABLED = process.env.OFFER_B_STREAMING_ENABLED !== 'false';
 const ENERGY_THRESHOLD = Number(process.env.OFFER_B_STREAMING_ENERGY_THRESHOLD || 500);
 const BBIS_SILENCE_THRESHOLD_MS = Number(process.env.OFFER_BBIS_STREAMING_SILENCE_MS || 260);
@@ -492,10 +491,10 @@ async function handleTwilioMessage(
       const customBaseUrl = startEvent.start?.customParameters?.baseUrl;
       const effectiveBaseUrl = state.baseUrl || customBaseUrl || '';
       logger.info('Recording start check', { resolvedCallSid, baseUrl: state.baseUrl, customBaseUrl, effectiveBaseUrl });
-      if (resolvedCallSid && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && effectiveBaseUrl) {
+      if (resolvedCallSid && TWILIO_CONFIGURED && effectiveBaseUrl) {
         void startTwilioRecording(resolvedCallSid, effectiveBaseUrl, resolvedCallId);
       } else {
-        logger.warn('Recording skipped - missing data', { resolvedCallSid, hasBaseUrl: !!effectiveBaseUrl, hasTwilioCreds: !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) });
+        logger.warn('Recording skipped - missing data', { resolvedCallSid, hasBaseUrl: !!effectiveBaseUrl, hasTwilioCreds: TWILIO_CONFIGURED });
       }
 
       if (!state.initialized) {
@@ -1434,21 +1433,20 @@ async function redirectToVoicemail(state: StreamSessionState) {
 }
 
 async function redirectTwilioCall(callSid: string, twiml: string) {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !callSid) {
-    logger.warn('Twilio transfer skipped because configuration is incomplete', { callSid, hasSid: Boolean(TWILIO_ACCOUNT_SID) });
+  if (!TWILIO_CONFIGURED || !callSid) {
+    logger.warn('Twilio transfer skipped because configuration is incomplete', { callSid, hasSid: Boolean(process.env.TWILIO_ACCOUNT_SID) });
     return;
   }
 
+  const accountSid = getTwilioAccountSid();
+  const twilioAuth = getTwilioBasicAuth();
   const body = new URLSearchParams({ Twiml: twiml });
 
   await axios.post(
-    `${getTwilioApiBase()}/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls/${callSid}.json`,
+    `${getTwilioApiBase()}/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`,
     body.toString(),
     {
-      auth: {
-        username: TWILIO_ACCOUNT_SID,
-        password: TWILIO_AUTH_TOKEN,
-      },
+      auth: twilioAuth,
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
@@ -1756,7 +1754,7 @@ function wait(durationMs: number): Promise<void> {
 }
 
 async function startTwilioRecording(callSid: string, baseUrl: string, callId: string): Promise<void> {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+  if (!TWILIO_CONFIGURED) {
     logger.warn('Twilio recording skipped: missing credentials', { callSid });
     return;
   }

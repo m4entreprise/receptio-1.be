@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { getTwilioClient } from '../services/twilioClient';
+import { getTwilioClient, getTwilioBasicAuth } from '../services/twilioClient';
 import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
@@ -207,22 +207,26 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       throw new AppError('Recording not found', 404);
     }
 
-    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+    let twilioAuth: { username: string; password: string } | undefined;
+    try {
+      twilioAuth = getTwilioBasicAuth();
+    } catch {
+      twilioAuth = undefined;
+    }
     const isTwilioRecording = /twilio\.com/i.test(recordingUrl);
 
     logger.info('Recording proxy request', {
       callId: id,
       isTwilioRecording,
-      hasTwilioCreds: !!(twilioSid && twilioToken),
+      hasTwilioCreds: !!twilioAuth,
       recordingUrl,
     });
 
     // Stream the recording directly from the stored URL.
     // For Twilio URLs: use Basic auth + beforeRedirect to strip auth header
     // before any CDN redirect (otherwise CDN rejects with 403).
-    const streamAuth = isTwilioRecording && twilioSid && twilioToken
-      ? { username: twilioSid, password: twilioToken }
+    const streamAuth = isTwilioRecording && twilioAuth
+      ? twilioAuth
       : undefined;
 
     logger.info('Recording proxy: streaming', { callId: id, isTwilioRecording, hasAuth: !!streamAuth });
@@ -294,9 +298,8 @@ router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Res
     const { call_sid: callSid } = callResult.rows[0];
 
     if (callSid) {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      if (accountSid && authToken) {
+      const hasTwilioConfig = !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_API_KEY_SID && !!process.env.TWILIO_API_KEY_SECRET;
+      if (hasTwilioConfig) {
         try {
           const twilioClient = getTwilioClient();
           await twilioClient.calls(callSid).update({ status: 'completed' });
@@ -357,10 +360,9 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
       return;
     }
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const hasTwilioConfig = !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_API_KEY_SID && !!process.env.TWILIO_API_KEY_SECRET;
 
-    if (!accountSid || !authToken) {
+    if (!hasTwilioConfig) {
       res.status(500).json({ error: 'Twilio credentials not configured' });
       return;
     }

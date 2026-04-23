@@ -33,10 +33,12 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // Verify critical environment variables on startup
 const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+const twilioApiKeySid = process.env.TWILIO_API_KEY_SID;
+const twilioApiKeySecret = process.env.TWILIO_API_KEY_SECRET;
 logger.info('Environment check', {
   hasTwilioSid: !!twilioSid,
-  hasTwilioToken: !!twilioToken,
+  hasTwilioApiKeySid: !!twilioApiKeySid,
+  hasTwilioApiKeySecret: !!twilioApiKeySecret,
   twilioSidPrefix: twilioSid ? twilioSid.substring(0, 10) : 'missing',
   envPath: path.resolve(__dirname, '../../.env'),
 });

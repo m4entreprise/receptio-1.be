@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { getTwilioClient, getTwilioApiBase } from '../services/twilioClient';
+import { getTwilioClient, getTwilioApiBase, getTwilioAccountSid, getTwilioBasicAuth } from '../services/twilioClient';
 import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
@@ -59,13 +59,8 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
 
     if (!company.phone_number) throw new AppError('Company has no Twilio phone number configured', 400);
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!accountSid || !authToken) throw new AppError('Twilio credentials not configured', 500);
-    const apiKeySid = (process.env.TWILIO_API_KEY_SID || '').trim() || undefined;
-    const apiKeySecret = (process.env.TWILIO_API_KEY_SECRET || '').trim() || undefined;
-    const region = (process.env.TWILIO_REGION || '').trim() || undefined;
-    const useApiKey = !!(region && apiKeySid && apiKeySecret);
+    const accountSid = getTwilioAccountSid();
+    const twilioAuth = getTwilioBasicAuth();
 
     const callRecord = await query(
       `INSERT INTO calls (company_id, caller_number, destination_number, direction, status, initiated_by_staff_id, metadata)
@@ -116,9 +111,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         'StatusCallbackEvent[6]': 'failed',
       });
       const twilioRes = await axios.post(callsUrl, params.toString(), {
-        auth: useApiKey
-          ? { username: apiKeySid!, password: apiKeySecret! }
-          : { username: accountSid, password: authToken },
+        auth: twilioAuth,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
       twilioSid = twilioRes.data.sid;
@@ -129,7 +122,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
       logger.error('Twilio call creation failed', { callsUrl, status, twilioCode, twilioMsg, data: twilioErr.response?.data });
       if (status === 401 || twilioCode === 20003) {
         throw new AppError(
-          `Authentification Twilio refusée (${callsUrl}) — vérifiez TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN et TWILIO_REGION`,
+          `Authentification Twilio refusée (${callsUrl}) — vérifiez TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET et TWILIO_REGION`,
           500
         );
       }
@@ -267,9 +260,8 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
     if (!callSid) throw new AppError('No active call SID found', 400);
     if (!['answered', 'in-progress'].includes(status)) throw new AppError('Call is not active', 400);
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!accountSid || !authToken) throw new AppError('Twilio credentials not configured', 500);
+    getTwilioAccountSid();
+    getTwilioBasicAuth();
 
     const client = getTwilioClient();
     await client.calls(callSid).update({
@@ -315,9 +307,8 @@ router.post('/:id/hangup', authenticateToken, async (req: AuthRequest, res: Resp
     const { call_sid: callSid } = callResult.rows[0];
 
     if (callSid) {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      if (accountSid && authToken) {
+      const hasTwilioConfig = !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_API_KEY_SID && !!process.env.TWILIO_API_KEY_SECRET;
+      if (hasTwilioConfig) {
         try {
           const client = getTwilioClient();
           await client.calls(callSid).update({ status: 'completed' });
