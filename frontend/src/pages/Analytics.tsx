@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import {
   ResponsiveContainer,
+  AreaChart,
+  Area,
   LineChart,
   Line,
   BarChart,
@@ -19,7 +21,23 @@ import {
 import Layout from '../components/Layout';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { X, Play, Square, CheckCircle, AlertCircle } from 'lucide-react';
+import {
+  X,
+  Play,
+  Square,
+  CheckCircle,
+  AlertCircle,
+  Phone,
+  PhoneIncoming,
+  PhoneOutgoing,
+  Clock,
+  TrendingDown,
+  ArrowRightLeft,
+  Calendar,
+  AlertTriangle,
+  Shield,
+  BarChart3,
+} from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -157,37 +175,117 @@ function getIntentColor(intent: string): string {
   return INTENT_COLORS[intent] || '#8B9CAA';
 }
 
+function scoreColor(score: number): string {
+  return score >= 70 ? '#2D9D78' : score >= 50 ? '#C7601D' : '#D94052';
+}
+
+function scoreLabel(score: number): string {
+  return score >= 70 ? 'Bon' : score >= 50 ? 'Moyen' : 'Faible';
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+}
+
 // ── Composants internes ───────────────────────────────────────────────────────
 
-function KpiCard({
+function KpiHeroCard({
   label,
   value,
   sub,
   highlight,
+  icon,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   highlight?: boolean;
+  icon: React.ReactNode;
 }) {
   return (
     <div
-      className={`rounded-[20px] border bg-white p-5 shadow-sm ${
-        highlight ? 'border-[#D94052]/30 bg-[#D94052]/[0.03]' : 'border-[#344453]/10'
+      className={`relative overflow-hidden rounded-2xl border bg-white p-6 shadow-sm ${
+        highlight ? 'border-[#D94052]/30' : 'border-[#344453]/10'
       }`}
     >
-      <p className="text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 font-medium">
-        {label}
-      </p>
+      <div
+        className="absolute inset-x-0 top-0 h-[3px] rounded-t-2xl"
+        style={{
+          background: highlight
+            ? 'linear-gradient(90deg, #D94052, #E07B22)'
+            : 'linear-gradient(90deg, #344453, #5B86B5)',
+        }}
+      />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.2em] text-[#344453]/45 font-medium">
+            {label}
+          </p>
+          <p
+            className={`mt-3 text-3xl font-bold tracking-tight ${
+              highlight ? 'text-[#D94052]' : 'text-[#141F28]'
+            }`}
+            style={{ fontFamily: 'var(--font-title)' }}
+          >
+            {value}
+          </p>
+          {sub && <p className="mt-1 text-xs text-[#344453]/45">{sub}</p>}
+        </div>
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+            highlight ? 'bg-[#D94052]/8 text-[#D94052]' : 'bg-[#344453]/7 text-[#344453]/60'
+          }`}
+        >
+          {icon}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KpiSmallCard({
+  label,
+  value,
+  sub,
+  highlight,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  highlight?: boolean;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border bg-white p-4 shadow-sm ${
+        highlight ? 'border-[#D94052]/25 bg-[#D94052]/[0.02]' : 'border-[#344453]/10'
+      }`}
+    >
+      <div className="flex items-center gap-2.5">
+        <div
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+            highlight ? 'bg-[#D94052]/8 text-[#D94052]' : 'bg-[#344453]/6 text-[#344453]/50'
+          }`}
+        >
+          {icon}
+        </div>
+        <p className="text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium truncate">
+          {label}
+        </p>
+      </div>
       <p
-        className={`mt-2 text-2xl font-bold ${
-          highlight ? 'text-[#D94052]' : 'text-[#141F28]'
-        }`}
+        className={`mt-2.5 text-xl font-bold ${highlight ? 'text-[#D94052]' : 'text-[#141F28]'}`}
         style={{ fontFamily: 'var(--font-title)' }}
       >
         {value}
       </p>
-      {sub && <p className="mt-1 text-xs text-[#344453]/50">{sub}</p>}
+      {sub && <p className="mt-0.5 text-xs text-[#344453]/40">{sub}</p>}
     </div>
   );
 }
@@ -195,11 +293,60 @@ function KpiCard({
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h2
-      className="text-sm font-semibold uppercase tracking-[0.18em] text-[#344453]/50 mb-3"
+      className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#344453]/45 mb-3"
       style={{ fontFamily: 'var(--font-mono)' }}
     >
       {children}
     </h2>
+  );
+}
+
+function ChartCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-[#344453]/10 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <p className="text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 font-medium">
+          {title}
+        </p>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function QaSummaryCard({
+  label,
+  value,
+  sub,
+  color,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  color?: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-4 rounded-2xl border border-[#344453]/10 bg-white px-5 py-4 shadow-sm">
+      <div
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+        style={{ backgroundColor: color ? `${color}14` : 'rgba(52,68,83,0.06)', color: color || '#344453' }}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] uppercase tracking-[0.2em] text-[#344453]/40 font-medium">{label}</p>
+        <p
+          className="mt-0.5 text-2xl font-bold tracking-tight"
+          style={{ fontFamily: 'var(--font-title)', color: color || '#141F28' }}
+        >
+          {value}
+        </p>
+        {sub && <p className="text-[11px] text-[#344453]/40">{sub}</p>}
+      </div>
+    </div>
   );
 }
 
@@ -252,7 +399,6 @@ function BatchAnalysisModal({
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-lg rounded-[24px] border border-[#344453]/10 bg-white shadow-2xl">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-[#344453]/10 px-6 py-4">
           <h2 className="text-base font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>
             Analyse batch
@@ -263,7 +409,6 @@ function BatchAnalysisModal({
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Config */}
           {batchState.status === 'idle' && (
             <>
               {templates.length === 0 ? (
@@ -294,7 +439,7 @@ function BatchAnalysisModal({
                     >
                       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${skipExisting ? 'translate-x-4' : 'translate-x-0.5'}`} />
                     </button>
-                    <span className="text-sm text-[#344453]/70">Ignorer les appels déjà analysés avec ce template</span>
+                    <span className="text-sm text-[#344453]/70">Ignorer les appels déjà analysés</span>
                   </div>
 
                   <div className="rounded-xl bg-[#344453]/4 px-4 py-3">
@@ -327,7 +472,6 @@ function BatchAnalysisModal({
             </>
           )}
 
-          {/* Progression */}
           {(batchState.status === 'running' || batchState.status === 'cancelled') && (
             <div className="space-y-4">
               <div className="flex items-center justify-between text-sm">
@@ -361,7 +505,6 @@ function BatchAnalysisModal({
             </div>
           )}
 
-          {/* Résultats finaux */}
           {batchState.status === 'done' && (
             <div className="space-y-4">
               <div className="flex items-center gap-3 rounded-xl bg-[#2D9D78]/8 border border-[#2D9D78]/20 px-4 py-3">
@@ -394,17 +537,6 @@ function BatchAnalysisModal({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-[20px] border border-[#344453]/10 bg-white p-5 shadow-sm">
-      <p className="mb-4 text-[11px] uppercase tracking-[0.22em] text-[#344453]/45 font-medium">
-        {title}
-      </p>
-      {children}
     </div>
   );
 }
@@ -463,7 +595,6 @@ export default function Analytics() {
       const { data } = await axios.get(`/api/qa/results?period=${p}&limit=200`, {
         headers: authHeader(),
       });
-      // L'API retourne du snake_case — on normalise en camelCase
       const normalized = (data.results || []).map((r: Record<string, unknown>) => ({
         id: r.id,
         callId: r.call_id,
@@ -581,6 +712,12 @@ export default function Analytics() {
     .filter((result: QAResult) => result.globalScore < reviewThreshold || result.flags.some((flag: string) => ['prospect_chaud', 'promesse_non_tenue', 'transfert_rate'].includes(flag)))
     .sort((a: QAResult, b: QAResult) => a.globalScore - b.globalScore)
     .slice(0, 20);
+
+  const avgGlobalScore =
+    qaResults.length > 0
+      ? Math.round(qaResults.reduce((sum, r) => sum + r.globalScore, 0) / qaResults.length)
+      : null;
+  const callsWithFlagsCount = qaResults.filter((r) => r.flags.length > 0).length;
 
   useEffect(() => {
     void loadQaAdvanced(period, effectiveSelectedFlagType);
@@ -701,7 +838,6 @@ export default function Analytics() {
             </h1>
           </div>
 
-          {/* Sélecteur de période */}
           <div className="flex gap-2">
             {(['today', '7d', '30d'] as Period[]).map((p) => (
               <button
@@ -731,7 +867,7 @@ export default function Analytics() {
                   : 'text-[#344453]/60 hover:bg-[#344453]/[0.06]'
               }`}
             >
-              {t === 'overview' ? 'Vue d\'ensemble' : 'Qualité IA'}
+              {t === 'overview' ? "Vue d'ensemble" : 'Qualité IA'}
             </button>
           ))}
         </div>
@@ -753,70 +889,99 @@ export default function Analytics() {
         {/* ── Onglet Vue d'ensemble ── */}
         {!loading && tab === 'overview' && kpiData && (
           <div className="space-y-6">
-            {/* KPI Grid */}
-            <div>
-              <SectionTitle>Indicateurs clés</SectionTitle>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                <KpiCard label="Total appels" value={ov?.totalCalls ?? 0} />
-                <KpiCard
-                  label="Entrants"
-                  value={ov?.inbound ?? 0}
-                  sub={ov && ov.totalCalls > 0 ? `${Math.round((ov.inbound / ov.totalCalls) * 100)}%` : undefined}
-                />
-                <KpiCard
-                  label="Sortants"
-                  value={ov?.outbound ?? 0}
-                  sub={ov && ov.totalCalls > 0 ? `${Math.round((ov.outbound / ov.totalCalls) * 100)}%` : undefined}
-                />
-                <KpiCard
-                  label="Durée moyenne"
-                  value={formatDuration(ov?.avgDurationSec ?? null)}
-                />
-                <KpiCard
-                  label="Tps avant transfert"
-                  value={formatDuration(ov?.avgTimeToTransferSec ?? null)}
-                />
-                <KpiCard
-                  label="Taux d'abandon"
-                  value={`${ov?.abandonRate ?? 0}%`}
-                  highlight={(ov?.abandonRate ?? 0) > 20}
-                />
-                <KpiCard
-                  label="Taux de transfert"
-                  value={`${ov?.transferRate ?? 0}%`}
-                />
-                <KpiCard
-                  label="Taux de RDV"
-                  value={`${ov?.appointmentRate ?? 0}%`}
-                />
-                <KpiCard
-                  label="Appels urgents"
-                  value={ov?.urgentCount ?? 0}
-                  highlight={(ov?.urgentCount ?? 0) > 0}
-                />
-              </div>
+            {/* Hero KPIs */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <KpiHeroCard
+                label="Total appels"
+                value={ov?.totalCalls ?? 0}
+                sub={`${ov?.inbound ?? 0} entrants · ${ov?.outbound ?? 0} sortants`}
+                icon={<Phone className="h-5 w-5" />}
+              />
+              <KpiHeroCard
+                label="Durée moyenne"
+                value={formatDuration(ov?.avgDurationSec ?? null)}
+                sub={ov?.avgTimeToTransferSec ? `Transfert en ${formatDuration(ov.avgTimeToTransferSec)}` : undefined}
+                icon={<Clock className="h-5 w-5" />}
+              />
+              <KpiHeroCard
+                label="Appels urgents"
+                value={ov?.urgentCount ?? 0}
+                sub={(ov?.urgentCount ?? 0) > 0 ? 'Nécessitent une attention' : 'Aucun signalement'}
+                highlight={(ov?.urgentCount ?? 0) > 0}
+                icon={<AlertTriangle className="h-5 w-5" />}
+              />
+            </div>
+
+            {/* KPIs secondaires */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <KpiSmallCard
+                label="Entrants"
+                value={ov?.inbound ?? 0}
+                sub={ov && ov.totalCalls > 0 ? `${Math.round((ov.inbound / ov.totalCalls) * 100)}%` : undefined}
+                icon={<PhoneIncoming className="h-3.5 w-3.5" />}
+              />
+              <KpiSmallCard
+                label="Sortants"
+                value={ov?.outbound ?? 0}
+                sub={ov && ov.totalCalls > 0 ? `${Math.round((ov.outbound / ov.totalCalls) * 100)}%` : undefined}
+                icon={<PhoneOutgoing className="h-3.5 w-3.5" />}
+              />
+              <KpiSmallCard
+                label="Taux d'abandon"
+                value={`${ov?.abandonRate ?? 0}%`}
+                highlight={(ov?.abandonRate ?? 0) > 20}
+                icon={<TrendingDown className="h-3.5 w-3.5" />}
+              />
+              <KpiSmallCard
+                label="Taux de transfert"
+                value={`${ov?.transferRate ?? 0}%`}
+                icon={<ArrowRightLeft className="h-3.5 w-3.5" />}
+              />
+              <KpiSmallCard
+                label="Taux de RDV"
+                value={`${ov?.appointmentRate ?? 0}%`}
+                icon={<Calendar className="h-3.5 w-3.5" />}
+              />
+              <KpiSmallCard
+                label="Tps avant transfert"
+                value={formatDuration(ov?.avgTimeToTransferSec ?? null)}
+                icon={<Clock className="h-3.5 w-3.5" />}
+              />
             </div>
 
             {/* Charts */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {/* Volume */}
+              {/* Volume — Area chart */}
               <ChartCard title="Volume d'appels">
                 {kpiData.charts.volumeBySlot.length === 0 ? (
                   <p className="py-8 text-center text-sm text-[#344453]/40">Aucun appel sur cette période</p>
                 ) : (
                   <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={kpiData.charts.volumeBySlot.map((d) => ({
+                    <AreaChart data={kpiData.charts.volumeBySlot.map((d) => ({
                       ...d,
                       slot: formatSlot(d.slot, period),
                     }))}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
-                      <XAxis dataKey="slot" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="inbound" name="Entrants" stroke="#344453" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="outbound" name="Sortants" stroke="#C7601D" strokeWidth={2} dot={false} />
-                    </LineChart>
+                      <defs>
+                        <linearGradient id="gradInbound" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#344453" stopOpacity={0.12} />
+                          <stop offset="95%" stopColor="#344453" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gradOutbound" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#C7601D" stopOpacity={0.12} />
+                          <stop offset="95%" stopColor="#C7601D" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.06)" />
+                      <XAxis dataKey="slot" tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: 12, border: '1px solid rgba(52,68,83,0.1)', boxShadow: '0 4px 20px rgba(52,68,83,0.12)', fontSize: 12 }}
+                        cursor={{ stroke: 'rgba(52,68,83,0.08)', strokeWidth: 1 }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                      <Area type="monotone" dataKey="inbound" name="Entrants" stroke="#344453" strokeWidth={2} fill="url(#gradInbound)" dot={false} />
+                      <Area type="monotone" dataKey="outbound" name="Sortants" stroke="#C7601D" strokeWidth={2} fill="url(#gradOutbound)" dot={false} />
+                    </AreaChart>
                   </ResponsiveContainer>
                 )}
               </ChartCard>
@@ -839,9 +1004,11 @@ export default function Analytics() {
                         nameKey="intent"
                         cx="50%"
                         cy="50%"
+                        innerRadius={52}
                         outerRadius={80}
+                        paddingAngle={2}
                         label={({ intent, percent }: { intent: string; percent: number }) =>
-                          percent > 0.04 ? `${intent} (${(percent * 100).toFixed(0)}%)` : ''
+                          percent > 0.06 ? `${intent} (${(percent * 100).toFixed(0)}%)` : ''
                         }
                         labelLine={false}
                       >
@@ -849,7 +1016,10 @@ export default function Analytics() {
                           <Cell key={entry.intent || 'autre'} fill={getIntentColor(entry.intent || 'autre')} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value: number, name: string) => [value, name]} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: 12, border: '1px solid rgba(52,68,83,0.1)', fontSize: 12 }}
+                        formatter={(value: number, name: string) => [value, name]}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
@@ -869,11 +1039,13 @@ export default function Analytics() {
                       }))}
                       margin={{ left: 8, right: 16 }}
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-                      <Tooltip />
-                      <Bar dataKey="count" name="Appels" fill="#344453" radius={[0, 4, 4, 0]} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.06)" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.6)' }} axisLine={false} tickLine={false} width={110} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: 12, border: '1px solid rgba(52,68,83,0.1)', fontSize: 12 }}
+                      />
+                      <Bar dataKey="count" name="Appels" fill="#344453" radius={[0, 6, 6, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -892,11 +1064,13 @@ export default function Analytics() {
                         status: d.status,
                       }))}
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <Tooltip />
-                      <Bar dataKey="count" name="Appels" radius={[4, 4, 0, 0]}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.06)" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: 12, border: '1px solid rgba(52,68,83,0.1)', fontSize: 12 }}
+                      />
+                      <Bar dataKey="count" name="Appels" radius={[6, 6, 0, 0]}>
                         {kpiData.charts.outcomeDistribution.map((entry) => (
                           <Cell key={entry.status} fill={OUTCOME_COLORS[entry.status] || '#8B9CAA'} />
                         ))}
@@ -990,177 +1164,312 @@ export default function Analytics() {
             )}
 
             {!qaLoading && qaResults.length > 0 && (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                {/* Score par agent */}
-                <ChartCard title="Score qualité par agent">
-                  {agentScores.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {agentScores.map((a) => (
-                        <div key={a.name} className="flex items-center gap-3">
-                          <span className="w-28 shrink-0 truncate text-sm text-[#344453]/70">{a.name}</span>
-                          <div className="flex-1 rounded-full bg-[#344453]/8 overflow-hidden">
-                            <div
-                              className="h-2 rounded-full transition-all"
-                              style={{
-                                width: `${a.avgScore}%`,
-                                backgroundColor: a.avgScore >= 70 ? '#2D9D78' : a.avgScore >= 50 ? '#C7601D' : '#D94052',
-                              }}
-                            />
-                          </div>
-                          <span className="w-12 shrink-0 text-right text-sm font-semibold text-[#141F28]">
-                            {a.avgScore}/100
-                          </span>
-                          <span className="w-16 shrink-0 text-right text-xs text-[#344453]/45">
-                            {a.count} appel{a.count > 1 ? 's' : ''}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </ChartCard>
+              <div className="space-y-6">
+                {/* Résumé QA */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <QaSummaryCard
+                    label="Score moyen global"
+                    value={avgGlobalScore !== null ? `${avgGlobalScore}/100` : '—'}
+                    sub={avgGlobalScore !== null ? scoreLabel(avgGlobalScore) : undefined}
+                    color={avgGlobalScore !== null ? scoreColor(avgGlobalScore) : undefined}
+                    icon={<Shield className="h-5 w-5" />}
+                  />
+                  <QaSummaryCard
+                    label="Appels analysés"
+                    value={qaResults.length}
+                    sub="sur la période sélectionnée"
+                    icon={<BarChart3 className="h-5 w-5" />}
+                  />
+                  <QaSummaryCard
+                    label="Avec flags"
+                    value={callsWithFlagsCount}
+                    sub={qaResults.length > 0 ? `${Math.round((callsWithFlagsCount / qaResults.length) * 100)}% des analyses` : undefined}
+                    color={callsWithFlagsCount > 0 ? '#D94052' : undefined}
+                    icon={<AlertTriangle className="h-5 w-5" />}
+                  />
+                </div>
 
-                {/* Évolution score */}
-                <ChartCard title="Évolution du score moyen">
-                  {scoreTrend.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <LineChart data={scoreTrend}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
-                        <XAxis dataKey="slot" tick={{ fontSize: 11 }} />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v) => [`${v}/100`, 'Score moyen']} />
-                        <Line type="monotone" dataKey="avgScore" name="Score moyen" stroke="#2D9D78" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                </ChartCard>
-
-                {/* Top flags */}
-                {flagFrequency.length > 0 && (
-                  <div className="lg:col-span-2">
-                    <ChartCard title="Flags de friction les plus fréquents">
-                      <div className="flex flex-wrap gap-2">
-                        {flagFrequency.map(({ flag, count }) => (
-                          <span
-                            key={flag}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-[#D94052]/20 bg-[#D94052]/5 px-3 py-1 text-xs font-medium text-[#D94052]"
-                          >
-                            {flag.replace(/_/g, ' ')}
-                            <span className="rounded-full bg-[#D94052]/15 px-1.5 py-0.5 text-[10px] font-bold">
-                              {count}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  {/* Score par agent */}
+                  <ChartCard title="Score qualité par agent">
+                    {agentScores.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
+                    ) : (
+                      <div className="space-y-5">
+                        {agentScores.map((a, idx) => (
+                          <div key={a.name} className="flex items-center gap-3">
+                            <span className="w-4 shrink-0 text-center text-xs font-semibold text-[#344453]/25" style={{ fontFamily: 'var(--font-mono)' }}>
+                              {idx + 1}
                             </span>
-                          </span>
+                            <div
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                              style={{
+                                backgroundColor: `${scoreColor(a.avgScore)}18`,
+                                color: scoreColor(a.avgScore),
+                              }}
+                            >
+                              {getInitials(a.name)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1.5 flex items-center justify-between gap-2">
+                                <span className="truncate text-sm font-medium text-[#141F28]">{a.name}</span>
+                                <span
+                                  className="shrink-0 text-sm font-bold"
+                                  style={{ color: scoreColor(a.avgScore) }}
+                                >
+                                  {a.avgScore}/100
+                                </span>
+                              </div>
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#344453]/8">
+                                <div
+                                  className="h-full rounded-full transition-all"
+                                  style={{
+                                    width: `${a.avgScore}%`,
+                                    backgroundColor: scoreColor(a.avgScore),
+                                  }}
+                                />
+                              </div>
+                              <p className="mt-1 text-[10px] text-[#344453]/40">
+                                {a.count} appel{a.count > 1 ? 's' : ''}
+                              </p>
+                            </div>
+                          </div>
                         ))}
                       </div>
-                    </ChartCard>
-                  </div>
-                )}
+                    )}
+                  </ChartCard>
 
-                <ChartCard title="Distribution des scores">
-                  {scoreDistribution.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={scoreDistribution}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
-                        <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                        <Tooltip />
-                        <Bar dataKey="count" name="Appels" fill="#344453" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </ChartCard>
-
-                <ChartCard title="Critères les plus faibles">
-                  {weakCriteria.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {weakCriteria.slice(0, 8).map((criterion) => (
-                        <div key={criterion.critere_id} className="rounded-2xl border border-[#344453]/10 bg-[#F8F9FB] px-4 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-medium text-[#141F28]">{criterion.label}</p>
-                              <p className="mt-1 text-xs text-[#344453]/45">Poids {criterion.weight}%</p>
+                  {/* Critères les plus faibles */}
+                  <ChartCard title="Critères les plus faibles">
+                    {weakCriteria.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
+                    ) : (
+                      <div>
+                        {weakCriteria.slice(0, 8).map((criterion, idx) => {
+                          const ratio = criterion.avg_max > 0 ? criterion.avg / criterion.avg_max : 0;
+                          const color = ratio >= 0.7 ? '#2D9D78' : ratio >= 0.5 ? '#C7601D' : '#D94052';
+                          return (
+                            <div
+                              key={criterion.critere_id}
+                              className="flex items-center gap-3 border-b border-[#344453]/6 py-3 last:border-0"
+                            >
+                              <span className="w-4 shrink-0 text-center text-xs font-semibold text-[#344453]/25" style={{ fontFamily: 'var(--font-mono)' }}>
+                                {idx + 1}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium text-[#141F28]">{criterion.label}</p>
+                                <p className="mt-0.5 text-[10px] text-[#344453]/40">Poids {criterion.weight}%</p>
+                                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[#344453]/8">
+                                  <div
+                                    className="h-full rounded-full"
+                                    style={{ width: `${ratio * 100}%`, backgroundColor: color }}
+                                  />
+                                </div>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <span className="text-sm font-bold" style={{ color }}>
+                                  {criterion.avg.toFixed(1)}
+                                </span>
+                                <span className="text-xs text-[#344453]/40">/{criterion.avg_max}</span>
+                              </div>
                             </div>
-                            <p className="text-sm font-semibold text-[#141F28]">{criterion.avg}/{criterion.avg_max}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </ChartCard>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </ChartCard>
 
-                <div className="lg:col-span-2">
-                  <ChartCard title="Évolution d'un flag">
-                    <div className="mb-4 flex items-center justify-between gap-3">
-                      <select
-                        value={effectiveSelectedFlagType}
-                        onChange={(event) => setSelectedFlagType(event.target.value)}
-                        className="rounded-xl border border-[#344453]/15 bg-[#F8F9FB] px-3 py-2 text-sm text-[#141F28] outline-none"
-                      >
-                        {flagFrequency.map((entry) => (
-                          <option key={entry.flag} value={entry.flag}>{entry.flag}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {flagTrend.length === 0 ? (
+                  {/* Top flags — liste avec barres */}
+                  {flagFrequency.length > 0 && (
+                    <ChartCard title="Flags de friction les plus fréquents">
+                      <div className="space-y-3">
+                        {flagFrequency.map(({ flag, count }) => {
+                          const maxCount = flagFrequency[0]?.count || 1;
+                          return (
+                            <div key={flag} className="flex items-center gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <span className="truncate text-sm text-[#141F28]">
+                                    {flag.replace(/_/g, ' ')}
+                                  </span>
+                                  <span className="shrink-0 text-sm font-bold text-[#D94052]">{count}</span>
+                                </div>
+                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#344453]/8">
+                                  <div
+                                    className="h-full rounded-full bg-[#D94052]/55"
+                                    style={{ width: `${(count / maxCount) * 100}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </ChartCard>
+                  )}
+
+                  {/* Distribution des scores */}
+                  <ChartCard title="Distribution des scores">
+                    {scoreDistribution.length === 0 ? (
                       <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
                     ) : (
                       <ResponsiveContainer width="100%" height={220}>
-                        <LineChart data={flagTrend}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.08)" />
-                          <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                          <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                          <Tooltip />
-                          <Line type="monotone" dataKey="count" stroke="#D94052" strokeWidth={2} dot={false} />
+                        <BarChart data={scoreDistribution}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.06)" vertical={false} />
+                          <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                          <Tooltip
+                            contentStyle={{ borderRadius: 12, border: '1px solid rgba(52,68,83,0.1)', fontSize: 12 }}
+                          />
+                          <Bar dataKey="count" name="Appels" fill="#344453" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </ChartCard>
+
+                  {/* Évolution du score moyen */}
+                  <ChartCard title="Évolution du score moyen">
+                    {scoreTrend.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart data={scoreTrend}>
+                          <defs>
+                            <linearGradient id="gradScore" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#2D9D78" stopOpacity={0.15} />
+                              <stop offset="95%" stopColor="#2D9D78" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.06)" />
+                          <XAxis dataKey="slot" tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} />
+                          <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} />
+                          <Tooltip
+                            contentStyle={{ borderRadius: 12, border: '1px solid rgba(52,68,83,0.1)', fontSize: 12 }}
+                            formatter={(v) => [`${v}/100`, 'Score moyen']}
+                          />
+                          <Line type="monotone" dataKey="avgScore" name="Score moyen" stroke="#2D9D78" strokeWidth={2} dot={false} />
                         </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </ChartCard>
+
+                  {/* Évolution d'un flag */}
+                  <ChartCard
+                    title="Évolution d'un flag"
+                    action={
+                      flagFrequency.length > 0 ? (
+                        <select
+                          value={effectiveSelectedFlagType}
+                          onChange={(event) => setSelectedFlagType(event.target.value)}
+                          className="rounded-lg border border-[#344453]/12 bg-[#F8F9FB] px-2.5 py-1.5 text-xs text-[#141F28] outline-none hover:border-[#344453]/25 transition"
+                        >
+                          {flagFrequency.map((entry) => (
+                            <option key={entry.flag} value={entry.flag}>{entry.flag.replace(/_/g, ' ')}</option>
+                          ))}
+                        </select>
+                      ) : undefined
+                    }
+                  >
+                    {flagTrend.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-[#344453]/40">Aucune donnée</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={200}>
+                        <AreaChart data={flagTrend}>
+                          <defs>
+                            <linearGradient id="gradFlag" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#D94052" stopOpacity={0.12} />
+                              <stop offset="95%" stopColor="#D94052" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(52,68,83,0.06)" />
+                          <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11, fill: 'rgba(52,68,83,0.45)' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                          <Tooltip
+                            contentStyle={{ borderRadius: 12, border: '1px solid rgba(52,68,83,0.1)', fontSize: 12 }}
+                          />
+                          <Area type="monotone" dataKey="count" stroke="#D94052" strokeWidth={2} fill="url(#gradFlag)" dot={false} />
+                        </AreaChart>
                       </ResponsiveContainer>
                     )}
                   </ChartCard>
                 </div>
 
-                <div className="lg:col-span-2">
-                  <SectionTitle>Appels à relire</SectionTitle>
-                  <div className="mb-3 flex items-center gap-3">
-                    <label className="text-sm text-[#344453]/60">
-                      Seuil score
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={reviewThreshold}
-                      onChange={(event) => setReviewThreshold(Number(event.target.value))}
-                      className="w-24 rounded-xl border border-[#344453]/15 bg-white px-3 py-2 text-sm text-[#141F28] outline-none"
-                    />
+                {/* Appels à relire */}
+                <div>
+                  <div className="mb-3 flex items-center justify-between gap-4">
+                    <SectionTitle>Appels à relire</SectionTitle>
+                    <div className="flex items-center gap-2.5">
+                      <label className="text-xs text-[#344453]/55">Seuil</label>
+                      <div className="flex items-center gap-2 rounded-xl border border-[#344453]/15 bg-white px-3 py-1.5">
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={reviewThreshold}
+                          onChange={(event) => setReviewThreshold(Number(event.target.value))}
+                          className="w-24 accent-[#344453]"
+                        />
+                        <span className="w-12 text-right text-sm font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-mono)' }}>
+                          {reviewThreshold}/100
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="overflow-hidden rounded-[20px] border border-[#344453]/10 bg-white shadow-sm">
+                  <div className="overflow-hidden rounded-2xl border border-[#344453]/10 bg-white shadow-sm">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-[#344453]/8 text-left">
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Appel</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Agent</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Score</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Flags</th>
+                        <tr className="border-b border-[#344453]/8 bg-[#344453]/[0.02] text-left">
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Appel</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Agent</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Score</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Flags</th>
+                          <th className="px-4 py-3"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#344453]/5">
                         {callsToReview.map((r) => (
-                          <tr key={`review-${r.id}`} className="hover:bg-[#344453]/[0.02] transition">
-                            <td className="px-4 py-3"><Link to={`/calls/${r.callId}/qa`} className="font-mono text-xs text-[#344453]/60 hover:text-[#344453]">{r.callId.slice(0, 8)}…</Link></td>
-                            <td className="px-4 py-3 text-[#344453]/70">{r.agentFirstName && r.agentLastName ? `${r.agentFirstName} ${r.agentLastName}` : '—'}</td>
-                            <td className="px-4 py-3 text-[#141F28] font-semibold">{r.globalScore}/100</td>
-                            <td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">{r.flags.map((flag) => <span key={`${r.id}-${flag}`} className="rounded-full bg-[#D94052]/8 px-2 py-0.5 text-[10px] text-[#D94052]">{flag}</span>)}<Link to={`/calls/${r.callId}/qa`} className="text-xs font-medium text-[#C7601D] hover:underline">Voir le rapport</Link></div></td>
+                          <tr key={`review-${r.id}`} className="hover:bg-[#344453]/[0.018] transition">
+                            <td className="px-4 py-3">
+                              <Link to={`/calls/${r.callId}/qa`} className="font-mono text-xs text-[#344453]/55 hover:text-[#344453] transition">
+                                {r.callId.slice(0, 8)}…
+                              </Link>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-[#344453]/70">
+                              {r.agentFirstName && r.agentLastName ? `${r.agentFirstName} ${r.agentLastName}` : '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className="inline-block rounded-lg px-2.5 py-1 text-xs font-bold"
+                                style={{
+                                  backgroundColor: `${scoreColor(r.globalScore)}18`,
+                                  color: scoreColor(r.globalScore),
+                                }}
+                              >
+                                {r.globalScore}/100
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {r.flags.map((flag) => (
+                                  <span key={`${r.id}-${flag}`} className="rounded-md bg-[#D94052]/8 px-2 py-0.5 text-[10px] font-medium text-[#D94052]">
+                                    {flag.replace(/_/g, ' ')}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Link to={`/calls/${r.callId}/qa`} className="text-xs font-semibold text-[#C7601D] hover:underline">
+                                Voir →
+                              </Link>
+                            </td>
                           </tr>
                         ))}
                         {callsToReview.length === 0 && (
                           <tr>
-                            <td colSpan={4} className="px-4 py-8 text-center text-sm text-[#344453]/45">Aucun appel sous le seuil ou avec flag critique.</td>
+                            <td colSpan={5} className="px-4 py-8 text-center text-sm text-[#344453]/40">
+                              Aucun appel sous le seuil ou avec flag critique.
+                            </td>
                           </tr>
                         )}
                       </tbody>
@@ -1168,27 +1477,27 @@ export default function Analytics() {
                   </div>
                 </div>
 
-                {/* Tableau des dernières analyses */}
-                <div className="lg:col-span-2">
+                {/* Dernières analyses */}
+                <div>
                   <SectionTitle>Dernières analyses</SectionTitle>
-                  <div className="overflow-hidden rounded-[20px] border border-[#344453]/10 bg-white shadow-sm">
+                  <div className="overflow-hidden rounded-2xl border border-[#344453]/10 bg-white shadow-sm">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b border-[#344453]/8 text-left">
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Appel</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Agent</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Template</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Score</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Flags</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium">Date</th>
-                          <th className="px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[#344453]/45 font-medium"></th>
+                        <tr className="border-b border-[#344453]/8 bg-[#344453]/[0.02] text-left">
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Appel</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Agent</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Template</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Score</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Flags</th>
+                          <th className="px-4 py-3 text-[10px] uppercase tracking-[0.18em] text-[#344453]/40 font-semibold">Date</th>
+                          <th className="px-4 py-3"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#344453]/5">
                         {qaResults.slice(0, 20).map((r) => (
-                          <tr key={r.id} className="hover:bg-[#344453]/[0.02] transition">
+                          <tr key={r.id} className="hover:bg-[#344453]/[0.018] transition">
                             <td className="px-4 py-3">
-                              <Link to={`/calls/${r.callId}/qa`} className="font-mono text-xs text-[#344453]/60 hover:text-[#344453] transition">
+                              <Link to={`/calls/${r.callId}/qa`} className="font-mono text-xs text-[#344453]/55 hover:text-[#344453] transition">
                                 {r.callId.slice(0, 8)}…
                               </Link>
                             </td>
@@ -1197,16 +1506,14 @@ export default function Analytics() {
                                 ? `${r.agentFirstName} ${r.agentLastName}`
                                 : '—'}
                             </td>
-                            <td className="px-4 py-3 text-[#344453]/70">{r.templateName}</td>
+                            <td className="px-4 py-3 text-[#344453]/55 text-xs">{r.templateName}</td>
                             <td className="px-4 py-3">
                               <span
-                                className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                                  r.globalScore >= 70
-                                    ? 'bg-[#2D9D78]/10 text-[#2D9D78]'
-                                    : r.globalScore >= 50
-                                    ? 'bg-[#C7601D]/10 text-[#C7601D]'
-                                    : 'bg-[#D94052]/10 text-[#D94052]'
-                                }`}
+                                className="inline-block rounded-lg px-2.5 py-1 text-xs font-bold"
+                                style={{
+                                  backgroundColor: `${scoreColor(r.globalScore)}18`,
+                                  color: scoreColor(r.globalScore),
+                                }}
                               >
                                 {r.globalScore}/100
                               </span>
@@ -1214,25 +1521,25 @@ export default function Analytics() {
                             <td className="px-4 py-3">
                               <div className="flex flex-wrap gap-1">
                                 {(r.flags || []).slice(0, 2).map((f) => (
-                                  <span key={f} className="rounded-full bg-[#344453]/8 px-2 py-0.5 text-[10px] text-[#344453]/60">
+                                  <span key={f} className="rounded-md bg-[#344453]/8 px-2 py-0.5 text-[10px] text-[#344453]/60">
                                     {f.replace(/_/g, ' ')}
                                   </span>
                                 ))}
                                 {(r.flags || []).length > 2 && (
-                                  <span className="rounded-full bg-[#344453]/8 px-2 py-0.5 text-[10px] text-[#344453]/60">
+                                  <span className="rounded-md bg-[#344453]/6 px-2 py-0.5 text-[10px] text-[#344453]/45">
                                     +{r.flags.length - 2}
                                   </span>
                                 )}
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-xs text-[#344453]/45">
+                            <td className="px-4 py-3 text-xs text-[#344453]/40">
                               {r.processedAt
-                                ? format(parseISO(r.processedAt), 'dd/MM/yyyy HH:mm', { locale: fr })
+                                ? format(parseISO(r.processedAt), 'dd/MM/yy HH:mm', { locale: fr })
                                 : '—'}
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <Link to={`/calls/${r.callId}/qa`} className="text-xs font-medium text-[#C7601D] hover:underline">
-                                Ouvrir
+                              <Link to={`/calls/${r.callId}/qa`} className="text-xs font-semibold text-[#C7601D] hover:underline">
+                                Ouvrir →
                               </Link>
                             </td>
                           </tr>
@@ -1246,6 +1553,7 @@ export default function Analytics() {
           </div>
         )}
       </div>
+
       {showBatchModal && (
         <BatchAnalysisModal
           period={period}
