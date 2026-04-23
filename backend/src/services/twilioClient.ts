@@ -1,6 +1,7 @@
 import Twilio from 'twilio';
 
 const TWILIO_IRELAND_REGION = 'ie1';
+const TWILIO_IRELAND_EDGE = 'dublin';
 
 export function getTwilioAccountSid(): string {
   const accountSid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
@@ -16,6 +17,14 @@ export function getTwilioRegion(): string {
     throw new Error(`Twilio region must be ${TWILIO_IRELAND_REGION}, received ${configuredRegion}`);
   }
   return TWILIO_IRELAND_REGION;
+}
+
+export function getTwilioEdge(): string {
+  const configuredEdge = (process.env.TWILIO_EDGE || '').trim().toLowerCase();
+  if (configuredEdge && configuredEdge !== TWILIO_IRELAND_EDGE) {
+    throw new Error(`Twilio edge must be ${TWILIO_IRELAND_EDGE}, received ${configuredEdge}`);
+  }
+  return TWILIO_IRELAND_EDGE;
 }
 
 export function getTwilioApiKeyCredentials(): { apiKeySid: string; apiKeySecret: string } {
@@ -38,14 +47,15 @@ export function getTwilioBasicAuth(): { username: string; password: string } {
 export function getTwilioClient(): ReturnType<typeof Twilio> {
   const accountSid = getTwilioAccountSid();
   const region = getTwilioRegion();
+  const edge = getTwilioEdge();
   const { apiKeySid, apiKeySecret } = getTwilioApiKeyCredentials();
-  return Twilio(apiKeySid, apiKeySecret, { accountSid, region });
+  return Twilio(apiKeySid, apiKeySecret, { accountSid, region, edge });
 }
 
 /**
  * Returns the Twilio REST API base URL for the configured region.
- * e.g. TWILIO_REGION=ie1 → https://api.ie1.twilio.com
+ * e.g. TWILIO_REGION=ie1 + TWILIO_EDGE=dublin → https://api.dublin.ie1.twilio.com
  */
 export function getTwilioApiBase(): string {
-  return `https://api.${getTwilioRegion()}.twilio.com`;
+  return `https://api.${getTwilioEdge()}.${getTwilioRegion()}.twilio.com`;
 }
