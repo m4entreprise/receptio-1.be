@@ -41,6 +41,16 @@ interface AuthContextType {
   isLoading: boolean;
 }
 
+interface OnboardingData {
+  sector?: string;
+  companySize?: string;
+  openDays?: string[];
+  openFrom?: string;
+  openUntil?: string;
+  agentCount?: number;
+  offer?: 'a' | 'b';
+}
+
 interface RegisterData {
   email: string;
   password: string;
@@ -48,6 +58,7 @@ interface RegisterData {
   lastName?: string;
   companyName: string;
   companyPhone?: string;
+  onboarding?: OnboardingData;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);

@@ -29,37 +29,69 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
   try {
     requirePermission(req, 'callsRead');
     const { companyId } = req.user!;
-    const { status, limit = 50, offset = 0 } = req.query;
+    const { status, direction, from, to, search, limit = 50, offset = 0 } = req.query;
 
-    let queryText = `
-      SELECT c.*, t.text as transcription_text, t.language, t.segments as transcription_segments, cs.summary, cs.intent
-      FROM calls c
-      LEFT JOIN transcriptions t ON c.id = t.call_id
-      LEFT JOIN call_summaries cs ON c.id = cs.call_id
-      WHERE c.company_id = $1
-    `;
+    const conditions: string[] = ['c.company_id = $1'];
     const params: any[] = [companyId];
 
     if (status) {
-      queryText += ` AND c.status = $${params.length + 1}`;
       params.push(status);
+      conditions.push(`c.status = $${params.length}`);
+    }
+    if (direction) {
+      params.push(direction);
+      conditions.push(`c.direction = $${params.length}`);
+    }
+    if (from) {
+      params.push(from);
+      conditions.push(`c.created_at >= $${params.length}`);
+    }
+    if (to) {
+      params.push(to);
+      conditions.push(`c.created_at <= $${params.length}`);
+    }
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`(c.caller_number ILIKE $${params.length} OR cs.summary ILIKE $${params.length})`);
     }
 
-    queryText += ` ORDER BY c.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(limit, offset);
+    const where = conditions.join(' AND ');
 
-    const result = await query(queryText, params);
-
-    const countResult = await query(
-      'SELECT COUNT(*) FROM calls WHERE company_id = $1',
-      [companyId]
-    );
+    const [result, countResult] = await Promise.all([
+      query(
+        `SELECT c.*,
+          t.text as transcription_text, t.language, t.segments as transcription_segments,
+          cs.summary, cs.intent,
+          car.id as qa_result_id, car.global_score as qa_score
+        FROM calls c
+        LEFT JOIN transcriptions t ON c.id = t.call_id
+        LEFT JOIN call_summaries cs ON c.id = cs.call_id
+        LEFT JOIN LATERAL (
+          SELECT id, global_score
+          FROM call_analysis_results
+          WHERE call_id = c.id
+          ORDER BY processed_at DESC
+          LIMIT 1
+        ) car ON true
+        WHERE ${where}
+        ORDER BY c.created_at DESC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, Number(limit), Number(offset)]
+      ),
+      query(
+        `SELECT COUNT(*)
+        FROM calls c
+        LEFT JOIN call_summaries cs ON c.id = cs.call_id
+        WHERE ${where}`,
+        params
+      ),
+    ]);
 
     res.json({
       calls: result.rows,
       total: parseInt(countResult.rows[0].count),
-      limit: parseInt(limit as string),
-      offset: parseInt(offset as string),
+      limit: Number(limit),
+      offset: Number(offset),
     });
   } catch (error) {
     next(error);

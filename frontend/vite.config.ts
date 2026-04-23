@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      manifest: false, // On utilise notre propre manifest.json
+      manifest: false,
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,woff2}'],
         runtimeCaching: [
@@ -19,13 +19,13 @@ export default defineConfig({
               cacheName: 'api-cache',
               expiration: {
                 maxEntries: 50,
-                maxAgeSeconds: 24 * 60 * 60 // 24h
-              }
-            }
-          }
-        ]
-      }
-    })
+                maxAgeSeconds: 24 * 60 * 60,
+              },
+            },
+          },
+        ],
+      },
+    }),
   ],
   resolve: {
     alias: {
@@ -38,6 +38,25 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // React core — loaded on every page
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // Animation — landing only
+          'vendor-motion': ['framer-motion', 'lenis'],
+          // i18n — landing only
+          'vendor-i18n': ['i18next', 'react-i18next', 'i18next-browser-languagedetector'],
+          // Charts — dashboard only
+          'vendor-charts': ['recharts'],
+          // Utilities
+          'vendor-utils': ['axios', 'date-fns', 'clsx', 'tailwind-merge'],
+        },
       },
     },
   },

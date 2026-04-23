@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Phone, LayoutDashboard, Settings, LogOut, Gauge, Users, PhoneOutgoing, BarChart2 } from 'lucide-react';
+import { Phone, LayoutDashboard, Settings, LogOut, Users, PhoneOutgoing, BarChart2 } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -29,21 +29,14 @@ export default function Layout({ children }: LayoutProps) {
         setUnacknowledgedAlertCount(0);
       }
     };
-
     void loadAlerts();
     const intervalId = window.setInterval(() => { void loadAlerts(); }, 60000);
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-    };
+    return () => { active = false; window.clearInterval(intervalId); };
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
+  const handleLogout = () => { logout(); navigate('/login'); };
 
-  const hasAnySettingsAccess = (
+  const hasSettingsAccess = (
     user?.permissions?.settingsManage ||
     user?.permissions?.knowledgeBaseManage ||
     user?.permissions?.intentsManage ||
@@ -53,105 +46,130 @@ export default function Layout({ children }: LayoutProps) {
     user?.role === 'admin'
   );
 
-  const navItems = [
-    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/calls', icon: Phone, label: 'Appels', visible: user?.permissions?.callsRead ?? true },
+  const mainNav = [
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Opérations', visible: true },
     { path: '/outbound', icon: PhoneOutgoing, label: 'Sortant', visible: user?.permissions?.outboundRead ?? true },
     { path: '/staff', icon: Users, label: 'Équipe', visible: user?.permissions?.staffManage ?? true },
-    { path: '/monitoring/bbis', icon: Gauge, label: 'Monitoring' },
     { path: '/analytics', icon: BarChart2, label: 'Analytics', badge: unacknowledgedAlertCount, visible: user?.permissions?.analyticsRead ?? true },
-    { path: '/settings', icon: Settings, label: 'Paramètres', visible: hasAnySettingsAccess },
   ].filter((item) => item.visible !== false);
 
+  const isActive = (path: string) =>
+    path === '/settings'
+      ? location.pathname.startsWith('/settings')
+      : location.pathname === path || location.pathname.startsWith(path + '/');
+
+  const navLinkClass = (active: boolean) =>
+    `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+      active
+        ? 'bg-[#344453] text-white'
+        : 'text-[#344453]/60 hover:bg-[#344453]/8 hover:text-[#344453]'
+    }`;
+
+  const allMobileItems = [
+    ...mainNav,
+    ...(hasSettingsAccess ? [{ path: '/settings', icon: Settings, label: 'Paramètres', visible: true }] : []),
+  ];
+
   return (
-    <div className="min-h-screen bg-[#F8F9FB] text-[#141F28]" style={{ fontFamily: "var(--font-body)" }}>
-      <div className="border-b border-[#344453]/10 bg-[#F8F9FB]/95 backdrop-blur-xl">
-        <nav className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4">
-            <div className="flex items-start justify-between gap-3">
-              <Link to="/dashboard" className="flex min-w-0 items-center gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#344453] text-white shadow-[0_8px_24px_rgba(52,68,83,0.28)]">
-                  <Phone className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs uppercase tracking-[0.28em] text-[#344453]/50" style={{ fontFamily: "var(--font-mono)" }}>Receptio</p>
-                  <p className="truncate text-base font-semibold text-[#141F28] sm:text-lg" style={{ fontFamily: "var(--font-title)" }}>Tableau de bord</p>
-                </div>
-              </Link>
+    <div className="flex min-h-screen bg-[#F8F9FB] text-[#141F28]" style={{ fontFamily: 'var(--font-body)' }}>
 
-              <button
-                onClick={handleLogout}
-                className="inline-flex shrink-0 items-center gap-2 rounded-full border border-[#344453]/15 bg-white px-3 py-2 text-sm font-medium text-[#344453] transition hover:bg-[#344453]/5"
-              >
-                <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">Déconnexion</span>
-              </button>
-            </div>
+      {/* ── Sidebar (desktop) ── */}
+      <aside className="hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 lg:w-56 lg:border-r lg:border-[#344453]/10 lg:bg-white lg:z-20">
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 rounded-2xl border border-[#344453]/10 bg-white px-4 py-3 shadow-sm">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-[#344453]/45" style={{ fontFamily: "var(--font-mono)" }}>Compte actif</p>
-                <p className="mt-1 truncate text-sm font-medium text-[#141F28]">{userLabel}</p>
-              </div>
-
-              <div className="hidden flex-wrap gap-2 sm:flex">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = item.path === '/settings'
-                    ? location.pathname.startsWith('/settings')
-                    : location.pathname === item.path || location.pathname.startsWith(item.path + '/');
-
-                  return (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
-                        isActive
-                          ? 'bg-[#344453] text-white shadow-[0_8px_20px_rgba(52,68,83,0.22)]'
-                          : 'border border-[#344453]/15 bg-white text-[#344453]/70 hover:bg-[#344453]/5'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      <span>{item.label}</span>
-                      {(item as { badge?: number }).badge && (item as { badge?: number }).badge! > 0 && (
-                        <span className={`inline-flex min-w-[20px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${isActive ? 'bg-white/15 text-white' : 'bg-[#D94052] text-white'}`}>
-                          {(item as { badge?: number }).badge}
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
+        {/* Logo */}
+        <div className="flex items-center gap-3 px-5 py-5 border-b border-[#344453]/8">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#344453] text-white shadow-[0_4px_12px_rgba(52,68,83,0.25)]">
+            <Phone className="h-4 w-4" />
           </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.28em] text-[#344453]/40" style={{ fontFamily: 'var(--font-mono)' }}>Receptio</p>
+            <p className="text-sm font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Dashboard</p>
+          </div>
+        </div>
+
+        {/* Nav principale */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
+          {mainNav.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            return (
+              <Link key={item.path} to={item.path} className={navLinkClass(active)}>
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{item.label}</span>
+                {(item as { badge?: number }).badge! > 0 && (
+                  <span className={`ml-auto inline-flex min-w-[20px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${active ? 'bg-white/20 text-white' : 'bg-[#D94052] text-white'}`}>
+                    {(item as { badge?: number }).badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
         </nav>
+
+        {/* Bottom: paramètres + user */}
+        <div className="border-t border-[#344453]/8 px-3 py-3 space-y-0.5">
+          {hasSettingsAccess && (
+            <Link to="/settings" className={navLinkClass(isActive('/settings'))}>
+              <Settings className="h-4 w-4 shrink-0" />
+              <span>Paramètres</span>
+            </Link>
+          )}
+          <div className="flex items-center gap-2 px-3 py-2 mt-1">
+            <div className="flex-1 min-w-0">
+              <p className="truncate text-xs text-[#344453]/45">{userLabel}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              title="Déconnexion"
+              className="shrink-0 rounded-lg p-1.5 text-[#344453]/35 hover:bg-[#344453]/8 hover:text-[#344453] transition-colors"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <div className="flex flex-col flex-1 lg:ml-56 min-w-0">
+
+        {/* Mobile header */}
+        <header className="lg:hidden sticky top-0 z-10 flex items-center justify-between border-b border-[#344453]/10 bg-white/95 backdrop-blur-xl px-4 py-3">
+          <Link to="/dashboard" className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#344453] text-white">
+              <Phone className="h-4 w-4" />
+            </div>
+            <span className="text-sm font-semibold text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>Receptio</span>
+          </Link>
+          <button onClick={handleLogout} className="p-2 rounded-xl text-[#344453]/50 hover:bg-[#344453]/8 transition-colors">
+            <LogOut className="h-4 w-4" />
+          </button>
+        </header>
+
+        <main className="flex-1 px-4 py-5 pb-24 sm:px-6 sm:py-6 lg:px-8 lg:py-8 lg:pb-8" style={{ fontFamily: 'var(--font-body)' }}>
+          {children}
+        </main>
       </div>
 
-      <main className="mx-auto max-w-7xl px-4 py-5 pb-24 sm:px-6 sm:py-8 sm:pb-8 lg:px-8" style={{ fontFamily: "var(--font-body)" }}>
-        {children}
-      </main>
-
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#344453]/10 bg-[#F8F9FB]/95 px-3 py-3 backdrop-blur-xl sm:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-7 gap-1 rounded-2xl border border-[#344453]/10 bg-white p-2 shadow-[0_-8px_24px_rgba(52,68,83,0.08)]">
-          {navItems.map((item) => {
+      {/* ── Mobile bottom nav ── */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#344453]/10 bg-[#F8F9FB]/95 px-3 py-3 backdrop-blur-xl lg:hidden">
+        <div
+          className="mx-auto grid max-w-md gap-1 rounded-2xl border border-[#344453]/10 bg-white p-2 shadow-[0_-8px_24px_rgba(52,68,83,0.08)]"
+          style={{ gridTemplateColumns: `repeat(${allMobileItems.length}, 1fr)` }}
+        >
+          {allMobileItems.map((item) => {
             const Icon = item.icon;
-            const isActive = item.path === '/settings'
-              ? location.pathname.startsWith('/settings')
-              : location.pathname === item.path || location.pathname.startsWith(item.path + '/');
-
+            const active = isActive(item.path);
             return (
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-2 text-[11px] font-medium transition ${
-                  isActive
-                    ? 'bg-[#344453] text-white'
-                    : 'text-[#344453]/60 hover:bg-[#344453]/[0.06]'
+                className={`flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium transition-colors ${
+                  active ? 'bg-[#344453] text-white' : 'text-[#344453]/60 hover:bg-[#344453]/[0.06]'
                 }`}
               >
                 <div className="relative">
                   <Icon className="h-4 w-4" />
-                  {(item as { badge?: number }).badge && (item as { badge?: number }).badge! > 0 && (
+                  {(item as { badge?: number }).badge! > 0 && (
                     <span className="absolute -right-2 -top-2 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[#D94052] px-1 py-0.5 text-[9px] font-semibold text-white">
                       {(item as { badge?: number }).badge}
                     </span>

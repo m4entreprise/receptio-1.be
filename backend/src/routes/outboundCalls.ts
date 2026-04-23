@@ -62,6 +62,10 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (!accountSid || !authToken) throw new AppError('Twilio credentials not configured', 500);
+    const apiKeySid = (process.env.TWILIO_API_KEY_SID || '').trim() || undefined;
+    const apiKeySecret = (process.env.TWILIO_API_KEY_SECRET || '').trim() || undefined;
+    const region = (process.env.TWILIO_REGION || '').trim() || undefined;
+    const useApiKey = !!(region && apiKeySid && apiKeySecret);
 
     const callRecord = await query(
       `INSERT INTO calls (company_id, caller_number, destination_number, direction, status, initiated_by_staff_id, metadata)
@@ -112,7 +116,9 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         'StatusCallbackEvent[6]': 'failed',
       });
       const twilioRes = await axios.post(callsUrl, params.toString(), {
-        auth: { username: accountSid, password: authToken },
+        auth: useApiKey
+          ? { username: apiKeySid!, password: apiKeySecret! }
+          : { username: accountSid, password: authToken },
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
       twilioSid = twilioRes.data.sid;

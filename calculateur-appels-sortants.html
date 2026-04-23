@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calculateur Appels Sortants</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --text: #1d2733;
+      --muted: #5d6b79;
+      --line: #dbe4ee;
+      --primary: #344453;
+      --accent: #c7601d;
+      --success: #2d9d78;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #141f28 0%, #344453 100%);
+      color: #fff;
+      border-radius: 24px;
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 940px;
+      color: rgba(255,255,255,0.86);
+      line-height: 1.55;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .nav a {
+      color: #fff;
+      text-decoration: none;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-size: 0.95rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 12px 30px rgba(20, 31, 40, 0.05);
+    }
+
+    .card h2 {
+      margin: 0 0 16px;
+      font-size: 1.15rem;
+      color: var(--primary);
+    }
+
+    .field-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .field label {
+      display: block;
+      font-weight: 700;
+      font-size: 0.96rem;
+      margin-bottom: 6px;
+    }
+
+    .field small {
+      display: block;
+      color: var(--muted);
+      line-height: 1.45;
+      margin-top: 6px;
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid #c9d5e2;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-size: 0.98rem;
+      background: #fbfdff;
+      color: var(--text);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin: 16px 0 18px;
+    }
+
+    .metric {
+      border-radius: 18px;
+      padding: 18px;
+      color: #fff;
+      background: linear-gradient(135deg, #344453 0%, #496076 100%);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 0.84rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.82);
+      margin-bottom: 8px;
+    }
+
+    .metric span {
+      display: block;
+      font-size: 1.8rem;
+      font-weight: 800;
+    }
+
+    .metric.orange {
+      background: linear-gradient(135deg, #c7601d 0%, #df874f 100%);
+    }
+
+    .metric.green {
+      background: linear-gradient(135deg, #2d9d78 0%, #53b592 100%);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 18px;
+      overflow: hidden;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px 14px;
+      border-bottom: 1px solid #ecf1f6;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      background: #f9fbfd;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+      font-weight: 700;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #fff4ec;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin-bottom: 12px;
+    }
+
+    .note, .footer-note {
+      color: var(--muted);
+      line-height: 1.6;
+      margin-top: 14px;
+    }
+
+    @media (max-width: 720px) {
+      .container { padding: 16px; }
+      .hero { padding: 22px; }
+      .hero h1 { font-size: 1.6rem; }
+      .metric span { font-size: 1.45rem; }
+      th, td { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="hero">
+      <h1>Calculateur Appels Sortants</h1>
+      <p>
+        Ce calculateur modélise le flux d'appels sortants actuel : Twilio appelle d'abord l'agent, puis le client,
+        ouvre un Media Stream pour la transcription live, enregistre l'appel et lance ensuite l'analyse IA.
+        Les paramètres sont séparés pour distinguer les jambes Twilio et les coûts IA réels.
+      </p>
+      <div class="nav">
+        <a href="calculateur-repondeur-classique.html">Répondeur classique</a>
+        <a href="calculateur-receptionniste-ia-streaming.html">Réceptionniste IA streaming</a>
+        <a href="calculateur-appels-sortants.html">Appels sortants</a>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <div class="pill">Volume</div>
+        <h2>Hypothèses de volume</h2>
+        <div class="field-grid">
+          <div class="field">
+            <label for="monthlyCalls">Nombre d'appels sortants par mois</label>
+            <input id="monthlyCalls" type="number" min="0" step="1" value="100" />
+            <small>Utilisé pour la projection mensuelle et annuelle.</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="pill">Usage par appel</div>
+        <h2>Consommation technique</h2>
+        <div class="field-grid">
+          <div class="field">
+            <label for="agentLegMinutes">Minutes de la jambe agent</label>
+            <input id="agentLegMinutes" type="number" min="0" step="0.01" value="2.50" />
+            <small>Durée facturée quand Twilio appelle d'abord l'agent.</small>
+          </div>
+          <div class="field">
+            <label for="clientLegMinutes">Minutes de la jambe client</label>
+            <input id="clientLegMinutes" type="number" min="0" step="0.01" value="2.50" />
+            <small>Durée facturée quand Twilio compose ensuite le client.</small>
+          </div>
+          <div class="field">
+            <label for="streamMinutes">Minutes de Media Streams</label>
+            <input id="streamMinutes" type="number" min="0" step="0.01" value="2.50" />
+            <small>Le stream démarre au moment de la mise en relation et sert à la transcription live.</small>
+          </div>
+          <div class="field">
+            <label for="recordingMinutes">Minutes d'enregistrement Twilio</label>
+            <input id="recordingMinutes" type="number" min="0" step="0.01" value="2.50" />
+            <small>Utilisé pour la relecture et la transcription/synthèse post-appel.</small>
+          </div>
+          <div class="field">
+            <label for="storageMinutes">Minutes stockées côté Twilio</label>
+            <input id="storageMinutes" type="number" min="0" step="0.01" value="2.50" />
+            <small>En général identique à la durée enregistrée si vous gardez l'audio.</small>
+          </div>
+          <div class="field">
+            <label for="sttMinutes">Minutes réellement transcrites côté STT</label>
+            <input id="sttMinutes" type="number" min="0" step="0.01" value="2.50" />
+            <small>Durée de conversation que vous considérez comme réellement envoyée au moteur STT.</small>
+          </div>
+          <div class="field">
+            <label for="llmInputTokens">Tokens LLM input par appel</label>
+            <input id="llmInputTokens" type="number" min="0" step="1" value="2500" />
+            <small>Pour le résumé, l'intention et les traitements post-appel.</small>
+          </div>
+          <div class="field">
+            <label for="llmOutputTokens">Tokens LLM output par appel</label>
+            <input id="llmOutputTokens" type="number" min="0" step="1" value="400" />
+            <small>Sorties liées à la synthèse ou à la structuration du résultat.</small>
+          </div>
+          <div class="field">
+            <label for="twilioSayUses">Nombre d'usages Twilio &lt;Say&gt; par appel</label>
+            <input id="twilioSayUses" type="number" min="0" step="1" value="1" />
+            <small>Par défaut, le flux sortant joue une annonce du type “Connexion en cours avec le client”.</small>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <div class="pill">Tarifs Twilio</div>
+        <h2>Unitaires Twilio</h2>
+        <div class="field-grid">
+          <div class="field">
+            <label for="rateOutboundVoice">Outbound Voice ($ / minute)</label>
+            <input id="rateOutboundVoice" type="number" min="0" step="0.000001" value="0.0387" />
+            <small>Prérempli depuis votre facture : 98 min pour 3,7926 $.</small>
+          </div>
+          <div class="field">
+            <label for="rateMediaStreams">Media Streams ($ / minute)</label>
+            <input id="rateMediaStreams" type="number" min="0" step="0.000001" value="0.004" />
+            <small>Prérempli depuis votre facture : 126 min pour 0,504 $.</small>
+          </div>
+          <div class="field">
+            <label for="rateRecording">Voice Recordings ($ / minute)</label>
+            <input id="rateRecording" type="number" min="0" step="0.000001" value="0.0025" />
+            <small>Prérempli depuis votre facture : 98 min pour 0,245 $.</small>
+          </div>
+          <div class="field">
+            <label for="rateStorage">Recording Storage ($ / minute)</label>
+            <input id="rateStorage" type="number" min="0" step="0.000001" value="0" />
+            <small>À ajuster si Twilio commence à facturer le stockage de façon significative.</small>
+          </div>
+          <div class="field">
+            <label for="rateTwilioSay">Twilio TTS / Polly ($ / usage)</label>
+            <input id="rateTwilioSay" type="number" min="0" step="0.000001" value="0.001053" />
+            <small>Prérempli depuis votre facture : 19 usages pour 0,02 $.</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="pill">Tarifs IA</div>
+        <h2>Unitaires Mistral</h2>
+        <div class="field-grid">
+          <div class="field">
+            <label for="rateStt">STT voxtral-mini-2602 ($ / minute)</label>
+            <input id="rateStt" type="number" min="0" step="0.000001" value="0.003" />
+            <small>Grille fournie : 0,003 $ par minute.</small>
+          </div>
+          <div class="field">
+            <label for="rateLlmInput">LLM input mistral-small-2603 ($ / 1M tokens)</label>
+            <input id="rateLlmInput" type="number" min="0" step="0.000001" value="0.155" />
+            <small>Grille fournie : 0,155 $ par million de tokens en entrée.</small>
+          </div>
+          <div class="field">
+            <label for="rateLlmOutput">LLM output mistral-small-2603 ($ / 1M tokens)</label>
+            <input id="rateLlmOutput" type="number" min="0" step="0.000001" value="0.6" />
+            <small>Grille fournie : 0,6 $ par million de tokens en sortie.</small>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="pill">Résultats</div>
+      <h2>Décomposition du coût</h2>
+      <div class="metrics">
+        <div class="metric">
+          <strong>Coût par appel</strong>
+          <span id="costPerCall">$0.0000</span>
+        </div>
+        <div class="metric orange">
+          <strong>Coût mensuel</strong>
+          <span id="costPerMonth">$0.0000</span>
+        </div>
+        <div class="metric green">
+          <strong>Projection annuelle</strong>
+          <span id="costPerYear">$0.0000</span>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Composante</th>
+            <th>Formule par appel</th>
+            <th>Coût par appel</th>
+            <th>Coût mensuel</th>
+          </tr>
+        </thead>
+        <tbody id="breakdown"></tbody>
+      </table>
+
+      <p class="note" id="summaryText"></p>
+      <p class="footer-note">
+        Pour les appels sortants, le coût Twilio n'est pas seulement un coût par minute de conversation finale : il faut aussi intégrer la jambe agent,
+        la jambe client, le stream, l'enregistrement et les traitements IA post-appel. Ce calculateur est donc volontairement décomposé en plusieurs postes.
+      </p>
+    </section>
+  </div>
+
+  <script>
+    const ids = [
+      'monthlyCalls',
+      'agentLegMinutes',
+      'clientLegMinutes',
+      'streamMinutes',
+      'recordingMinutes',
+      'storageMinutes',
+      'sttMinutes',
+      'llmInputTokens',
+      'llmOutputTokens',
+      'twilioSayUses',
+      'rateOutboundVoice',
+      'rateMediaStreams',
+      'rateRecording',
+      'rateStorage',
+      'rateTwilioSay',
+      'rateStt',
+      'rateLlmInput',
+      'rateLlmOutput'
+    ];
+
+    function readNumber(id) {
+      const raw = String(document.getElementById(id).value || '').replace(',', '.');
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    function money(value) {
+      const digits = Math.abs(value) >= 1 ? 4 : 6;
+      return '$' + value.toFixed(digits);
+    }
+
+    function dec(value, digits = 2) {
+      return Number(value).toFixed(digits);
+    }
+
+    function update() {
+      const monthlyCalls = readNumber('monthlyCalls');
+      const agentLegMinutes = readNumber('agentLegMinutes');
+      const clientLegMinutes = readNumber('clientLegMinutes');
+      const streamMinutes = readNumber('streamMinutes');
+      const recordingMinutes = readNumber('recordingMinutes');
+      const storageMinutes = readNumber('storageMinutes');
+      const sttMinutes = readNumber('sttMinutes');
+      const llmInputTokens = readNumber('llmInputTokens');
+      const llmOutputTokens = readNumber('llmOutputTokens');
+      const twilioSayUses = readNumber('twilioSayUses');
+
+      const rateOutboundVoice = readNumber('rateOutboundVoice');
+      const rateMediaStreams = readNumber('rateMediaStreams');
+      const rateRecording = readNumber('rateRecording');
+      const rateStorage = readNumber('rateStorage');
+      const rateTwilioSay = readNumber('rateTwilioSay');
+      const rateStt = readNumber('rateStt');
+      const rateLlmInput = readNumber('rateLlmInput');
+      const rateLlmOutput = readNumber('rateLlmOutput');
+
+      const outboundVoiceCost = (agentLegMinutes + clientLegMinutes) * rateOutboundVoice;
+      const mediaStreamsCost = streamMinutes * rateMediaStreams;
+      const recordingCost = recordingMinutes * rateRecording;
+      const storageCost = storageMinutes * rateStorage;
+      const twilioSayCost = twilioSayUses * rateTwilioSay;
+      const sttCost = sttMinutes * rateStt;
+      const llmInputCost = (llmInputTokens / 1000000) * rateLlmInput;
+      const llmOutputCost = (llmOutputTokens / 1000000) * rateLlmOutput;
+
+      const rows = [
+        {
+          label: 'Twilio outbound voice',
+          formula: dec(agentLegMinutes + clientLegMinutes) + ' min × ' + money(rateOutboundVoice) + '/min',
+          perCall: outboundVoiceCost
+        },
+        {
+          label: 'Twilio Media Streams',
+          formula: dec(streamMinutes) + ' min × ' + money(rateMediaStreams) + '/min',
+          perCall: mediaStreamsCost
+        },
+        {
+          label: 'Twilio voice recordings',
+          formula: dec(recordingMinutes) + ' min × ' + money(rateRecording) + '/min',
+          perCall: recordingCost
+        },
+        {
+          label: 'Twilio recording storage',
+          formula: dec(storageMinutes) + ' min × ' + money(rateStorage) + '/min',
+          perCall: storageCost
+        },
+        {
+          label: 'Twilio TTS / Polly',
+          formula: dec(twilioSayUses, 0) + ' usage(s) × ' + money(rateTwilioSay) + '/usage',
+          perCall: twilioSayCost
+        },
+        {
+          label: 'Mistral STT',
+          formula: dec(sttMinutes) + ' min × ' + money(rateStt) + '/min',
+          perCall: sttCost
+        },
+        {
+          label: 'Mistral LLM input',
+          formula: dec(llmInputTokens, 0) + ' tokens × ' + money(rateLlmInput) + '/1M',
+          perCall: llmInputCost
+        },
+        {
+          label: 'Mistral LLM output',
+          formula: dec(llmOutputTokens, 0) + ' tokens × ' + money(rateLlmOutput) + '/1M',
+          perCall: llmOutputCost
+        }
+      ];
+
+      const totalPerCall = rows.reduce((sum, row) => sum + row.perCall, 0);
+      const totalPerMonth = totalPerCall * monthlyCalls;
+      const totalPerYear = totalPerMonth * 12;
+
+      document.getElementById('costPerCall').textContent = money(totalPerCall);
+      document.getElementById('costPerMonth').textContent = money(totalPerMonth);
+      document.getElementById('costPerYear').textContent = money(totalPerYear);
+
+      const tbody = document.getElementById('breakdown');
+      tbody.innerHTML = rows.map((row) => {
+        return '<tr>' +
+          '<td>' + row.label + '</td>' +
+          '<td>' + row.formula + '</td>' +
+          '<td>' + money(row.perCall) + '</td>' +
+          '<td>' + money(row.perCall * monthlyCalls) + '</td>' +
+        '</tr>';
+      }).join('') +
+      '<tr>' +
+        '<td>Total</td>' +
+        '<td>' + dec(monthlyCalls, 0) + ' appel(s) par mois</td>' +
+        '<td>' + money(totalPerCall) + '</td>' +
+        '<td>' + money(totalPerMonth) + '</td>' +
+      '</tr>';
+
+      document.getElementById('summaryText').textContent =
+        'Avec ' + dec(monthlyCalls, 0) + ' appels sortants mensuels, ce scénario donne un coût unitaire de ' + money(totalPerCall) +
+        ' et un coût mensuel estimé de ' + money(totalPerMonth) + '. La variable la plus structurante est souvent la somme des minutes agent + client facturées en outbound.';
+    }
+
+    ids.forEach((id) => {
+      document.getElementById(id).addEventListener('input', update);
+    });
+
+    update();
+  </script>
+</body>
+</html>
