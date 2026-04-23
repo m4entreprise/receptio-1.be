@@ -69,33 +69,33 @@ const KEYPAD_ROWS = [
 ];
 
 const EU_COUNTRIES = [
-  { code: '+32',  flag: '🇧🇪', name: 'Belgique' },
-  { code: '+33',  flag: '🇫🇷', name: 'France' },
-  { code: '+352', flag: '🇱🇺', name: 'Luxembourg' },
-  { code: '+31',  flag: '🇳🇱', name: 'Pays-Bas' },
-  { code: '+49',  flag: '🇩🇪', name: 'Allemagne' },
-  { code: '+43',  flag: '🇦🇹', name: 'Autriche' },
-  { code: '+34',  flag: '🇪🇸', name: 'Espagne' },
-  { code: '+39',  flag: '🇮🇹', name: 'Italie' },
-  { code: '+351', flag: '🇵🇹', name: 'Portugal' },
-  { code: '+30',  flag: '🇬🇷', name: 'Grèce' },
-  { code: '+353', flag: '🇮🇪', name: 'Irlande' },
-  { code: '+45',  flag: '🇩🇰', name: 'Danemark' },
-  { code: '+46',  flag: '🇸🇪', name: 'Suède' },
-  { code: '+358', flag: '🇫🇮', name: 'Finlande' },
-  { code: '+48',  flag: '🇵🇱', name: 'Pologne' },
-  { code: '+420', flag: '🇨🇿', name: 'Tchéquie' },
-  { code: '+421', flag: '🇸🇰', name: 'Slovaquie' },
-  { code: '+36',  flag: '🇭🇺', name: 'Hongrie' },
-  { code: '+40',  flag: '🇷🇴', name: 'Roumanie' },
-  { code: '+359', flag: '🇧🇬', name: 'Bulgarie' },
-  { code: '+385', flag: '🇭🇷', name: 'Croatie' },
-  { code: '+386', flag: '🇸🇮', name: 'Slovénie' },
-  { code: '+372', flag: '🇪🇪', name: 'Estonie' },
-  { code: '+371', flag: '🇱🇻', name: 'Lettonie' },
-  { code: '+370', flag: '🇱🇹', name: 'Lituanie' },
-  { code: '+356', flag: '🇲🇹', name: 'Malte' },
-  { code: '+357', flag: '🇨🇾', name: 'Chypre' },
+  { code: '+32',  abbr: 'BE', name: 'Belgique' },
+  { code: '+33',  abbr: 'FR', name: 'France' },
+  { code: '+352', abbr: 'LU', name: 'Luxembourg' },
+  { code: '+31',  abbr: 'NL', name: 'Pays-Bas' },
+  { code: '+49',  abbr: 'DE', name: 'Allemagne' },
+  { code: '+43',  abbr: 'AT', name: 'Autriche' },
+  { code: '+34',  abbr: 'ES', name: 'Espagne' },
+  { code: '+39',  abbr: 'IT', name: 'Italie' },
+  { code: '+351', abbr: 'PT', name: 'Portugal' },
+  { code: '+30',  abbr: 'GR', name: 'Grèce' },
+  { code: '+353', abbr: 'IE', name: 'Irlande' },
+  { code: '+45',  abbr: 'DK', name: 'Danemark' },
+  { code: '+46',  abbr: 'SE', name: 'Suède' },
+  { code: '+358', abbr: 'FI', name: 'Finlande' },
+  { code: '+48',  abbr: 'PL', name: 'Pologne' },
+  { code: '+420', abbr: 'CZ', name: 'Tchéquie' },
+  { code: '+421', abbr: 'SK', name: 'Slovaquie' },
+  { code: '+36',  abbr: 'HU', name: 'Hongrie' },
+  { code: '+40',  abbr: 'RO', name: 'Roumanie' },
+  { code: '+359', abbr: 'BG', name: 'Bulgarie' },
+  { code: '+385', abbr: 'HR', name: 'Croatie' },
+  { code: '+386', abbr: 'SI', name: 'Slovénie' },
+  { code: '+372', abbr: 'EE', name: 'Estonie' },
+  { code: '+371', abbr: 'LV', name: 'Lettonie' },
+  { code: '+370', abbr: 'LT', name: 'Lituanie' },
+  { code: '+356', abbr: 'MT', name: 'Malte' },
+  { code: '+357', abbr: 'CY', name: 'Chypre' },
 ];
 
 const COUNTRY_CODE_KEY = 'outbound_country_code';
@@ -248,12 +248,13 @@ function InitiatePanel({ staff, onCallStarted }: { staff: StaffMember[]; onCallS
             <select
               value={countryCode}
               onChange={e => handleCountryChange(e.target.value)}
-              className="rounded-xl border border-white/15 bg-white/8 px-3 py-1.5 text-sm text-white outline-none focus:border-white/30 cursor-pointer"
+              className="rounded-xl border border-white/20 px-3 py-1.5 text-sm outline-none cursor-pointer"
+              style={{ background: '#1e2d3a', color: '#ffffff' }}
               title="Indicatif pays"
             >
               {EU_COUNTRIES.map(c => (
-                <option key={c.code} value={c.code} style={{ background: '#141F28', color: '#fff' }}>
-                  {c.flag} {c.name} ({c.code})
+                <option key={c.code} value={c.code} style={{ background: '#1e2d3a', color: '#ffffff' }}>
+                  {c.abbr} — {c.name} ({c.code})
                 </option>
               ))}
             </select>
