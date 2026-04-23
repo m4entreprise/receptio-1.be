@@ -331,6 +331,12 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response, 
     if (data.staffId) {
       const staffResult = await query('SELECT id FROM staff WHERE id = $1 AND company_id = $2', [data.staffId, actor.companyId]);
       if (staffResult.rows.length === 0) throw new AppError('Membre du staff introuvable', 404);
+
+      const conflict = await query(
+        'SELECT id FROM users WHERE staff_id = $1 AND company_id = $2 AND id != $3',
+        [data.staffId, actor.companyId, id]
+      );
+      if (conflict.rows.length > 0) throw new AppError('Ce profil d\'agent est déjà assigné à un autre membre', 400);
     }
 
     const fields: string[] = [];

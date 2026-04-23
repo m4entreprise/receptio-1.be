@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import {
-  AlertCircle, Check, Copy, History, MailPlus,
+  AlertCircle, Check, Copy, History, MailPlus, Pencil,
   RefreshCw, Shield, UserCheck, UserCog, UserMinus, UserPlus, Users, X,
 } from 'lucide-react';
 import Layout from '../components/Layout';
@@ -399,12 +399,181 @@ function InviteSuccess({ url, onClose }: { url: string; onClose: () => void }) {
   );
 }
 
+// ─── Assign Staff Modal ───────────────────────────────────────────────────────
+
+function AssignStaffModal({
+  member, unlinkedStaff, onClose, onDone,
+}: {
+  member: Member;
+  unlinkedStaff: UnlinkedStaff[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const hasCurrentStaff = Boolean(member.staff_id);
+  const [mode, setMode]   = useState<StaffMode>(hasCurrentStaff ? 'existing' : unlinkedStaff.length > 0 ? 'existing' : 'new');
+  const [staffId, setStaffId] = useState('');
+  const [ns, setNs] = useState({ firstName: '', lastName: '', phone: '', role: 'Secrétaire' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState('');
+
+  const save = async () => {
+    setSaving(true); setError('');
+    try {
+      let resolvedStaffId: string | null = null;
+
+      if (mode === 'new') {
+        const { data } = await axios.post('/api/staff', {
+          firstName:   ns.firstName,
+          lastName:    ns.lastName,
+          phoneNumber: ns.phone || undefined,
+          role:        ns.role  || undefined,
+        });
+        resolvedStaffId = data.staff.id;
+      } else if (mode === 'existing') {
+        if (!staffId) { setError('Veuillez sélectionner un profil.'); setSaving(false); return; }
+        resolvedStaffId = staffId;
+      }
+      // mode === 'none' → resolvedStaffId reste null
+
+      await axios.patch(`/api/members/${member.id}`, { staffId: resolvedStaffId });
+      onDone();
+    } catch (err: any) {
+      setError(err?.response?.data?.error || 'Erreur lors de la mise à jour.');
+    } finally { setSaving(false); }
+  };
+
+  const displayName = (member.first_name || member.last_name)
+    ? `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim()
+    : member.email;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center p-4">
+      <div className="w-full max-w-md rounded-t-[28px] bg-white p-6 shadow-2xl sm:rounded-[28px]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#344453]/8">
+              <UserCog className="h-4 w-4 text-[#344453]" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold tracking-[-0.03em] text-[#141F28]" style={{ fontFamily: 'var(--font-title)' }}>
+                Profil d'agent
+              </h2>
+              <p className="text-xs text-[#344453]/50">{displayName}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full border border-[#344453]/15 text-[#344453] hover:bg-[#344453]/5 transition">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {hasCurrentStaff && (
+          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-[#344453]/10 bg-[#F8F9FB] px-4 py-3">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#344453] text-[10px] font-bold text-white">
+              {member.staff_first_name?.[0]}{member.staff_last_name?.[0]}
+            </div>
+            <div>
+              <p className="text-sm font-medium text-[#141F28]">{member.staff_first_name} {member.staff_last_name}</p>
+              {member.staff_phone && <p className="text-xs text-[#344453]/50" style={{ fontFamily: 'var(--font-mono)' }}>{member.staff_phone}</p>}
+            </div>
+            <span className="ml-auto rounded-full bg-[#2D9D78]/10 px-2 py-0.5 text-[10px] font-medium text-[#2D9D78]">Actuel</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[#D94052]/20 bg-[#D94052]/6 px-4 py-3 text-sm text-[#D94052]">
+            <AlertCircle className="h-4 w-4 shrink-0" />{error}
+          </div>
+        )}
+
+        <div className="mt-5 space-y-4">
+          <div className={`grid gap-2 ${unlinkedStaff.length > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+            {([
+              { v: 'new'      as StaffMode, label: 'Nouveau',  icon: UserPlus  },
+              ...(unlinkedStaff.length > 0 ? [{ v: 'existing' as StaffMode, label: 'Existant', icon: UserCheck }] : []),
+              { v: 'none'     as StaffMode, label: 'Aucun',    icon: UserMinus },
+            ]).map(({ v, label, icon: Icon }) => (
+              <button key={v} type="button" onClick={() => setMode(v)}
+                className={`flex items-center justify-center gap-2 rounded-2xl border px-3 py-2.5 text-sm font-medium transition ${
+                  mode === v
+                    ? 'border-[#344453] bg-[#344453] text-white'
+                    : 'border-[#344453]/15 bg-[#F8F9FB] text-[#344453] hover:border-[#344453]/25'
+                }`}>
+                <Icon className="h-4 w-4 shrink-0" />{label}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'new' && (
+            <div className="rounded-2xl border border-[#344453]/10 bg-[#F8F9FB] p-4 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-[#344453]">Prénom <span className="text-[#D94052]">*</span></label>
+                  <input required type="text" value={ns.firstName} onChange={e => setNs(p => ({ ...p, firstName: e.target.value }))}
+                    className="mt-1 block w-full rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/25" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#344453]">Nom <span className="text-[#D94052]">*</span></label>
+                  <input required type="text" value={ns.lastName} onChange={e => setNs(p => ({ ...p, lastName: e.target.value }))}
+                    className="mt-1 block w-full rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/25" />
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-[#344453]">Téléphone</label>
+                  <input type="tel" placeholder="+32 470 …" value={ns.phone} onChange={e => setNs(p => ({ ...p, phone: e.target.value }))}
+                    className="mt-1 block w-full rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/25" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#344453]">Fonction</label>
+                  <input type="text" value={ns.role} onChange={e => setNs(p => ({ ...p, role: e.target.value }))}
+                    className="mt-1 block w-full rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/25" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === 'existing' && (
+            <select value={staffId} onChange={e => setStaffId(e.target.value)}
+              className="block w-full rounded-2xl border border-[#344453]/12 bg-[#F8F9FB] px-4 py-3 text-sm outline-none focus:border-[#344453]/25 focus:bg-white transition">
+              <option value="">Sélectionner un profil sans compte…</option>
+              {unlinkedStaff.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.first_name} {s.last_name}{s.phone_number ? ` — ${s.phone_number}` : ''} ({s.role})
+                </option>
+              ))}
+            </select>
+          )}
+
+          {mode === 'none' && (
+            <p className="rounded-2xl border border-[#D94052]/15 bg-[#D94052]/6 px-4 py-3 text-xs text-[#D94052]">
+              {hasCurrentStaff
+                ? 'Le profil d\'agent actuel sera dissocié. Ce membre ne recevra plus d\'appels transférés.'
+                : 'Ce membre n\'aura pas de profil de routage d\'appels.'}
+            </p>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 rounded-full border border-[#344453]/15 py-3 text-sm font-medium text-[#344453] hover:bg-[#344453]/5 transition">
+              Annuler
+            </button>
+            <button type="button" onClick={() => void save()} disabled={saving}
+              className="flex-1 rounded-full bg-[#344453] py-3 text-sm font-semibold text-white hover:bg-[#2a3642] disabled:opacity-50 transition">
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Members Tab ──────────────────────────────────────────────────────────────
 
 function MembersTab({
   members, pendingInvitations, unlinkedStaff,
   canManage, isOwner, currentUserId,
-  onRevoke, onMemberUpdate, onInvite,
+  onRevoke, onMemberUpdate, onInvite, onAssignStaff,
 }: {
   members: Member[];
   pendingInvitations: PendingInvitation[];
@@ -415,6 +584,7 @@ function MembersTab({
   onRevoke: (id: string) => void;
   onMemberUpdate: (id: string, payload: Record<string, unknown>) => void;
   onInvite: (defaultStaffId?: string) => void;
+  onAssignStaff: (member: Member) => void;
 }) {
   const activeCount = members.filter(m => m.status === 'active').length;
 
@@ -486,16 +656,27 @@ function MembersTab({
                 <td className={`${TD} hidden sm:table-cell`}><RoleBadge role={m.role} /></td>
                 <td className={`${TD} hidden md:table-cell`}><StatusDot status={m.status} /></td>
                 <td className={`${TD} hidden lg:table-cell`}>
-                  {m.staff_first_name ? (
-                    <div>
-                      <p className="text-sm text-[#141F28]">{m.staff_first_name} {m.staff_last_name}</p>
-                      {m.staff_phone && (
-                        <p className="text-xs text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>{m.staff_phone}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-xs italic text-[#344453]/30">Aucun</span>
-                  )}
+                  <div className="flex items-center justify-between gap-2">
+                    {m.staff_first_name ? (
+                      <div>
+                        <p className="text-sm text-[#141F28]">{m.staff_first_name} {m.staff_last_name}</p>
+                        {m.staff_phone && (
+                          <p className="text-xs text-[#344453]/45" style={{ fontFamily: 'var(--font-mono)' }}>{m.staff_phone}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs italic text-[#344453]/30">Aucun</span>
+                    )}
+                    {canManage && (
+                      <button
+                        onClick={() => onAssignStaff(m)}
+                        title={m.staff_first_name ? 'Modifier le profil d\'agent' : 'Assigner un profil d\'agent'}
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-[#344453]/15 text-[#344453]/40 hover:border-[#344453]/30 hover:bg-[#344453]/5 hover:text-[#344453] transition"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td className={`${TD} hidden xl:table-cell`}>
                   <span className="text-xs text-[#344453]/50">{fmt(m.last_login_at)}</span>
@@ -835,9 +1016,10 @@ export default function SettingsTeamAccess() {
   const [policy, setPolicy]                     = useState<AgentPolicy | null>(null);
   const [logs, setLogs]                         = useState<AuditLog[]>([]);
 
-  const [inviteModal, setInviteModal] = useState<{ open: boolean; defaultStaffId?: string }>({ open: false });
-  const [inviteUrl, setInviteUrl]     = useState('');
-  const [toast, setToast]             = useState('');
+  const [inviteModal, setInviteModal]   = useState<{ open: boolean; defaultStaffId?: string }>({ open: false });
+  const [assignModal, setAssignModal]   = useState<{ open: boolean; member?: Member }>({ open: false });
+  const [inviteUrl, setInviteUrl]       = useState('');
+  const [toast, setToast]               = useState('');
 
   const canManage   = Boolean(user?.permissions?.memberManage);
   const canReadLogs = Boolean(user?.permissions?.auditLogsRead);
@@ -964,6 +1146,7 @@ export default function SettingsTeamAccess() {
             onRevoke={(id) => void handleRevoke(id)}
             onMemberUpdate={(id, payload) => void handleMemberUpdate(id, payload)}
             onInvite={(defaultStaffId) => setInviteModal({ open: true, defaultStaffId })}
+            onAssignStaff={(member) => setAssignModal({ open: true, member })}
           />
         )}
         {tab === 'acces' && policy && (
@@ -998,6 +1181,16 @@ export default function SettingsTeamAccess() {
         {/* Invite success */}
         {inviteUrl && (
           <InviteSuccess url={inviteUrl} onClose={() => setInviteUrl('')} />
+        )}
+
+        {/* Assign staff modal */}
+        {assignModal.open && assignModal.member && (
+          <AssignStaffModal
+            member={assignModal.member}
+            unlinkedStaff={unlinkedStaff}
+            onClose={() => setAssignModal({ open: false })}
+            onDone={() => { setAssignModal({ open: false }); void load(); }}
+          />
         )}
       </div>
     </Layout>
