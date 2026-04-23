@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { getTwilioClient } from '../services/twilioClient';
+import { hangupTelnyxCall, redirectTelnyxCall } from '../services/telnyxClient';
 import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
@@ -207,34 +207,30 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
       throw new AppError('Recording not found', 404);
     }
 
-    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-    const isTwilioRecording = /twilio\.com/i.test(recordingUrl);
+    const isTelnyxRecording = /telnyx\.com/i.test(recordingUrl);
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
 
     logger.info('Recording proxy request', {
       callId: id,
-      isTwilioRecording,
-      hasTwilioCreds: !!(twilioSid && twilioToken),
+      isTelnyxRecording,
+      hasTelnyxKey: !!telnyxApiKey,
       recordingUrl,
     });
 
-    // Stream the recording directly from the stored URL.
-    // For Twilio URLs: use Basic auth + beforeRedirect to strip auth header
-    // before any CDN redirect (otherwise CDN rejects with 403).
-    const streamAuth = isTwilioRecording && twilioSid && twilioToken
-      ? { username: twilioSid, password: twilioToken }
+    const authHeader = isTelnyxRecording && telnyxApiKey
+      ? `Bearer ${telnyxApiKey}`
       : undefined;
 
-    logger.info('Recording proxy: streaming', { callId: id, isTwilioRecording, hasAuth: !!streamAuth });
+    logger.info('Recording proxy: streaming', { callId: id, isTelnyxRecording, hasAuth: !!authHeader });
 
     const response = await axios.get(recordingUrl, {
       responseType: 'stream',
       maxRedirects: 10,
       validateStatus: (s) => s >= 200 && s < 300,
-      ...(streamAuth ? { auth: streamAuth } : {}),
+      ...(authHeader ? { headers: { Authorization: authHeader } } : {}),
       beforeRedirect: (options: any) => {
-        // Strip Authorization header when redirected to a non-Twilio host (CDN)
-        if (options.hostname && !/twilio\.com$/i.test(options.hostname)) {
+        // Strip Authorization header when redirected away from Telnyx (CDN)
+        if (options.hostname && !/telnyx\.com$/i.test(options.hostname)) {
           delete options.headers['Authorization'];
           delete options.headers['authorization'];
         }
@@ -263,11 +259,10 @@ router.get('/:id/recording', authenticateToken, async (req: AuthRequest, res: Re
     if (error instanceof AppError) {
       next(error);
     } else if (upstreamStatus === 404) {
-      // Clear the stale recording_url so the player doesn't appear on future loads
       query('UPDATE calls SET recording_url = NULL WHERE id = $1', [req.params.id]).catch(() => {});
-      next(new AppError('Enregistrement introuvable sur Twilio', 404));
+      next(new AppError('Enregistrement introuvable', 404));
     } else if (upstreamStatus === 401 || upstreamStatus === 403) {
-      next(new AppError('Accès à l\'enregistrement refusé (authentification Twilio)', 502));
+      next(new AppError('Accès à l\'enregistrement refusé', 502));
     } else {
       next(error);
     }
@@ -294,14 +289,9 @@ router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Res
     const { call_sid: callSid } = callResult.rows[0];
 
     if (callSid) {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      if (accountSid && authToken) {
-        try {
-          const twilioClient = getTwilioClient();
-          await twilioClient.calls(callSid).update({ status: 'completed' });
-        } catch {
-        }
+      try {
+        await hangupTelnyxCall(callSid);
+      } catch {
       }
     }
 
@@ -312,7 +302,7 @@ router.post('/:id/abandon', authenticateToken, async (req: AuthRequest, res: Res
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-      [id, 'twilio.routing.abandoned', { companyId }]
+      [id, 'telnyx.routing.abandoned', { companyId }]
     );
 
     logger.info('Queued call abandoned by agent', { callId: id, companyId });
@@ -357,28 +347,19 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
       return;
     }
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-    if (!accountSid || !authToken) {
-      res.status(500).json({ error: 'Twilio credentials not configured' });
-      return;
-    }
-
     const baseWebhookUrl = (process.env.PUBLIC_WEBHOOK_URL || '').replace(/\/+$/, '');
     const recordingCallbackUrl = baseWebhookUrl
-      ? `${baseWebhookUrl}/api/webhooks/twilio/recording-complete`
+      ? `${baseWebhookUrl}/api/webhooks/telnyx/recording-complete`
       : null;
 
     const recordAttr = recordingCallbackUrl
       ? ` record="record-from-answer" recordingStatusCallback="${recordingCallbackUrl}" recordingStatusCallbackMethod="POST"`
       : '';
 
-    const twilioClient = getTwilioClient();
-
-    await twilioClient.calls(callSid).update({
-      twiml: `<Response><Say language="fr-FR">Nous vous transférons maintenant. Veuillez patienter.</Say><Dial${recordAttr}><Number>${staffPhone}</Number></Dial></Response>`,
-    });
+    await redirectTelnyxCall(
+      callSid,
+      `<Response><Say language="fr-FR">Nous vous transférons maintenant. Veuillez patienter.</Say><Dial${recordAttr}><Number>${staffPhone}</Number></Dial></Response>`
+    );
 
     await query(
       `UPDATE calls SET queue_status = 'transferred', status = 'transferred' WHERE id = $1`,
@@ -387,7 +368,7 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-      [id, 'twilio.routing.transferred', { staffPhone, companyId }]
+      [id, 'telnyx.routing.transferred', { staffPhone, companyId }]
     );
 
     logger.info('Call transferred', { callId: id, staffPhone, companyId });

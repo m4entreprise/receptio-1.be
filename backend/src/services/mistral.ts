@@ -158,15 +158,13 @@ export async function generateResponse(
 }
 
 const MISTRAL_DIARIZATION_MODEL = 'voxtral-mini-latest';
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-
 async function downloadAudioForMistral(audioUrl: string): Promise<{ buffer: Buffer; mimeType: string; fileName: string }> {
   const resolvedUrl = audioUrl.endsWith('.mp3') || audioUrl.endsWith('.wav') ? audioUrl : `${audioUrl}.mp3`;
   const headers: Record<string, string> = {};
 
-  if (resolvedUrl.includes('twilio.com') && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-    headers.Authorization = `Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}`;
+  const telnyxApiKey = process.env.TELNYX_API_KEY;
+  if (resolvedUrl.includes('telnyx.com') && telnyxApiKey) {
+    headers.Authorization = `Bearer ${telnyxApiKey}`;
   }
 
   const response = await fetch(resolvedUrl, { headers });

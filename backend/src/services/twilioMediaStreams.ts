@@ -1,5 +1,4 @@
 import { IncomingMessage, Server as HttpServer } from 'http';
-import axios from 'axios';
 import { RawData, WebSocket, WebSocketServer } from 'ws';
 import { query } from '../config/database';
 import { OfferBSettings } from '../types';
@@ -7,11 +6,9 @@ import { buildKnowledgeBaseContext, getBbisAgentSettings, getCompanyOfferBSettin
 import { generateResponse as mistralGenerateResponse, summarizeCall as mistralSummarizeCall, textToSpeech as mistralTextToSpeech, transcribeAudioBuffer as mistralTranscribeAudioBuffer } from './mistral';
 import { transcribeAudioBuffer as gladiaTranscribeAudioBuffer } from './gladia';
 import logger from '../utils/logger';
-import { getTwilioClient, getTwilioApiBase } from './twilioClient';
+import { redirectTelnyxCall, startTelnyxRecording } from './telnyxClient';
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const STREAMING_ENABLED = process.env.OFFER_B_STREAMING_ENABLED !== 'false';
 const ENERGY_THRESHOLD = Number(process.env.OFFER_B_STREAMING_ENERGY_THRESHOLD || 500);
 const BBIS_SILENCE_THRESHOLD_MS = Number(process.env.OFFER_BBIS_STREAMING_SILENCE_MS || 260);
@@ -79,7 +76,7 @@ interface StreamSessionState {
   streamSid: string;
   transcriptMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
   turnCounter: number;
-  twilioStartedAt: number | null;
+  streamStartedAt: number | null;
 }
 
 interface TwilioStreamStartEvent {
@@ -115,14 +112,14 @@ interface AssistantPlaybackMetrics {
   ttsDurationMs: number;
 }
 
-export function attachTwilioMediaStreamsServer(server: HttpServer) {
+export function attachMediaStreamsServer(server: HttpServer) {
   const wss = new WebSocketServer({ noServer: true });
   const wssOutbound = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (request, socket, head) => {
     const requestUrl = new URL(request.url || '/', 'http://localhost');
 
-    if (requestUrl.pathname === '/api/media-streams/twilio') {
+    if (requestUrl.pathname === '/api/media-streams/telnyx') {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });
@@ -436,7 +433,7 @@ async function handleTwilioConnection(twilioSocket: WebSocket, request: Incoming
     streamSid: '',
     transcriptMessages: [],
     turnCounter: 0,
-    twilioStartedAt: null,
+    streamStartedAt: null,
   };
 
   twilioSocket.on('message', (data) => {
@@ -492,10 +489,11 @@ async function handleTwilioMessage(
       const customBaseUrl = startEvent.start?.customParameters?.baseUrl;
       const effectiveBaseUrl = state.baseUrl || customBaseUrl || '';
       logger.info('Recording start check', { resolvedCallSid, baseUrl: state.baseUrl, customBaseUrl, effectiveBaseUrl });
-      if (resolvedCallSid && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && effectiveBaseUrl) {
-        void startTwilioRecording(resolvedCallSid, effectiveBaseUrl, resolvedCallId);
+      if (resolvedCallSid && process.env.TELNYX_API_KEY && effectiveBaseUrl) {
+        const recordingCallbackUrl = `${effectiveBaseUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/$/, '')}/api/webhooks/telnyx/streaming-recording?callId=${encodeURIComponent(resolvedCallId)}`;
+        void startTelnyxRecording(resolvedCallSid, recordingCallbackUrl, resolvedCallId);
       } else {
-        logger.warn('Recording skipped - missing data', { resolvedCallSid, hasBaseUrl: !!effectiveBaseUrl, hasTwilioCreds: !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) });
+        logger.warn('Recording skipped - missing data', { resolvedCallSid, hasBaseUrl: !!effectiveBaseUrl, hasTelnyxKey: !!process.env.TELNYX_API_KEY });
       }
 
       if (!state.initialized) {
@@ -524,9 +522,9 @@ async function handleTwilioMessage(
 
       state.streamSid = startEvent.start?.streamSid || startEvent.streamSid || '';
       state.callSid = startEvent.start?.callSid || state.callSid;
-      state.twilioStartedAt = Date.now();
+      state.streamStartedAt = Date.now();
 
-      await appendCallEvent(state.callId, 'twilio.media_stream.started', {
+      await appendCallEvent(state.callId, 'telnyx.media_stream.started', {
         callSid: state.callSid,
         streamSid: state.streamSid,
       });
@@ -628,7 +626,7 @@ async function handleTwilioMessage(
       }
 
       const stopEvent = payload as TwilioStreamStopEvent;
-      await appendCallEvent(state.callId, 'twilio.media_stream.stopped', {
+      await appendCallEvent(state.callId, 'telnyx.media_stream.stopped', {
         callSid: stopEvent.stop?.callSid || state.callSid,
         streamSid: stopEvent.streamSid || state.streamSid,
       });
@@ -676,9 +674,9 @@ async function initializeStreamingSession(state: StreamSessionState, callId: str
 
   await ensureConversationExists(callId);
   await ensureCallSummaryExists(callId);
-  await appendCallEvent(callId, 'twilio.media_stream.connection_opened', {
+  await appendCallEvent(callId, 'telnyx.media_stream.connection_opened', {
     companyId,
-    provider: 'twilio',
+    provider: 'telnyx',
     mode: `${bbisAgentSettings.sttProvider}_${bbisAgentSettings.llmProvider}_${bbisAgentSettings.ttsProvider}`,
   });
   state.bbisBargeInMinSpeechMs = bbisAgentSettings.bargeInMinSpeechMs;
@@ -822,7 +820,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         persistTranscript: false,
         source: 'transfer_premium_tts',
       });
-      await redirectTwilioCall(state.callSid, buildTransferTwiml(state.humanTransferNumber));
+      await redirectTelnyxCall(state.callSid, buildTransferTwiml(state.humanTransferNumber));
       await finalizeStreamingCall(state, 'human_transfer_requested');
       if (twilioSocket.readyState === WebSocket.OPEN) {
         twilioSocket.close();
@@ -953,7 +951,7 @@ async function processBufferedUtterance(twilioSocket: WebSocket, state: StreamSe
         persistTranscript: false,
         source: 'transfer_premium_tts',
       });
-      await redirectTwilioCall(state.callSid, buildTransferTwiml(state.humanTransferNumber));
+      await redirectTelnyxCall(state.callSid, buildTransferTwiml(state.humanTransferNumber));
       await finalizeStreamingCall(state, 'agent_transfer_requested');
       if (twilioSocket.readyState === WebSocket.OPEN) {
         twilioSocket.close();
@@ -1379,8 +1377,8 @@ async function finalizeStreamingCall(state: StreamSessionState, reason: string) 
 
   state.finalized = true;
 
-  const durationSeconds = state.twilioStartedAt
-    ? Math.max(1, Math.round((Date.now() - state.twilioStartedAt) / 1000))
+  const durationSeconds = state.streamStartedAt
+    ? Math.max(1, Math.round((Date.now() - state.streamStartedAt) / 1000))
     : 0;
 
   await query(
@@ -1393,7 +1391,7 @@ async function finalizeStreamingCall(state: StreamSessionState, reason: string) 
   );
 
   await persistFinalSummary(state.callId, state.lastIntent);
-  await appendCallEvent(state.callId, 'twilio.media_stream.finalized', {
+  await appendCallEvent(state.callId, 'telnyx.media_stream.finalized', {
     durationSeconds,
     reason,
   });
@@ -1426,34 +1424,11 @@ async function persistFinalSummary(callId: string, intent: string) {
 }
 
 async function redirectToVoicemail(state: StreamSessionState) {
-  const greetingUrl = `${state.baseUrl}/api/webhooks/twilio/greeting?companyId=${encodeURIComponent(state.companyId)}`;
-  const recordingCompleteUrl = `${state.baseUrl}/api/webhooks/twilio/recording-complete`;
+  const greetingUrl = `${state.baseUrl}/api/webhooks/telnyx/greeting?companyId=${encodeURIComponent(state.companyId)}`;
+  const recordingCompleteUrl = `${state.baseUrl}/api/webhooks/telnyx/recording-complete`;
   const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${greetingUrl}</Play><Record method="POST" playBeep="true" maxLength="120" trim="trim-silence" recordingStatusCallback="${recordingCompleteUrl}" recordingStatusCallbackMethod="POST" /><Hangup /></Response>`;
   logger.info('Redirecting call to Core voicemail fallback', { callSid: state.callSid, companyId: state.companyId });
-  await redirectTwilioCall(state.callSid, twiml);
-}
-
-async function redirectTwilioCall(callSid: string, twiml: string) {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !callSid) {
-    logger.warn('Twilio transfer skipped because configuration is incomplete', { callSid, hasSid: Boolean(TWILIO_ACCOUNT_SID) });
-    return;
-  }
-
-  const body = new URLSearchParams({ Twiml: twiml });
-
-  await axios.post(
-    `${getTwilioApiBase()}/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls/${callSid}.json`,
-    body.toString(),
-    {
-      auth: {
-        username: TWILIO_ACCOUNT_SID,
-        password: TWILIO_AUTH_TOKEN,
-      },
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    }
-  );
+  await redirectTelnyxCall(state.callSid, twiml);
 }
 
 async function sendULawAudioToTwilio(
@@ -1579,7 +1554,7 @@ function convertWavToULaw(wavBuffer: Buffer): Buffer {
 
 function parseWavPcm16(wavBuffer: Buffer): { channels: number; sampleRate: number; samples: Int16Array } {
   if (wavBuffer.length < 44 || wavBuffer.subarray(0, 4).toString('ascii') !== 'RIFF' || wavBuffer.subarray(8, 12).toString('ascii') !== 'WAVE') {
-    throw new Error('Invalid WAV buffer for Twilio streaming conversion');
+    throw new Error('Invalid WAV buffer for streaming conversion');
   }
 
   let fmtChunkOffset = -1;
@@ -1619,7 +1594,7 @@ function parseWavPcm16(wavBuffer: Buffer): { channels: number; sampleRate: numbe
   const bitsPerSample = wavBuffer.readUInt16LE(fmtChunkOffset + 14);
 
   if (audioFormat !== 1 || bitsPerSample !== 16) {
-    throw new Error(`Unsupported WAV format for Twilio streaming conversion: format=${audioFormat}, bits=${bitsPerSample}`);
+    throw new Error(`Unsupported WAV format for streaming conversion: format=${audioFormat}, bits=${bitsPerSample}`);
   }
 
   const availableDataLength = Math.min(dataChunkLength, wavBuffer.length - dataChunkOffset);
@@ -1755,40 +1730,3 @@ function wait(durationMs: number): Promise<void> {
   });
 }
 
-async function startTwilioRecording(callSid: string, baseUrl: string, callId: string): Promise<void> {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
-    logger.warn('Twilio recording skipped: missing credentials', { callSid });
-    return;
-  }
-
-  if (!baseUrl) {
-    logger.warn('Twilio recording skipped: empty baseUrl', { callSid, callId });
-    return;
-  }
-
-  try {
-    // Convert wss:// to https:// for the callback URL (Twilio requires http/https, not ws/wss)
-    const httpsBaseUrl = baseUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
-    const recordingCallbackUrl = `${httpsBaseUrl.replace(/\/$/, '')}/api/webhooks/twilio/streaming-recording?callId=${encodeURIComponent(callId)}`;
-    logger.info('Starting Twilio recording with callback', { callSid, callId, recordingCallbackUrl });
-    const client = getTwilioClient();
-
-    const recording = await client.calls(callSid).recordings.create({
-      recordingStatusCallback: recordingCallbackUrl,
-      recordingStatusCallbackMethod: 'POST',
-      recordingChannels: 'dual', // Dual channel for speaker separation
-    });
-
-    logger.info('Twilio recording started for streaming call', {
-      callSid,
-      callId,
-      recordingSid: recording.sid,
-    });
-  } catch (error: any) {
-    logger.error('Failed to start Twilio recording', {
-      callSid,
-      callId,
-      error: error.message,
-    });
-  }
-}

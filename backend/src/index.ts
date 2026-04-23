@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { connectRedis } from './config/redis';
 import { query } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
-import { attachTwilioMediaStreamsServer } from './services/twilioMediaStreams';
+import { attachMediaStreamsServer } from './services/twilioMediaStreams';
 import logger from './utils/logger';
 
 import authRoutes from './routes/auth';
@@ -32,12 +32,10 @@ import membersRoutes from './routes/members';
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // Verify critical environment variables on startup
-const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+const telnyxApiKey = process.env.TELNYX_API_KEY;
 logger.info('Environment check', {
-  hasTwilioSid: !!twilioSid,
-  hasTwilioToken: !!twilioToken,
-  twilioSidPrefix: twilioSid ? twilioSid.substring(0, 10) : 'missing',
+  hasTelnyxApiKey: !!telnyxApiKey,
+  telnyxKeyPrefix: telnyxApiKey ? telnyxApiKey.substring(0, 10) : 'missing',
   envPath: path.resolve(__dirname, '../../.env'),
 });
 
@@ -121,7 +119,7 @@ app.use('/api/super', superRoutes);
 app.use(errorHandler);
 
 const server = createServer(app);
-attachTwilioMediaStreamsServer(server);
+attachMediaStreamsServer(server);
 
 async function cleanupOrphanCalls() {
   try {

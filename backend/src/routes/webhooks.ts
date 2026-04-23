@@ -44,26 +44,26 @@ router.post('/telnyx/call', async (req: Request, res: Response, next) => {
   }
 });
 
-router.all('/twilio/voice', async (req: Request, res: Response) => {
+router.all('/telnyx/voice', async (req: Request, res: Response) => {
   try {
     const payload = req.body;
     const company = await findCompanyByPhoneNumber(payload.To);
 
     if (!company) {
-      logger.warn('No company matched inbound Twilio number', { to: payload.To, callSid: payload.CallSid });
+      logger.warn('No company matched inbound Telnyx number', { to: payload.To, callSid: payload.CallSid });
       res.type('text/xml').send(buildTwiml('<Pause length="1" /><Hangup />'));
       return;
     }
 
-    const callId = await createOrUpdateTwilioCall(payload, company.id);
+    const callId = await createOrUpdateTelnyxCall(payload, company.id);
     const baseUrl = getBaseUrl(req);
     const offerBSettings = await getCompanyOfferBSettings(company.id);
-    const voiceStatusUrl = joinUrl(baseUrl, '/api/webhooks/twilio/voice-status');
+    const voiceStatusUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/voice-status');
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data)
        VALUES ($1, $2, $3)`,
-      [callId, 'twilio.voice.inbound', payload]
+      [callId, 'telnyx.voice.inbound', payload]
     );
 
     await query(
@@ -78,7 +78,7 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
         await query(
           `INSERT INTO call_events (call_id, event_type, data)
            VALUES ($1, $2, $3)`,
-          [callId, 'twilio.offer_b.started', { settings: offerBSettings, callSid: payload.CallSid }]
+          [callId, 'telnyx.offer_b.started', { settings: offerBSettings, callSid: payload.CallSid }]
         );
 
         const streamUrl = buildOfferBStreamingUrl(baseUrl, callId, company.id);
@@ -92,22 +92,22 @@ router.all('/twilio/voice', async (req: Request, res: Response) => {
 
     if (offerBSettings.smartRoutingEnabled) {
       const routingQuestion = offerBSettings.routingQuestion || 'Quel est le motif de votre appel ?';
-      const gatherUrl = joinUrl(baseUrl, `/api/webhooks/twilio/gather-reason?callId=${callId}&companyId=${company.id}`);
-      const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}&routing=1&question=${encodeURIComponent(routingQuestion)}`);
+      const gatherUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/gather-reason?callId=${callId}&companyId=${company.id}`);
+      const greetingUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${company.id}&routing=1&question=${encodeURIComponent(routingQuestion)}`);
       res.type('text/xml').send(buildOfferARoutingTwiml(greetingUrl, gatherUrl, voiceStatusUrl));
       return;
     }
 
-    const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
-    const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+    const greetingUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${company.id}`);
+    const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
     res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl, voiceStatusUrl));
   } catch (error: any) {
-    logger.error('Twilio voice webhook error', { error: error.message });
+    logger.error('Telnyx voice webhook error', { error: error.message });
     res.type('text/xml').send(buildTwiml('<Hangup />'));
   }
 });
 
-router.get('/twilio/greeting', async (req: Request, res: Response) => {
+router.get('/telnyx/greeting', async (req: Request, res: Response) => {
   try {
     const companyId = String(req.query.companyId || '');
     const isRouting = req.query.routing === '1';
@@ -125,7 +125,7 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
 
     const company = result.rows[0];
     const aiModels = getAiModelsSettings(company.settings || {});
-    const greetingText = company.settings?.twilioGreetingText || company.settings?.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
+    const greetingText = company.settings?.greetingText || `Bonjour, vous êtes bien chez ${company.name}. Merci de laisser votre message après le bip.`;
     const fullText = isRouting ? `${greetingText} ${routingQuestion}` : greetingText;
     const audio = await mistralTextToSpeech(fullText, 'mp3', 'fr', {
       model: aiModels.greetingTtsModel || 'voxtral-mini-tts-2603',
@@ -135,12 +135,12 @@ router.get('/twilio/greeting', async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(audio);
   } catch (error: any) {
-    logger.error('Twilio greeting generation error', { error: error.message });
+    logger.error('Telnyx greeting generation error', { error: error.message });
     res.status(500).send('Greeting unavailable');
   }
 });
 
-router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
+router.all('/telnyx/gather-reason', async (req: Request, res: Response) => {
   const callId = String(req.query.callId || '');
   const companyId = String(req.query.companyId || '');
   const speechResult = String(req.body.SpeechResult || req.query.SpeechResult || '').trim();
@@ -156,7 +156,7 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
       );
       await query(
         `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-        [callId, 'twilio.routing.queued', { speechResult, callSid, companyId }]
+        [callId, 'telnyx.routing.queued', { speechResult, callSid, companyId }]
       );
       logger.info('Call queued for transfer', { callId, speechResult: speechResult.slice(0, 80) });
     } catch (dbError: any) {
@@ -244,12 +244,12 @@ router.all('/twilio/gather-reason', async (req: Request, res: Response) => {
   }
 
   // No matching dispatch rule (outside hours or no rule configured): fallback to Receptio voicemail
-  const greetingUrlFallback = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${encodeURIComponent(companyId)}`);
-  const recordingCompleteUrlFallback = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+  const greetingUrlFallback = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${encodeURIComponent(companyId)}`);
+  const recordingCompleteUrlFallback = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
   res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrlFallback, recordingCompleteUrlFallback));
 });
 
-router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
+router.get('/telnyx/agent-audio', async (req: Request, res: Response) => {
   try {
     const promptText = String(req.query.text || '').trim();
 
@@ -264,12 +264,12 @@ router.get('/twilio/agent-audio', async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'audio/wav');
     res.send(audio);
   } catch (error: any) {
-    logger.error('Twilio agent audio generation error', { error: error.message });
+    logger.error('Telnyx agent audio generation error', { error: error.message });
     res.status(500).send('Prompt unavailable');
   }
 });
 
-router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
+router.all('/telnyx/agent-turn', async (req: Request, res: Response) => {
   try {
     const { callId } = req.query;
     const speechResult = String(req.body.SpeechResult || '').trim();
@@ -297,8 +297,8 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
     const aiModelsOfferB = getAiModelsSettings(offerBSettings);
 
     if (!shouldUseRealtimeOfferAgent(offerBSettings)) {
-      const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
-      const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+      const greetingUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${company.id}`);
+      const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
       res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
       return;
     }
@@ -335,8 +335,8 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
         }
 
         if (offerBSettings.fallbackToVoicemail) {
-          const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
-          const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+          const greetingUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${company.id}`);
+          const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
           await registerOfferBAction(call.id, 'fallback_to_voicemail', { reason: escalation.reason });
           res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
           return;
@@ -447,8 +447,8 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
       }
 
       if (offerBSettings.fallbackToVoicemail) {
-        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${company.id}`);
-        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${company.id}`);
+        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
         await registerOfferBAction(call.id, 'fallback_to_voicemail', { intent: intentData.intent });
         res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
         return;
@@ -470,7 +470,7 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
 
     res.type('text/xml').send(buildOfferBFollowupTwiml(baseUrl, call.id, agentReply));
   } catch (error: any) {
-    logger.error('Twilio Offer B agent turn error', { error: error.message });
+    logger.error('Telnyx Offer B agent turn error', { error: error.message });
 
     try {
       const { callId } = req.query;
@@ -484,22 +484,22 @@ router.all('/twilio/agent-turn', async (req: Request, res: Response) => {
       if (fallbackCallResult.rows.length > 0) {
         const call = fallbackCallResult.rows[0];
         const baseUrl = getBaseUrl(req);
-        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${call.company_id}`);
-        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+        const greetingUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${call.company_id}`);
+        const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
 
         await registerOfferBAction(call.id, 'fallback_to_voicemail', { reason: 'agent_turn_error' });
         res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
         return;
       }
     } catch (fallbackError: any) {
-      logger.error('Twilio Offer B fallback error', { error: fallbackError.message });
+      logger.error('Telnyx Offer B fallback error', { error: fallbackError.message });
     }
 
     res.type('text/xml').send(buildTwiml('<Say language="fr-FR" voice="alice">Une erreur est survenue. Merci de rappeler plus tard.</Say><Hangup />'));
   }
 });
 
-router.post('/twilio/recording-complete', async (req: Request, res: Response) => {
+router.post('/telnyx/recording-complete', async (req: Request, res: Response) => {
   try {
     const payload = req.body;
     const callSid = payload.CallSid;
@@ -521,7 +521,7 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
     );
 
     if (callResult.rows.length === 0) {
-      logger.warn('Twilio recording received for unknown call', { callSid });
+      logger.warn('Telnyx recording received for unknown call', { callSid });
       res.status(200).send('ok');
       return;
     }
@@ -538,7 +538,7 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
     await query(
       `INSERT INTO call_events (call_id, event_type, data)
        VALUES ($1, $2, $3)`,
-      [call.id, 'twilio.recording.completed', payload]
+      [call.id, 'telnyx.recording.completed', payload]
     );
 
     // Respond immediately — transcription runs async
@@ -660,14 +660,14 @@ router.post('/twilio/recording-complete', async (req: Request, res: Response) =>
       }
     });
   } catch (error: any) {
-    logger.error('Twilio recording webhook error', { error: error.message });
+    logger.error('Telnyx recording webhook error', { error: error.message });
     res.status(200).send('ok');
   }
 });
 
 // Click-to-call: when the original caller picks up, Twilio calls this URL
 // and we bridge them to the staff member's phone.
-router.all('/twilio/transfer', async (req: Request, res: Response) => {
+router.all('/telnyx/transfer', async (req: Request, res: Response) => {
   const staffPhone = String(req.query.staffPhone || req.body?.staffPhone || '');
 
   if (!staffPhone) {
@@ -682,7 +682,7 @@ router.all('/twilio/transfer', async (req: Request, res: Response) => {
 });
 
 // Dispatch fallback — called by Twilio when a dispatched <Dial> ends
-router.all('/twilio/dispatch-fallback', async (req: Request, res: Response) => {
+router.all('/telnyx/dispatch-fallback', async (req: Request, res: Response) => {
   const companyId = String(req.query.companyId || '');
   const callId = String(req.query.callId || '');
   const fallback = String(req.query.fallback || 'voicemail');
@@ -721,19 +721,19 @@ router.all('/twilio/dispatch-fallback', async (req: Request, res: Response) => {
   }
 
   // Default fallback: voicemail
-  const greetingUrl = joinUrl(baseUrl, `/api/webhooks/twilio/greeting?companyId=${encodeURIComponent(companyId)}`);
-  const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+  const greetingUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/greeting?companyId=${encodeURIComponent(companyId)}`);
+  const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
   res.type('text/xml').send(buildOfferAVoicemailTwiml(greetingUrl, recordingCompleteUrl));
 });
 
 // Generic inbound call status callback — fired by Twilio on every status change
-router.post('/twilio/voice-status', async (req: Request, res: Response) => {
+router.post('/telnyx/voice-status', async (req: Request, res: Response) => {
   try {
     const callSid = String(req.body?.CallSid || '');
     const callStatus = String(req.body?.CallStatus || '');
     const callDuration = parseInt(req.body?.CallDuration || '0', 10);
 
-    logger.info('Twilio voice-status callback', { callSid, callStatus, callDuration });
+    logger.info('Telnyx voice-status callback', { callSid, callStatus, callDuration });
 
     if (!callSid) {
       res.sendStatus(200);
@@ -879,7 +879,7 @@ router.post('/twilio/voice-status', async (req: Request, res: Response) => {
 });
 
 // Click-to-call: status callback — if no-answer / busy / failed, leave a voicemail
-router.post('/twilio/call-status', async (req: Request, res: Response) => {
+router.post('/telnyx/call-status', async (req: Request, res: Response) => {
   const callStatus = String(req.body?.CallStatus || '');
   const voicemailMessage = String(req.query.voicemailMessage || req.body?.voicemailMessage || '');
   const callId = String(req.query.callId || '');
@@ -938,7 +938,7 @@ function toWebSocketBaseUrl(baseUrl: string): string {
 function buildOfferBStreamingUrl(baseUrl: string, callId: string, companyId: string): string {
   return joinUrl(
     toWebSocketBaseUrl(baseUrl),
-    `/api/media-streams/twilio?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}&baseUrl=${encodeURIComponent(baseUrl)}`
+    `/api/media-streams/telnyx?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}&baseUrl=${encodeURIComponent(baseUrl)}`
   );
 }
 
@@ -964,13 +964,13 @@ function buildOfferARoutingTwiml(greetingUrl: string, gatherUrl: string, _status
 }
 
 function buildOfferBFollowupTwiml(baseUrl: string, callId: string, prompt: string): string {
-  const actionUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-turn?callId=${encodeURIComponent(callId)}`);
-  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?text=${encodeURIComponent(prompt)}`);
+  const actionUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/agent-turn?callId=${encodeURIComponent(callId)}`);
+  const promptUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/agent-audio?text=${encodeURIComponent(prompt)}`);
   return buildGatherTwiml(actionUrl, promptUrl);
 }
 
 function buildOfferBHangupTwiml(baseUrl: string, prompt: string): string {
-  const promptUrl = joinUrl(baseUrl, `/api/webhooks/twilio/agent-audio?text=${encodeURIComponent(prompt)}`);
+  const promptUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/agent-audio?text=${encodeURIComponent(prompt)}`);
   return buildTwiml(`<Play>${escapeXml(promptUrl)}</Play><Hangup />`);
 }
 
@@ -1010,10 +1010,10 @@ function buildDispatchTransferTwiml(params: BuildDispatchTransferTwimlParams): s
 
   const dialActionUrl = joinUrl(
     baseUrl,
-    `/api/webhooks/twilio/dispatch-fallback?companyId=${encodeURIComponent(companyId)}&callId=${encodeURIComponent(callId)}${fallbackQs}`
+    `/api/webhooks/telnyx/dispatch-fallback?companyId=${encodeURIComponent(companyId)}&callId=${encodeURIComponent(callId)}${fallbackQs}`
   );
 
-  const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/twilio/recording-complete');
+  const recordingCompleteUrl = joinUrl(baseUrl, '/api/webhooks/telnyx/recording-complete');
   const wsBaseUrl = toWebSocketBaseUrl(baseUrl);
   const streamUrl = joinUrl(wsBaseUrl, `/api/media-streams/outbound?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
 
@@ -1033,7 +1033,7 @@ async function findCompanyByPhoneNumber(phoneNumber: string) {
   return result.rows.find((company: any) => normalizePhoneNumber(company.phone_number) === normalizedPhoneNumber) || null;
 }
 
-async function createOrUpdateTwilioCall(payload: any, companyId: string): Promise<string> {
+async function createOrUpdateTelnyxCall(payload: any, companyId: string): Promise<string> {
   const existingCall = await query(
     'SELECT id FROM calls WHERE call_sid = $1',
     [payload.CallSid]
@@ -1056,7 +1056,7 @@ async function createOrUpdateTwilioCall(payload: any, companyId: string): Promis
       callerNumber,
       'inbound',
       payload.CallStatus || 'initiated',
-      { to: payload.To || null, provider: 'twilio', callerPrivate: !callerNumber },
+      { to: payload.To || null, provider: 'telnyx', callerPrivate: !callerNumber },
     ]
   );
 
@@ -1409,9 +1409,9 @@ async function handleRecordingSaved(payload: any) {
 
 // ---------------------------------------------------------------------------
 // Offer B streaming call: recording complete callback
-// POST /api/webhooks/twilio/streaming-recording
+// POST /api/webhooks/telnyx/streaming-recording
 // ---------------------------------------------------------------------------
-router.post('/twilio/streaming-recording', async (req: Request, res: Response) => {
+router.post('/telnyx/streaming-recording', async (req: Request, res: Response) => {
   try {
     const callId = String(req.query.callId || '');
     const recordingSid = req.body?.RecordingSid;
@@ -1437,7 +1437,7 @@ router.post('/twilio/streaming-recording', async (req: Request, res: Response) =
 
       await query(
         `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-        [callId, 'twilio.streaming.recording.completed', { recordingUrl: fullUrl, recordingSid, recordingDuration }]
+        [callId, 'telnyx.streaming.recording.completed', { recordingUrl: fullUrl, recordingSid, recordingDuration }]
       );
 
       logger.info('Streaming recording saved', { callId, recordingUrl: fullUrl });
@@ -1452,9 +1452,9 @@ router.post('/twilio/streaming-recording', async (req: Request, res: Response) =
 
 // ---------------------------------------------------------------------------
 // Outbound call (agent-first): agent answered → now dial the client
-// GET/POST /api/webhooks/twilio/outbound-answer
+// GET/POST /api/webhooks/telnyx/outbound-answer
 // ---------------------------------------------------------------------------
-router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
+router.all('/telnyx/outbound-answer', async (req: Request, res: Response) => {
   try {
     const callId = String(req.query.callId || '');
     const destNumber = String(req.query.destNumber || '');
@@ -1481,10 +1481,10 @@ router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
     }
 
     const baseUrl = getBaseUrl(req);
-    const recordingCompleteUrl = joinUrl(baseUrl, `/api/webhooks/twilio/outbound-recording?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
+    const recordingCompleteUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/outbound-recording?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
     const wsBaseUrl = toWebSocketBaseUrl(baseUrl);
     const streamUrl = joinUrl(wsBaseUrl, `/api/media-streams/outbound?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
-    const clientEndUrl = joinUrl(baseUrl, `/api/webhooks/twilio/outbound-client-end?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
+    const clientEndUrl = joinUrl(baseUrl, `/api/webhooks/telnyx/outbound-client-end?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`);
 
     // Announce to the agent, then dial the client
     const twiml = buildTwiml(
@@ -1502,9 +1502,9 @@ router.all('/twilio/outbound-answer', async (req: Request, res: Response) => {
 
 // ---------------------------------------------------------------------------
 // Outbound call: client-side dial ended (no-answer, busy, completed…)
-// POST /api/webhooks/twilio/outbound-client-end
+// POST /api/webhooks/telnyx/outbound-client-end
 // ---------------------------------------------------------------------------
-router.all('/twilio/outbound-client-end', async (req: Request, res: Response) => {
+router.all('/telnyx/outbound-client-end', async (req: Request, res: Response) => {
   try {
     const callId = String(req.query.callId || '');
     const dialCallStatus = String(req.body?.DialCallStatus || '');
@@ -1537,9 +1537,9 @@ router.all('/twilio/outbound-client-end', async (req: Request, res: Response) =>
 
 // ---------------------------------------------------------------------------
 // Outbound call: status callback (ringing, no-answer, completed, etc.)
-// POST /api/webhooks/twilio/outbound-status
+// POST /api/webhooks/telnyx/outbound-status
 // ---------------------------------------------------------------------------
-router.post('/twilio/outbound-status', async (req: Request, res: Response) => {
+router.post('/telnyx/outbound-status', async (req: Request, res: Response) => {
   try {
     const callId = String(req.query.callId || '');
     const callStatus = String(req.body?.CallStatus || '');
@@ -1588,9 +1588,9 @@ router.post('/twilio/outbound-status', async (req: Request, res: Response) => {
 
 // ---------------------------------------------------------------------------
 // Outbound call: recording complete → transcribe + summarize
-// POST /api/webhooks/twilio/outbound-recording
+// POST /api/webhooks/telnyx/outbound-recording
 // ---------------------------------------------------------------------------
-router.post('/twilio/outbound-recording', async (req: Request, res: Response) => {
+router.post('/telnyx/outbound-recording', async (req: Request, res: Response) => {
   try {
     const callId = String(req.query.callId || '');
     const rawRecordingUrl = req.body?.RecordingUrl;

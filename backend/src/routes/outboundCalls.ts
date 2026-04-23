@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { getTwilioClient, getTwilioApiBase } from '../services/twilioClient';
+import { redirectTelnyxCall, hangupTelnyxCall } from '../services/telnyxClient';
 import axios from 'axios';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
@@ -57,15 +57,12 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
     const staff = staffResult.rows[0];
     const company = companyResult.rows[0];
 
-    if (!company.phone_number) throw new AppError('Company has no Twilio phone number configured', 400);
+    if (!company.phone_number) throw new AppError('Company has no phone number configured', 400);
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!accountSid || !authToken) throw new AppError('Twilio credentials not configured', 500);
-    const apiKeySid = (process.env.TWILIO_API_KEY_SID || '').trim() || undefined;
-    const apiKeySecret = (process.env.TWILIO_API_KEY_SECRET || '').trim() || undefined;
-    const region = (process.env.TWILIO_REGION || '').trim() || undefined;
-    const useApiKey = !!(region && apiKeySid && apiKeySecret);
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    if (!telnyxApiKey) throw new AppError('TELNYX_API_KEY not configured', 500);
+    const telnyxAppId = process.env.TELNYX_APP_ID;
+    if (!telnyxAppId) throw new AppError('TELNYX_APP_ID not configured (set it in Telnyx portal → TeXML Applications)', 500);
 
     const callRecord = await query(
       `INSERT INTO calls (company_id, caller_number, destination_number, direction, status, initiated_by_staff_id, metadata)
@@ -78,28 +75,28 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         'outbound',
         'initiated',
         staffId,
-        JSON.stringify({ staffName: `${staff.first_name} ${staff.last_name}`, provider: 'twilio' }),
+        JSON.stringify({ staffName: `${staff.first_name} ${staff.last_name}`, provider: 'telnyx' }),
       ]
     );
 
     const callId = callRecord.rows[0].id as string;
     const baseUrl = getBaseUrl(req);
 
-    // Agent-first flow: Receptio calls the agent first, then dials the client
+    // Agent-first flow: Telnyx calls the agent first, then dials the client
     // once the agent has picked up — the client never waits.
-    const answerUrl = `${baseUrl}/api/webhooks/twilio/outbound-answer?callId=${encodeURIComponent(callId)}&destNumber=${encodeURIComponent(destinationNumber)}&companyId=${encodeURIComponent(companyId)}`;
-    const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/outbound-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`;
+    const answerUrl = `${baseUrl}/api/webhooks/telnyx/outbound-answer?callId=${encodeURIComponent(callId)}&destNumber=${encodeURIComponent(destinationNumber)}&companyId=${encodeURIComponent(companyId)}`;
+    const statusCallbackUrl = `${baseUrl}/api/webhooks/telnyx/outbound-status?callId=${encodeURIComponent(callId)}&companyId=${encodeURIComponent(companyId)}`;
 
-    const callsUrl = `${getTwilioApiBase()}/2010-04-01/Accounts/${accountSid}/Calls.json`;
+    const callsUrl = `https://api.telnyx.com/v2/texml/calls/${telnyxAppId}`;
 
-    logger.info('Outbound call: creating Twilio call via REST', {
+    logger.info('Outbound call: creating Telnyx call via TeXML REST', {
       from: company.phone_number,
       to: staff.phone_number,
       callsUrl,
       answerUrl,
     });
 
-    let twilioSid: string;
+    let telnyxSid: string;
     try {
       const params = new URLSearchParams({
         To: staff.phone_number,
@@ -107,54 +104,41 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response, next
         Url: answerUrl,
         StatusCallback: statusCallbackUrl,
         StatusCallbackMethod: 'POST',
-        'StatusCallbackEvent[0]': 'initiated',
-        'StatusCallbackEvent[1]': 'ringing',
-        'StatusCallbackEvent[2]': 'answered',
-        'StatusCallbackEvent[3]': 'completed',
-        'StatusCallbackEvent[4]': 'no-answer',
-        'StatusCallbackEvent[5]': 'busy',
-        'StatusCallbackEvent[6]': 'failed',
       });
-      const twilioRes = await axios.post(callsUrl, params.toString(), {
-        auth: useApiKey
-          ? { username: apiKeySid!, password: apiKeySecret! }
-          : { username: accountSid, password: authToken },
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      const telnyxRes = await axios.post(callsUrl, params.toString(), {
+        headers: {
+          Authorization: `Bearer ${telnyxApiKey}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
       });
-      twilioSid = twilioRes.data.sid;
-    } catch (twilioErr: any) {
-      const status = twilioErr.response?.status;
-      const twilioCode = twilioErr.response?.data?.code;
-      const twilioMsg = twilioErr.response?.data?.message || twilioErr.message;
-      logger.error('Twilio call creation failed', { callsUrl, status, twilioCode, twilioMsg, data: twilioErr.response?.data });
-      if (status === 401 || twilioCode === 20003) {
-        throw new AppError(
-          `Authentification Twilio refusée (${callsUrl}) — vérifiez TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN et TWILIO_REGION`,
-          500
-        );
+      telnyxSid = telnyxRes.data.sid || telnyxRes.data.call_control_id || telnyxRes.data.CallSid;
+    } catch (telnyxErr: any) {
+      const status = telnyxErr.response?.status;
+      const errData = telnyxErr.response?.data;
+      const errMsg = errData?.errors?.[0]?.detail || errData?.message || telnyxErr.message;
+      logger.error('Telnyx call creation failed', { callsUrl, status, errMsg, data: errData });
+      if (status === 401 || status === 403) {
+        throw new AppError(`Authentification Telnyx refusée — vérifiez TELNYX_API_KEY`, 500);
       }
-      if (twilioCode === 21211 || twilioCode === 21214) {
-        throw new AppError(`Numéro de destination invalide : ${destinationNumber}`, 400);
+      if (status === 422) {
+        throw new AppError(`Numéro ou paramètre invalide : ${errMsg}`, 400);
       }
-      if (twilioCode === 21606) {
-        throw new AppError(`Le numéro émetteur ${company.phone_number} n'est pas autorisé pour les appels sortants`, 400);
-      }
-      throw new AppError(`Erreur Twilio (${twilioCode ?? status ?? 'inconnu'}) : ${twilioMsg}`, 500);
+      throw new AppError(`Erreur Telnyx (${status ?? 'inconnu'}) : ${errMsg}`, 500);
     }
 
     await query(
       `UPDATE calls SET call_sid = $1, outbound_call_sid = $1 WHERE id = $2`,
-      [twilioSid, callId]
+      [telnyxSid, callId]
     );
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-      [callId, 'outbound.initiated', { twilioCallSid: twilioSid, staffId, destinationNumber }]
+      [callId, 'outbound.initiated', { telnyxCallSid: telnyxSid, staffId, destinationNumber }]
     );
 
-    logger.info('Outbound call initiated', { callId, twilioSid, destinationNumber, staffId });
+    logger.info('Outbound call initiated', { callId, telnyxSid, destinationNumber, staffId });
 
-    res.status(201).json({ callId, callSid: twilioSid, status: 'initiated' });
+    res.status(201).json({ callId, callSid: telnyxSid, status: 'initiated' });
   } catch (error) {
     next(error);
   }
@@ -267,14 +251,10 @@ router.post('/:id/transfer', authenticateToken, async (req: AuthRequest, res: Re
     if (!callSid) throw new AppError('No active call SID found', 400);
     if (!['answered', 'in-progress'].includes(status)) throw new AppError('Call is not active', 400);
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    if (!accountSid || !authToken) throw new AppError('Twilio credentials not configured', 500);
-
-    const client = getTwilioClient();
-    await client.calls(callSid).update({
-      twiml: `<Response><Say language="fr-FR">Nous vous transférons vers un autre collaborateur. Veuillez patienter.</Say><Dial><Number>${staff.phone_number}</Number></Dial></Response>`,
-    });
+    await redirectTelnyxCall(
+      callSid,
+      `<Response><Say language="fr-FR">Nous vous transférons vers un autre collaborateur. Veuillez patienter.</Say><Dial><Number>${staff.phone_number}</Number></Dial></Response>`
+    );
 
     await query(
       `UPDATE calls SET initiated_by_staff_id = $1, metadata = metadata || $2 WHERE id = $3`,
@@ -315,15 +295,10 @@ router.post('/:id/hangup', authenticateToken, async (req: AuthRequest, res: Resp
     const { call_sid: callSid } = callResult.rows[0];
 
     if (callSid) {
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      if (accountSid && authToken) {
-        try {
-          const client = getTwilioClient();
-          await client.calls(callSid).update({ status: 'completed' });
-        } catch (e: any) {
-          logger.warn('Twilio hangup error (may already be completed)', { callId: id, error: e.message });
-        }
+      try {
+        await hangupTelnyxCall(callSid);
+      } catch (e: any) {
+        logger.warn('Telnyx hangup error (may already be completed)', { callId: id, error: e.message });
       }
     }
 

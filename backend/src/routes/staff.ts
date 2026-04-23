@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { getTwilioClient } from '../services/twilioClient';
+import axios from 'axios';
+import { getTelnyxApiKey } from '../services/telnyxClient';
 import { query } from '../config/database';
 import { authenticateToken } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -172,32 +173,42 @@ router.post('/:staffId/call/:callId', authenticateToken, async (req: AuthRequest
     if (companyResult.rows.length === 0) throw new AppError('Company not found', 404);
     const company = companyResult.rows[0];
     const fromNumber = company.phone_number;
-    if (!fromNumber) throw new AppError('Company has no Twilio phone number configured', 400);
+    if (!fromNumber) throw new AppError('Company has no phone number configured', 400);
+
+    const telnyxApiKey = getTelnyxApiKey();
+    const telnyxAppId = process.env.TELNYX_APP_ID;
+    if (!telnyxAppId) throw new AppError('TELNYX_APP_ID not configured', 500);
 
     const baseUrl = getBaseUrl(req);
-    const transferUrl = `${baseUrl}/api/webhooks/twilio/transfer?staffPhone=${encodeURIComponent(staffMember.phone_number)}`;
+    const transferUrl = `${baseUrl}/api/webhooks/telnyx/transfer?staffPhone=${encodeURIComponent(staffMember.phone_number)}`;
     const voicemailMessage = staffMember.voicemail_message ||
       `Bonjour, ${staffMember.first_name} ${staffMember.last_name} de ${company.name} a essayé de vous joindre. N'hésitez pas à nous recontacter.`;
-    const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/call-status?callId=${callId}&staffId=${staffId}&voicemailMessage=${encodeURIComponent(voicemailMessage)}`;
+    const statusCallbackUrl = `${baseUrl}/api/webhooks/telnyx/call-status?callId=${callId}&staffId=${staffId}&voicemailMessage=${encodeURIComponent(voicemailMessage)}`;
 
-    const client = getTwilioClient();
-    const call = await client.calls.create({
-      to: callerNumber,
-      from: fromNumber,
-      url: transferUrl,
-      statusCallback: statusCallbackUrl,
-      statusCallbackMethod: 'POST',
-      statusCallbackEvent: ['no-answer', 'busy', 'failed'],
+    const callsUrl = `https://api.telnyx.com/v2/texml/calls/${telnyxAppId}`;
+    const params = new URLSearchParams({
+      To: callerNumber,
+      From: fromNumber,
+      Url: transferUrl,
+      StatusCallback: statusCallbackUrl,
+      StatusCallbackMethod: 'POST',
     });
+    const telnyxRes = await axios.post(callsUrl, params.toString(), {
+      headers: {
+        Authorization: `Bearer ${telnyxApiKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+    const callSid = telnyxRes.data.sid || telnyxRes.data.call_control_id || telnyxRes.data.CallSid;
 
-    logger.info('Outbound call initiated', { callSid: call.sid, to: callerNumber, staffId, callId });
+    logger.info('Outbound call initiated', { callSid, to: callerNumber, staffId, callId });
 
     await query(
       `INSERT INTO call_events (call_id, event_type, data) VALUES ($1, $2, $3)`,
-      [callId, 'click_to_call.initiated', { outboundCallSid: call.sid, staffId, staffName: `${staffMember.first_name} ${staffMember.last_name}` }]
+      [callId, 'click_to_call.initiated', { outboundCallSid: callSid, staffId, staffName: `${staffMember.first_name} ${staffMember.last_name}` }]
     );
 
-    res.json({ message: 'Call initiated', callSid: call.sid });
+    res.json({ message: 'Call initiated', callSid });
   } catch (error) {
     next(error);
   }
