@@ -206,3 +206,51 @@ export function newConditionId(): string {
 export function newFallbackId(): string {
   return `fb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
+
+export function newNodeId(): string {
+  return `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// ─── Flow builder — types des nœuds ──────────────────────────────────────────
+
+export interface FlowNodeData_Condition {
+  label: string;
+  condition: Condition;
+}
+export interface FlowNodeData_Action {
+  label: string;
+  action: LeafAction;
+}
+export interface FlowNodeData_End {
+  label?: string;
+}
+
+export interface DispatchFlowNode {
+  id: string;
+  type: 'entry' | 'condition' | 'action' | 'end';
+  position: { x: number; y: number };
+  data: FlowNodeData_Condition | FlowNodeData_Action | FlowNodeData_End | Record<string, never>;
+}
+
+export interface DispatchFlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: 'yes' | 'no' | 'out' | null;
+}
+
+export interface DispatchFlowData {
+  nodes: DispatchFlowNode[];
+  edges: DispatchFlowEdge[];
+}
+
+// Valeurs par défaut par type de condition / action pour la palette
+export const DEFAULT_CONDITIONS: Record<ConditionType, Condition> = {
+  always:             { id: '', type: 'always' },
+  schedule:           { id: '', type: 'schedule', days: ['monday','tuesday','wednesday','thursday','friday'], time_start: '09:00', time_end: '18:00' },
+  holiday:            { id: '', type: 'holiday', country: 'BE', match: 'on_holiday' },
+  language:           { id: '', type: 'language', languages: ['fr'] },
+  caller_number:      { id: '', type: 'caller_number', mode: 'starts_with', patterns: [] },
+  intent:             { id: '', type: 'intent', intents: [], match_mode: 'any' },
+  agent_availability: { id: '', type: 'agent_availability', group_id: '', check: 'any_available' },
+};

@@ -172,6 +172,47 @@ export interface DispatchRule {
   updated_at: string;
 }
 
+// ─── Flow builder — nœuds et arêtes ──────────────────────────────────────
+
+export type LeafAction =
+  | RouteGroupAction | RouteAgentAction | RouteExternalAction
+  | PlayMessageAction | VoicemailAction;
+
+export interface FlowNodeData_Condition {
+  label: string;
+  condition: Condition;
+}
+export interface FlowNodeData_Action {
+  label: string;
+  action: LeafAction;
+}
+export interface FlowNodeData_End {
+  label?: string;
+}
+
+export interface FlowNode {
+  id: string;
+  type: 'entry' | 'condition' | 'action' | 'end';
+  position: { x: number; y: number };
+  data: FlowNodeData_Condition | FlowNodeData_Action | FlowNodeData_End | Record<string, never>;
+}
+
+export interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle: 'yes' | 'no' | 'out' | null;
+}
+
+export interface DispatchFlow {
+  id: string;
+  company_id: string;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Contexte d'appel (pour l'évaluation des conditions) ──────────────────
 export interface CallContext {
   companyId: string;

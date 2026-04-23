@@ -1,83 +1,91 @@
-import { useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import ReactFlow, {
   Node, Edge, Controls, Background, BackgroundVariant,
-  useNodesState, useEdgesState, MarkerType, NodeProps,
-  Handle, Position, Panel, MiniMap,
+  useNodesState, useEdgesState, addEdge, Connection,
+  MarkerType, NodeProps, Handle, Position, Panel,
+  MiniMap, useReactFlow, ReactFlowProvider, NodeChange,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import {
-  Phone, ChevronDown, Clock, Calendar, Globe, Hash,
-  Zap, Users, User, PhoneCall, MessageSquare, Voicemail,
-  ArrowRight, GitBranch, RefreshCw, Shuffle, Play, AlignJustify,
+  Phone, Clock, Calendar, Globe, Hash, Zap, Users, User,
+  PhoneCall, MessageSquare, Voicemail, GitBranch, RefreshCw,
+  Shuffle, AlignJustify, X, Trash2, Check, ArrowRight,
+  Plus, ChevronUp, ChevronDown, GripVertical,
 } from 'lucide-react';
 import type {
-  DispatchRule, Condition, Action, FallbackStep,
-  DistributionStrategy, RouteConditionalAction,
+  Condition, ConditionType, LeafAction, ActionType,
+  FlowNodeData_Condition, FlowNodeData_Action, FlowNodeData_End,
+  DistributionStrategy, RetryConfig,
+  RouteGroupAction, RouteAgentAction, RouteExternalAction,
+  PlayMessageAction, VoicemailAction,
+  ScheduleCondition, HolidayCondition, LanguageCondition,
+  CallerNumberCondition, IntentCondition, AgentAvailabilityCondition,
 } from '../types/dispatch';
 import {
-  STRATEGY_LABELS,
-  DAYS_SHORT, COUNTRY_LABELS,
+  CONDITION_LABELS, ACTION_LABELS, STRATEGY_LABELS, COUNTRY_LABELS,
+  DAYS_FR, DAYS_SHORT, DEFAULT_RETRY, DEFAULT_VOICEMAIL,
+  newConditionId, newNodeId, DEFAULT_CONDITIONS,
 } from '../types/dispatch';
 
-// ─── Props du composant ───────────────────────────────────────────────────────
+// ─── Props ────────────────────────────────────────────────────────────────────
 
-interface Props {
-  rules: DispatchRule[];
-  groups: { id: string; name: string; role?: string | null }[];
-  staff: { id: string; first_name: string; last_name: string; role: string }[];
-  onRuleClick: (rule: DispatchRule) => void;
-  onCreateRule: () => void;
-  onDeleteRule: (id: string) => void;
-  onUpdatePositions: (
-    updates: { id: string; node_positions: Record<string, { x: number; y: number }> }[]
-  ) => void;
+export interface StaffGroup {
+  id: string; name: string; role?: string | null;
+  members: { id: string; first_name: string; last_name: string; role: string; enabled: boolean }[];
+}
+export interface StaffMember {
+  id: string; first_name: string; last_name: string; role: string; enabled: boolean;
 }
 
-// ─── Couleurs de la palette ───────────────────────────────────────────────────
+interface Props {
+  groups: StaffGroup[];
+  staff: StaffMember[];
+  nodes: Node[];
+  edges: Edge[];
+  onSave: (nodes: Node[], edges: Edge[]) => Promise<void>;
+  saving?: boolean;
+}
+
+// ─── Couleurs ─────────────────────────────────────────────────────────────────
 
 const C = {
-  navy:    '#344453',
-  orange:  '#C7601D',
-  green:   '#2D9D78',
-  yellow:  '#E6A817',
-  red:     '#D94052',
-  bg:      '#F8F9FB',
-  border:  'rgba(52,68,83,0.12)',
+  navy:   '#141F28',
+  orange: '#C7601D',
+  green:  '#16A34A',
+  red:    '#DC2626',
+  grey:   '#64748B',
+  border: 'rgba(52,68,83,0.12)',
+  bg:     '#F8F9FB',
 };
 
-// ─── Icônes par type de condition ─────────────────────────────────────────────
+// ─── Icônes ───────────────────────────────────────────────────────────────────
 
-function CondIcon({ type }: { type: Condition['type'] }) {
-  const cls = 'h-3 w-3 shrink-0';
+function CondIcon({ type }: { type: ConditionType }) {
+  const cls = 'h-3.5 w-3.5 shrink-0';
   switch (type) {
+    case 'always':             return <ArrowRight className={cls} />;
     case 'schedule':           return <Clock className={cls} />;
     case 'holiday':            return <Calendar className={cls} />;
     case 'language':           return <Globe className={cls} />;
     case 'caller_number':      return <Hash className={cls} />;
     case 'intent':             return <Zap className={cls} />;
     case 'agent_availability': return <Users className={cls} />;
-    default:                   return <AlignJustify className={cls} />;
   }
 }
 
-// ─── Icônes par type d'action ─────────────────────────────────────────────────
-
-function ActionIcon({ type }: { type: Action['type'] }) {
-  const cls = 'h-4 w-4 shrink-0';
+function ActionIcon({ type }: { type: LeafAction['type'] }) {
+  const cls = 'h-3.5 w-3.5 shrink-0';
   switch (type) {
-    case 'route_group':       return <Users className={cls} />;
-    case 'route_agent':       return <User className={cls} />;
-    case 'route_external':    return <PhoneCall className={cls} />;
-    case 'play_message':      return <MessageSquare className={cls} />;
-    case 'voicemail':         return <Voicemail className={cls} />;
-    case 'route_conditional': return <GitBranch className={cls} />;
+    case 'route_group':    return <Users className={cls} />;
+    case 'route_agent':    return <User className={cls} />;
+    case 'route_external': return <PhoneCall className={cls} />;
+    case 'play_message':   return <MessageSquare className={cls} />;
+    case 'voicemail':      return <Voicemail className={cls} />;
   }
 }
-
-// ─── Icône de stratégie de distribution ──────────────────────────────────────
 
 function StratIcon({ strategy }: { strategy: DistributionStrategy }) {
-  const cls = 'h-3 w-3 shrink-0';
+  const cls = 'h-3 w-3';
   switch (strategy) {
     case 'sequential':   return <AlignJustify className={cls} />;
     case 'simultaneous': return <GitBranch className={cls} />;
@@ -86,537 +94,908 @@ function StratIcon({ strategy }: { strategy: DistributionStrategy }) {
   }
 }
 
-// ─── Résumé d'une condition en langage naturel ────────────────────────────────
+// ─── Résumés ──────────────────────────────────────────────────────────────────
 
-function conditionSummary(cond: Condition): string {
+function condSummary(cond: Condition): string {
   switch (cond.type) {
-    case 'always': return 'Toujours';
+    case 'always': return 'Toujours actif';
     case 'schedule': {
       const days = cond.days.map(d => DAYS_SHORT[d] ?? d).join(' ');
       return `${days} · ${cond.time_start}–${cond.time_end}`;
     }
     case 'holiday':
       return cond.match === 'on_holiday'
-        ? `Jour férié ${COUNTRY_LABELS[cond.country] ?? cond.country}`
-        : `Hors jours fériés ${COUNTRY_LABELS[cond.country] ?? cond.country}`;
-    case 'language':
-      return `Langue : ${cond.languages.join(', ').toUpperCase()}`;
-    case 'caller_number':
-      return `N° appelant (${cond.patterns.slice(0, 2).join(', ')}${cond.patterns.length > 2 ? '…' : ''})`;
-    case 'intent':
-      return `IA : ${cond.intents.slice(0, 3).join(', ')}${cond.intents.length > 3 ? '…' : ''}`;
-    case 'agent_availability':
-      return cond.check === 'any_available' ? 'Si agents disponibles' : 'Si aucun agent dispo';
+        ? `Jour férié (${COUNTRY_LABELS[cond.country] ?? cond.country})`
+        : `Hors jours fériés (${COUNTRY_LABELS[cond.country] ?? cond.country})`;
+    case 'language': return `Langue : ${cond.languages.join(', ').toUpperCase()}`;
+    case 'caller_number': return `N° : ${cond.patterns.slice(0,2).join(', ')}${cond.patterns.length > 2 ? '…' : ''}`;
+    case 'intent': return `IA : ${cond.intents.slice(0,3).join(', ')}${cond.intents.length > 3 ? '…' : ''}`;
+    case 'agent_availability': return cond.check === 'any_available' ? 'Si agents dispo' : 'Si aucun dispo';
   }
 }
 
-// ─── Résumé de l'action principale ───────────────────────────────────────────
-
-function actionSummary(
-  action: Action,
-  groups: Props['groups'],
-  staff: Props['staff'],
-): string {
+function actionSummary(action: LeafAction, groups: StaffGroup[], staff: StaffMember[]): string {
   switch (action.type) {
     case 'route_group': {
-      const grp = groups.find(g => g.id === action.group_id);
-      const name = grp ? grp.name : 'Groupe';
-      const strat = STRATEGY_LABELS[action.distribution_strategy]?.label ?? action.distribution_strategy;
-      const max = action.retry.max_attempts;
-      const attempts = max === 0 ? '∞ essais' : `${max} essai${max > 1 ? 's' : ''}`;
-      return `${name} · ${strat} · ${attempts}`;
+      const g = groups.find(x => x.id === action.group_id);
+      const strat = STRATEGY_LABELS[action.distribution_strategy]?.label ?? '';
+      return g ? `${g.name} · ${strat}` : 'Groupe non défini';
     }
     case 'route_agent': {
       const s = staff.find(x => x.id === action.agent_id);
-      return s ? `${s.first_name} ${s.last_name}` : 'Agent';
+      return s ? `${s.first_name} ${s.last_name}` : 'Agent non défini';
     }
-    case 'route_external':
-      return action.label ?? action.phone_number;
-    case 'play_message':
-      return `"${action.message_text.slice(0, 40)}${action.message_text.length > 40 ? '…' : ''}"`;
-    case 'voicemail':
-      return 'Messagerie vocale';
-    case 'route_conditional': {
-      const rc = action as RouteConditionalAction;
-      return `${rc.branches.length} branche${rc.branches.length > 1 ? 's' : ''} conditionnelle${rc.branches.length > 1 ? 's' : ''}`;
-    }
+    case 'route_external': return action.label || action.phone_number || '—';
+    case 'play_message':   return `"${action.message_text.slice(0, 35)}${action.message_text.length > 35 ? '…' : ''}"`;
+    case 'voicemail':      return 'Messagerie vocale';
   }
 }
 
-// ─── Nœud : Appel entrant ────────────────────────────────────────────────────
+// ─── Nœud : Entrée ───────────────────────────────────────────────────────────
 
-function StartNode() {
+function EntryNode() {
   return (
-    <div
-      style={{ background: C.navy, borderRadius: 20 }}
-      className="flex items-center gap-3 px-5 py-3.5 shadow-lg"
-    >
+    <div style={{ background: C.navy, borderRadius: 20 }}
+      className="flex items-center gap-3 px-5 py-3.5 shadow-lg select-none">
       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
         <Phone className="h-4 w-4 text-white" />
       </div>
       <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-white/50">Entrée</p>
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/50">Entrée</p>
         <p className="text-sm font-bold text-white">Appel entrant</p>
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ background: C.navy, border: '2px solid white' }} />
+      <Handle type="source" id="out" position={Position.Bottom}
+        style={{ background: C.navy, border: '2px solid white', width: 10, height: 10 }} />
     </div>
   );
 }
 
-// ─── Nœud : Règle de dispatch ─────────────────────────────────────────────────
+// ─── Nœud : Condition ─────────────────────────────────────────────────────────
 
-interface RuleNodeData {
-  rule: DispatchRule;
-  groups: Props['groups'];
-  staff: Props['staff'];
-  onClick: (rule: DispatchRule) => void;
-  isLast: boolean;
-}
-
-function RuleNode({ data }: NodeProps<RuleNodeData>) {
-  const { rule, groups, staff, onClick, isLast } = data;
-
-  const opColor = rule.condition_operator === 'ALWAYS' ? C.green
-    : rule.condition_operator === 'OR' ? C.yellow
-    : C.orange;
-
-  const opLabel = rule.condition_operator === 'ALWAYS' ? 'TOUJOURS'
-    : rule.condition_operator === 'OR' ? 'OU'
-    : 'ET';
-
+function ConditionNode({ data, selected }: NodeProps<FlowNodeData_Condition>) {
+  const { condition, label } = data;
   return (
-    <div
-      className="relative cursor-pointer transition-all"
-      onClick={() => onClick(rule)}
-      style={{
-        width: 310,
-        background: 'white',
-        borderRadius: 20,
-        border: `1.5px solid ${rule.enabled ? C.border : 'rgba(52,68,83,0.06)'}`,
-        boxShadow: rule.enabled
-          ? '0 4px 24px rgba(52,68,83,0.10), 0 1px 4px rgba(52,68,83,0.06)'
-          : '0 2px 8px rgba(52,68,83,0.04)',
-        opacity: rule.enabled ? 1 : 0.55,
-      }}
-    >
-      {/* ─── Bordure gauche colorée selon priorité ─────────────────────────── */}
-      <div
-        style={{
-          position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
-          background: rule.enabled ? C.orange : C.border,
-          borderRadius: '20px 0 0 20px',
-        }}
-      />
+    <div style={{
+      width: 260,
+      background: 'white',
+      borderRadius: 16,
+      border: `2px solid ${selected ? C.orange : C.border}`,
+      boxShadow: selected
+        ? `0 0 0 3px ${C.orange}25, 0 4px 20px rgba(52,68,83,0.12)`
+        : '0 2px 12px rgba(52,68,83,0.08)',
+    }}>
+      {/* Bande colorée gauche */}
+      <div style={{ position:'absolute', left:0, top:0, bottom:0, width:4, background: C.orange, borderRadius:'16px 0 0 16px' }} />
 
-      {/* ─── En-tête ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 pt-3.5 pb-2.5" style={{ paddingLeft: 20 }}>
-        <span
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-          style={{ background: rule.enabled ? C.orange : C.navy + '40', fontSize: 10 }}
-        >
-          {rule.priority + 1}
-        </span>
-        <p className="flex-1 truncate text-sm font-semibold text-[#141F28]">{rule.name}</p>
-        {!rule.enabled && (
-          <span
-            className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-            style={{ background: 'rgba(52,68,83,0.08)', color: C.navy + '80' }}
-          >
-            off
-          </span>
-        )}
-      </div>
+      <Handle type="target" id="in" position={Position.Top}
+        style={{ background: C.grey, border: '2px solid white', width: 10, height: 10 }} />
 
-      {/* ─── Conditions ─────────────────────────────────────────────────────── */}
-      <div className="px-4 pb-3" style={{ paddingLeft: 20 }}>
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <span
-            className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest"
-            style={{ background: opColor + '18', color: opColor }}
-          >
-            {opLabel}
+      <div className="px-4 py-3" style={{ paddingLeft: 20 }}>
+        {/* Badge type */}
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+            style={{ background: C.orange + '15', color: C.orange }}>
+            <CondIcon type={condition.type} />
+            {CONDITION_LABELS[condition.type]}
           </span>
         </div>
-
-        {rule.conditions.length === 0 ? (
-          <p className="text-xs text-[#344453]/35 italic">Aucune condition définie</p>
-        ) : (
-          <div className="flex flex-wrap gap-1">
-            {rule.conditions.slice(0, 4).map(cond => (
-              <span
-                key={cond.id}
-                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-                style={{ background: C.bg, color: C.navy, border: `1px solid ${C.border}` }}
-              >
-                <CondIcon type={cond.type} />
-                {conditionSummary(cond)}
-              </span>
-            ))}
-            {rule.conditions.length > 4 && (
-              <span className="text-[10px] text-[#344453]/40">+{rule.conditions.length - 4}</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ─── Séparateur ─────────────────────────────────────────────────────── */}
-      <div style={{ height: 1, background: 'rgba(52,68,83,0.07)', marginLeft: 20 }} />
-
-      {/* ─── Action principale ───────────────────────────────────────────────── */}
-      <div className="px-4 py-3" style={{ paddingLeft: 20 }}>
-        <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-widest text-[#344453]/40">
-          Action
+        {/* Libellé */}
+        <p className="text-xs font-semibold text-[#141F28] leading-tight">
+          {label || CONDITION_LABELS[condition.type]}
         </p>
-
-        {rule.action.type === 'route_conditional' ? (
-          /* Dispatch conditionnel : afficher les branches */
-          <div className="space-y-1">
-            {(rule.action as RouteConditionalAction).branches.slice(0, 3).map((branch, i) => (
-              <div key={branch.id} className="flex items-center gap-2">
-                <span
-                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold text-white"
-                  style={{ background: C.orange }}
-                >{i + 1}</span>
-                <span className="truncate text-[10px] text-[#344453]/60">
-                  {branch.label || conditionSummary(branch.condition)}
-                </span>
-                <ArrowRight className="h-2.5 w-2.5 shrink-0 text-[#344453]/25" />
-                <ActionIcon type={branch.action.type} />
-              </div>
-            ))}
-            {(rule.action as RouteConditionalAction).branches.length > 3 && (
-              <p className="text-[10px] text-[#344453]/35 pl-5">
-                +{(rule.action as RouteConditionalAction).branches.length - 3} autre{(rule.action as RouteConditionalAction).branches.length - 3 > 1 ? 's' : ''}
-              </p>
-            )}
-            <div className="flex items-center gap-2 pt-0.5 border-t border-[#344453]/6 mt-1">
-              <span className="text-[10px] text-[#344453]/35 italic">Par défaut :</span>
-              <ActionIcon type={(rule.action as RouteConditionalAction).default_action.type} />
-            </div>
-          </div>
-        ) : (
-          /* Action simple */
-          <div className="flex items-center gap-2">
-            <div
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl"
-              style={{ background: C.orange + '15', color: C.orange }}
-            >
-              <ActionIcon type={rule.action.type} />
-            </div>
-            <p className="text-xs font-medium text-[#141F28] leading-tight">
-              {actionSummary(rule.action, groups, staff)}
-            </p>
-            {rule.action.type === 'route_group' && (
-              <div
-                className="ml-auto flex items-center gap-0.5 shrink-0 rounded-full px-1.5 py-0.5"
-                style={{ background: C.bg, border: `1px solid ${C.border}` }}
-              >
-                <StratIcon strategy={rule.action.distribution_strategy} />
-                <span className="text-[9px] text-[#344453]/55 ml-0.5">
-                  {STRATEGY_LABELS[rule.action.distribution_strategy]?.label}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Résumé */}
+        <p className="mt-0.5 text-[10px] text-[#344453]/55 leading-tight">
+          {condSummary(condition)}
+        </p>
       </div>
 
-      {/* ─── Chaîne de fallback (si définie) ───────────────────────────────── */}
-      {rule.fallback_chain.length > 0 && (
-        <>
-          <div style={{ height: 1, background: 'rgba(52,68,83,0.07)', marginLeft: 20 }} />
-          <div className="px-4 py-2.5" style={{ paddingLeft: 20 }}>
-            <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-widest text-[#344453]/40">
-              Si échec
-            </p>
-            <div className="space-y-1">
-              {rule.fallback_chain.slice(0, 3).map((step: FallbackStep, i) => (
-                <div key={step.id} className="flex items-center gap-2">
-                  <span className="text-[10px] text-[#344453]/30 w-3 shrink-0">{i + 1}.</span>
-                  <ActionIcon type={step.action.type} />
-                  <span className="text-[10px] text-[#344453]/65 truncate">{step.label}</span>
-                </div>
-              ))}
-              {rule.fallback_chain.length > 3 && (
-                <p className="text-[10px] text-[#344453]/35 pl-5">
-                  +{rule.fallback_chain.length - 3} étape{rule.fallback_chain.length - 3 > 1 ? 's' : ''}
-                </p>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+      {/* Handles YES / NO */}
+      <div className="flex justify-between px-4 pb-2.5" style={{ paddingLeft: 20 }}>
+        <span className="text-[9px] font-bold text-green-600">OUI</span>
+        <span className="text-[9px] font-bold text-red-500">NON</span>
+      </div>
 
-      {/* ─── Handles React Flow ─────────────────────────────────────────────── */}
-      <Handle type="target" position={Position.Top}
-        style={{ background: C.navy, border: '2px solid white', width: 10, height: 10 }} />
-      {!isLast && (
-        <Handle type="source" position={Position.Bottom}
-          style={{ background: C.navy, border: '2px solid white', width: 10, height: 10 }} />
-      )}
+      <Handle type="source" id="yes" position={Position.Bottom}
+        style={{ left: '28%', background: C.green, border: '2px solid white', width: 10, height: 10 }} />
+      <Handle type="source" id="no" position={Position.Bottom}
+        style={{ left: '72%', background: C.red, border: '2px solid white', width: 10, height: 10 }} />
     </div>
   );
 }
 
-// ─── Nœud : Fin de flux (aucune règle) ───────────────────────────────────────
+// ─── Nœud : Action ───────────────────────────────────────────────────────────
 
-function EndNode() {
+function ActionNode({ data, selected }: NodeProps<FlowNodeData_Action & { groups: StaffGroup[]; staff: StaffMember[] }>) {
+  const { action, label, groups = [], staff = [] } = data;
   return (
-    <div
-      style={{
-        borderRadius: 16, border: `2px dashed ${C.red}40`,
-        background: C.red + '06', padding: '12px 20px',
-      }}
-      className="flex items-center gap-3"
-    >
-      <Handle type="target" position={Position.Top}
+    <div style={{
+      width: 260,
+      background: 'white',
+      borderRadius: 16,
+      border: `2px solid ${selected ? C.navy : C.border}`,
+      boxShadow: selected
+        ? `0 0 0 3px ${C.navy}20, 0 4px 20px rgba(52,68,83,0.12)`
+        : '0 2px 12px rgba(52,68,83,0.08)',
+    }}>
+      <div style={{ position:'absolute', left:0, top:0, bottom:0, width:4, background: C.navy, borderRadius:'16px 0 0 16px' }} />
+
+      <Handle type="target" id="in" position={Position.Top}
+        style={{ background: C.grey, border: '2px solid white', width: 10, height: 10 }} />
+
+      <div className="px-4 py-3" style={{ paddingLeft: 20 }}>
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+            style={{ background: C.navy + '12', color: C.navy }}>
+            <ActionIcon type={action.type} />
+            {ACTION_LABELS[action.type]}
+          </span>
+          {action.type === 'route_group' && (
+            <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px]"
+              style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.grey }}>
+              <StratIcon strategy={action.distribution_strategy} />
+              {STRATEGY_LABELS[action.distribution_strategy]?.label}
+            </span>
+          )}
+        </div>
+        <p className="text-xs font-semibold text-[#141F28]">
+          {label || ACTION_LABELS[action.type]}
+        </p>
+        <p className="mt-0.5 text-[10px] text-[#344453]/55">
+          {actionSummary(action, groups, staff)}
+        </p>
+        {action.type === 'route_group' && (
+          <p className="mt-0.5 text-[9px] text-[#344453]/40">
+            {action.retry.max_attempts === 0 ? '∞' : action.retry.max_attempts} essai{action.retry.max_attempts !== 1 ? 's' : ''} · {action.retry.ring_duration}s
+          </p>
+        )}
+      </div>
+
+      <div className="px-4 pb-2.5 text-center" style={{ paddingLeft: 20 }}>
+        <span className="text-[9px] font-bold text-[#344453]/35">SI ÉCHEC →</span>
+      </div>
+
+      <Handle type="source" id="out" position={Position.Bottom}
+        style={{ background: C.grey, border: '2px solid white', width: 10, height: 10 }} />
+    </div>
+  );
+}
+
+// ─── Nœud : Fin de flux ───────────────────────────────────────────────────────
+
+function EndNode({ data }: NodeProps<FlowNodeData_End>) {
+  return (
+    <div style={{
+      borderRadius: 14, border: `2px dashed ${C.red}50`,
+      background: C.red + '06', padding: '10px 18px', minWidth: 160,
+    }} className="flex items-center gap-2.5">
+      <Handle type="target" id="in" position={Position.Top}
         style={{ background: C.red, border: '2px solid white' }} />
       <Voicemail className="h-4 w-4 shrink-0" style={{ color: C.red }} />
       <div>
-        <p className="text-xs font-semibold" style={{ color: C.red }}>Aucune règle applicable</p>
-        <p className="text-[10px] text-[#344453]/40">Messagerie vocale par défaut</p>
+        <p className="text-[10px] font-semibold text-[#344453]/50">Fin de flux</p>
+        <p className="text-xs font-medium text-[#344453]/70">{data.label || 'Aucune correspondance'}</p>
       </div>
     </div>
   );
 }
 
-// ─── Nœud : Bouton d'ajout de règle ──────────────────────────────────────────
+const nodeTypes = {
+  entry:     EntryNode,
+  condition: ConditionNode,
+  action:    ActionNode,
+  end:       EndNode,
+};
 
-function AddRuleNode({ data }: NodeProps<{ onAdd: () => void }>) {
+// ─── Palette gauche ───────────────────────────────────────────────────────────
+
+const COND_PALETTE: { type: ConditionType; icon: JSX.Element; desc: string }[] = [
+  { type: 'always',             icon: <ArrowRight className="h-3.5 w-3.5" />, desc: 'Toujours vrai' },
+  { type: 'schedule',           icon: <Clock className="h-3.5 w-3.5" />,      desc: 'Plage horaire' },
+  { type: 'holiday',            icon: <Calendar className="h-3.5 w-3.5" />,   desc: 'Jours fériés' },
+  { type: 'language',           icon: <Globe className="h-3.5 w-3.5" />,      desc: 'Langue appelant' },
+  { type: 'caller_number',      icon: <Hash className="h-3.5 w-3.5" />,       desc: 'Numéro appelant' },
+  { type: 'intent',             icon: <Zap className="h-3.5 w-3.5" />,        desc: 'Intention IA' },
+  { type: 'agent_availability', icon: <Users className="h-3.5 w-3.5" />,      desc: 'Dispo équipe' },
+];
+
+const ACTION_PALETTE: { type: ActionType; icon: JSX.Element; desc: string }[] = [
+  { type: 'route_group',    icon: <Users className="h-3.5 w-3.5" />,       desc: 'Groupe d\'agents' },
+  { type: 'route_agent',    icon: <User className="h-3.5 w-3.5" />,        desc: 'Agent direct' },
+  { type: 'route_external', icon: <PhoneCall className="h-3.5 w-3.5" />,   desc: 'Numéro externe' },
+  { type: 'play_message',   icon: <MessageSquare className="h-3.5 w-3.5" />, desc: 'Lire un message' },
+  { type: 'voicemail',      icon: <Voicemail className="h-3.5 w-3.5" />,   desc: 'Messagerie' },
+];
+
+function PaletteItem({ nodeType, subType, icon, label, desc }: {
+  nodeType: string; subType: string; icon: JSX.Element; label: string; desc: string;
+}) {
+  const onDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('nodeType', nodeType);
+    e.dataTransfer.setData('subType', subType);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const bg   = nodeType === 'condition' ? C.orange + '10' : nodeType === 'action' ? C.navy + '08' : C.red + '08';
+  const col  = nodeType === 'condition' ? C.orange : nodeType === 'action' ? C.navy : C.red;
+  const bord = nodeType === 'condition' ? C.orange + '30' : nodeType === 'action' ? C.navy + '20' : C.red + '25';
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'center' }}>
-      <Handle type="target" position={Position.Top}
-        style={{ background: 'transparent', border: 'none' }} />
-      <button
-        onClick={data.onAdd}
-        className="flex items-center gap-2 rounded-full border-2 border-dashed px-5 py-2.5 text-sm font-medium transition hover:bg-[#C7601D]/6"
-        style={{ borderColor: C.orange + '50', color: C.orange + 'CC' }}
-      >
-        <Play className="h-3.5 w-3.5" />
-        Ajouter une règle
-      </button>
+    <div draggable onDragStart={onDragStart} title={desc}
+      className="flex cursor-grab items-center gap-2 rounded-xl px-2.5 py-2 transition active:cursor-grabbing hover:brightness-95"
+      style={{ background: bg, border: `1px solid ${bord}`, color: col }}>
+      {icon}
+      <div className="min-w-0">
+        <p className="truncate text-[11px] font-semibold leading-tight" style={{ color: col }}>{label}</p>
+        <p className="truncate text-[9px] leading-tight" style={{ color: col + 'AA' }}>{desc}</p>
+      </div>
     </div>
   );
 }
 
-// ─── Types de nœuds enregistrés ───────────────────────────────────────────────
+function NodePalette() {
+  return (
+    <div className="flex w-52 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-[#344453]/8 bg-[#F8F9FB] p-3"
+      style={{ height: '100%' }}>
+      <p className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[#344453]/40">Conditions</p>
+      {COND_PALETTE.map(item => (
+        <PaletteItem key={item.type} nodeType="condition" subType={item.type}
+          icon={item.icon} label={CONDITION_LABELS[item.type]} desc={item.desc} />
+      ))}
 
-const nodeTypes = {
-  startNode:   StartNode,
-  ruleNode:    RuleNode,
-  endNode:     EndNode,
-  addRuleNode: AddRuleNode,
-};
+      <div className="my-1 border-t border-[#344453]/8" />
+      <p className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[#344453]/40">Actions</p>
+      {ACTION_PALETTE.map(item => (
+        <PaletteItem key={item.type} nodeType="action" subType={item.type}
+          icon={item.icon} label={ACTION_LABELS[item.type]} desc={item.desc} />
+      ))}
 
-// ─── Composant principal ─────────────────────────────────────────────────────
+      <div className="my-1 border-t border-[#344453]/8" />
+      <p className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[#344453]/40">Terminaison</p>
+      <PaletteItem nodeType="end" subType="end"
+        icon={<Voicemail className="h-3.5 w-3.5" />} label="Fin de flux" desc="Aucune correspondance" />
 
-export default function DispatchFlowBuilder({
-  rules, groups, staff, onRuleClick, onCreateRule, onUpdatePositions,
-}: Props) {
-
-  // ─── Construire les nœuds et les arêtes à partir des règles ──────────────
-  const { initialNodes, initialEdges } = useMemo(() => {
-    const CANVAS_CX = 400;
-    const NODE_H    = 260; // hauteur estimée d'un nœud de règle
-    const GAP       = 60;  // espace vertical entre nœuds
-
-    const nodes: Node[] = [];
-    const edges: Edge[] = [];
-
-    // Nœud START
-    nodes.push({
-      id: 'start',
-      type: 'startNode',
-      position: { x: CANVAS_CX - 100, y: 0 },
-      data: {},
-      draggable: false,
-      selectable: false,
-    });
-
-    const sorted = [...rules].sort((a, b) => a.priority - b.priority);
-
-    sorted.forEach((rule, i) => {
-      const savedPos = rule.node_positions?.['rule'];
-      const x = savedPos?.x ?? CANVAS_CX - 155;
-      const y = savedPos?.y ?? 100 + i * (NODE_H + GAP);
-
-      nodes.push({
-        id: rule.id,
-        type: 'ruleNode',
-        position: { x, y },
-        data: {
-          rule,
-          groups,
-          staff,
-          onClick: onRuleClick,
-          isLast: i === sorted.length - 1,
-        },
-      });
-
-      // Arête : START → première règle
-      if (i === 0) {
-        edges.push({
-          id: `start-${rule.id}`,
-          source: 'start',
-          target: rule.id,
-          type: 'smoothstep',
-          style: { stroke: C.navy + '60', strokeWidth: 2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: C.navy + '60' },
-        });
-      } else {
-        // Arête : règle N → règle N+1 (condition non remplie)
-        edges.push({
-          id: `${sorted[i - 1].id}-${rule.id}`,
-          source: sorted[i - 1].id,
-          target: rule.id,
-          type: 'smoothstep',
-          label: 'Sinon',
-          labelStyle: { fontSize: 10, fill: C.navy + '80', fontWeight: 600 },
-          labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
-          labelBgPadding: [4, 6] as [number, number],
-          labelBgBorderRadius: 6,
-          style: { stroke: C.navy + '35', strokeWidth: 1.5, strokeDasharray: '5 4' },
-          markerEnd: { type: MarkerType.ArrowClosed, color: C.navy + '35' },
-        });
-      }
-    });
-
-    // Nœud intermédiaire : Ajouter une règle
-    const addY = sorted.length > 0
-      ? 100 + sorted.length * (NODE_H + GAP) + 10
-      : 180;
-
-    nodes.push({
-      id: 'add-rule',
-      type: 'addRuleNode',
-      position: { x: CANVAS_CX - 80, y: addY },
-      data: { onAdd: onCreateRule },
-      draggable: false,
-      selectable: false,
-    });
-
-    if (sorted.length > 0) {
-      edges.push({
-        id: `${sorted[sorted.length - 1].id}-add`,
-        source: sorted[sorted.length - 1].id,
-        target: 'add-rule',
-        type: 'smoothstep',
-        style: { stroke: C.orange + '30', strokeWidth: 1.5, strokeDasharray: '4 4' },
-        markerEnd: { type: MarkerType.ArrowClosed, color: C.orange + '30' },
-      });
-    } else {
-      edges.push({
-        id: 'start-add',
-        source: 'start',
-        target: 'add-rule',
-        type: 'smoothstep',
-        style: { stroke: C.navy + '30', strokeWidth: 1.5, strokeDasharray: '4 4' },
-        markerEnd: { type: MarkerType.ArrowClosed, color: C.navy + '30' },
-      });
-    }
-
-    // Nœud END
-    const endY = addY + 80;
-    nodes.push({
-      id: 'end',
-      type: 'endNode',
-      position: { x: CANVAS_CX - 130, y: endY },
-      data: {},
-      draggable: false,
-      selectable: false,
-    });
-    edges.push({
-      id: 'add-end',
-      source: 'add-rule',
-      target: 'end',
-      style: { stroke: 'transparent' },
-    });
-
-    return { initialNodes: nodes, initialEdges: edges };
-  }, [rules, groups, staff, onRuleClick, onCreateRule]);
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange]          = useEdgesState(initialEdges);
-
-  // Synchroniser quand les règles changent (nouvelle règle, reorder, etc.)
-  useEffect(() => {
-    setNodes(initialNodes);
-  }, [initialNodes, setNodes]);
-
-  // Sauvegarder les positions après drag
-  const onNodeDragStop = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      if (!node.id || node.id === 'start' || node.id === 'end' || node.id === 'add-rule') return;
-      const rule = rules.find(r => r.id === node.id);
-      if (!rule) return;
-      const updated = {
-        ...rule.node_positions,
-        rule: { x: node.position.x, y: node.position.y },
-      };
-      onUpdatePositions([{ id: node.id, node_positions: updated }]);
-    },
-    [rules, onUpdatePositions]
+      <div className="mt-auto pt-3 text-[9px] leading-relaxed text-[#344453]/35">
+        <p className="font-semibold mb-1">Comment utiliser :</p>
+        <p>1. Glissez un nœud sur le canvas</p>
+        <p>2. Connectez les poignées</p>
+        <p>3. Cliquez pour configurer</p>
+        <p className="mt-1 text-green-600 font-medium">● OUI (vert)</p>
+        <p className="text-red-500 font-medium">● NON (rouge)</p>
+        <p className="text-slate-400 font-medium">● SI ÉCHEC (gris)</p>
+      </div>
+    </div>
   );
+}
+
+// ─── Panneau éditeur de nœud (droite) ────────────────────────────────────────
+
+function DAYS_LIST_CONST() {
+  return ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] as const;
+}
+
+function ConditionForm({ condition, groups, onChange }: {
+  condition: Condition; groups: StaffGroup[]; onChange: (c: Condition) => void;
+}) {
+  const inputCls = 'block w-full rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/30 transition';
+  const days = DAYS_LIST_CONST();
+
+  const changeType = (t: ConditionType) => {
+    const base = { ...DEFAULT_CONDITIONS[t], id: newConditionId() };
+    onChange(base);
+  };
 
   return (
-    <div
-      style={{
-        height: 600,
-        borderRadius: 24,
-        border: `1.5px solid ${C.border}`,
-        overflow: 'hidden',
-        background: '#FAFBFC',
-      }}
-    >
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodeDragStop={onNodeDragStop}
-        fitView
-        fitViewOptions={{ padding: 0.25, maxZoom: 1.2 }}
-        minZoom={0.3}
-        maxZoom={1.8}
-        attributionPosition="bottom-right"
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(52,68,83,0.06)" />
-        <Controls
-          showInteractive={false}
-          style={{
-            border: `1px solid ${C.border}`,
-            borderRadius: 12,
-            overflow: 'hidden',
-            boxShadow: '0 2px 8px rgba(52,68,83,0.08)',
-          }}
-        />
-        <MiniMap
-          nodeColor={() => C.orange + '80'}
-          maskColor="rgba(248,249,251,0.85)"
-          style={{
-            border: `1px solid ${C.border}`,
-            borderRadius: 12,
-          }}
-        />
-        <Panel position="top-right">
-          <div
-            className="flex items-center gap-3 rounded-[14px] px-4 py-2.5 text-xs text-[#344453]/55"
-            style={{ background: 'white', border: `1px solid ${C.border}`, boxShadow: '0 2px 8px rgba(52,68,83,0.06)' }}
-          >
-            <span className="flex items-center gap-1.5">
-              <ChevronDown className="h-3 w-3 text-[#344453]/40" />
-              Glisser pour réorganiser
-            </span>
-            <span className="h-3 w-px bg-[#344453]/15" />
-            <span className="flex items-center gap-1.5">
-              <ArrowRight className="h-3 w-3 text-[#344453]/40" />
-              Cliquer pour modifier
-            </span>
+    <div className="space-y-3">
+      {/* Sélecteur de type */}
+      <div className="grid grid-cols-2 gap-1.5">
+        {(Object.keys(CONDITION_LABELS) as ConditionType[]).map(t => (
+          <button key={t} type="button" onClick={() => changeType(t)}
+            className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-left text-[11px] font-medium transition ${
+              condition.type === t
+                ? 'border-[#C7601D] bg-[#C7601D]/8 text-[#C7601D]'
+                : 'border-[#344453]/10 text-[#344453]/50 hover:bg-[#344453]/4'
+            }`}>
+            <CondIcon type={t} />
+            {CONDITION_LABELS[t]}
+          </button>
+        ))}
+      </div>
+
+      {/* Champs par type */}
+      {condition.type === 'schedule' && (() => {
+        const c = condition as ScheduleCondition;
+        return (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1">
+              {days.map(d => (
+                <button key={d} type="button"
+                  onClick={() => onChange({ ...c, days: c.days.includes(d) ? c.days.filter(x => x !== d) : [...c.days, d] })}
+                  className={`rounded-lg border px-2 py-1 text-[10px] font-medium transition ${
+                    c.days.includes(d) ? 'border-[#344453] bg-[#344453] text-white' : 'border-[#344453]/15 text-[#344453]/50'
+                  }`}>
+                  {DAYS_FR[d]?.slice(0,2)}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input type="time" value={c.time_start} onChange={e => onChange({ ...c, time_start: e.target.value })} className={inputCls} />
+              <span className="self-center text-[#344453]/30">→</span>
+              <input type="time" value={c.time_end} onChange={e => onChange({ ...c, time_end: e.target.value })} className={inputCls} />
+            </div>
           </div>
-        </Panel>
-      </ReactFlow>
+        );
+      })()}
+
+      {condition.type === 'holiday' && (() => {
+        const c = condition as HolidayCondition;
+        return (
+          <div className="flex gap-2">
+            <select value={c.country} onChange={e => onChange({ ...c, country: e.target.value as HolidayCondition['country'] })} className={`flex-1 ${inputCls}`}>
+              {Object.entries(COUNTRY_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <select value={c.match} onChange={e => onChange({ ...c, match: e.target.value as HolidayCondition['match'] })} className={`flex-1 ${inputCls}`}>
+              <option value="on_holiday">Est férié</option>
+              <option value="not_on_holiday">N'est pas férié</option>
+            </select>
+          </div>
+        );
+      })()}
+
+      {condition.type === 'language' && (() => {
+        const c = condition as LanguageCondition;
+        return (
+          <div className="flex flex-wrap gap-1.5">
+            {['fr','nl','en','de','es','it','pt'].map(lang => (
+              <button key={lang} type="button"
+                onClick={() => onChange({ ...c, languages: c.languages.includes(lang) ? c.languages.filter(x => x !== lang) : [...c.languages, lang] })}
+                className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium uppercase transition ${
+                  c.languages.includes(lang) ? 'border-[#344453] bg-[#344453] text-white' : 'border-[#344453]/15 text-[#344453]/50'
+                }`}>{lang}</button>
+            ))}
+          </div>
+        );
+      })()}
+
+      {condition.type === 'caller_number' && (() => {
+        const c = condition as CallerNumberCondition;
+        return (
+          <div className="space-y-2">
+            <select value={c.mode} onChange={e => onChange({ ...c, mode: e.target.value as CallerNumberCondition['mode'] })} className={inputCls}>
+              <option value="equals">Égal à</option>
+              <option value="starts_with">Commence par</option>
+              <option value="contains">Contient</option>
+            </select>
+            <PatternEditor patterns={c.patterns} onChange={p => onChange({ ...c, patterns: p })} />
+          </div>
+        );
+      })()}
+
+      {condition.type === 'intent' && (() => {
+        const c = condition as IntentCondition;
+        return (
+          <div className="space-y-2">
+            <select value={c.match_mode} onChange={e => onChange({ ...c, match_mode: e.target.value as IntentCondition['match_mode'] })} className={inputCls}>
+              <option value="any">L'un des mots</option>
+              <option value="all">Tous les mots</option>
+            </select>
+            <PatternEditor patterns={c.intents} onChange={p => onChange({ ...c, intents: p })} placeholder="Mot-clé (ex: panne)" />
+          </div>
+        );
+      })()}
+
+      {condition.type === 'agent_availability' && (() => {
+        const c = condition as AgentAvailabilityCondition;
+        return (
+          <div className="flex gap-2">
+            <select value={c.group_id} onChange={e => onChange({ ...c, group_id: e.target.value })} className={`flex-1 ${inputCls}`}>
+              <option value="">Sélectionner un groupe…</option>
+              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+            <select value={c.check} onChange={e => onChange({ ...c, check: e.target.value as AgentAvailabilityCondition['check'] })} className={`flex-1 ${inputCls}`}>
+              <option value="any_available">Au moins 1 dispo</option>
+              <option value="all_unavailable">Tous indisponibles</option>
+            </select>
+          </div>
+        );
+      })()}
     </div>
+  );
+}
+
+function PatternEditor({ patterns, onChange, placeholder = 'Valeur…' }: {
+  patterns: string[]; onChange: (p: string[]) => void; placeholder?: string;
+}) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    const v = draft.trim();
+    if (v && !patterns.includes(v)) { onChange([...patterns, v]); setDraft(''); }
+  };
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-1.5">
+        <input type="text" value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          placeholder={placeholder}
+          className="flex-1 rounded-xl border border-[#344453]/12 bg-white px-3 py-1.5 text-sm outline-none focus:border-[#344453]/30 transition" />
+        <button type="button" onClick={add}
+          className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#344453] text-white hover:bg-[#1f2d38] transition">
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {patterns.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {patterns.map(p => (
+            <span key={p} className="inline-flex items-center gap-1 rounded-full border border-[#344453]/12 bg-[#F8F9FB] px-2.5 py-0.5 text-[11px] font-medium text-[#344453]">
+              {p}
+              <button type="button" onClick={() => onChange(patterns.filter(x => x !== p))} className="text-[#344453]/40 hover:text-red-500 transition">
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RetryForm({ retry, onChange }: { retry: RetryConfig; onChange: (r: RetryConfig) => void }) {
+  return (
+    <div className="rounded-xl border border-[#344453]/8 bg-[#F8F9FB] p-3 space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">Tentatives de sonnerie</p>
+      <div className="grid grid-cols-3 gap-2">
+        {([
+          { key: 'max_attempts',          label: 'Essais',     hint: '0=∞' },
+          { key: 'ring_duration',         label: 'Sonnerie s', hint: '' },
+          { key: 'between_attempts_delay',label: 'Pause s',    hint: '' },
+        ] as const).map(({ key, label, hint }) => (
+          <div key={key}>
+            <label className="mb-1 block text-[10px] text-[#344453]/50">{label}</label>
+            <input type="number" min={0} value={retry[key]}
+              onChange={e => onChange({ ...retry, [key]: Number(e.target.value) })}
+              className="w-full rounded-xl border border-[#344453]/12 bg-white px-2 py-1.5 text-center text-sm font-mono outline-none focus:border-[#344453]/30 transition" />
+            {hint && <p className="mt-0.5 text-center text-[9px] text-[#344453]/35">{hint}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActionForm({ action, groups, staff, onChange }: {
+  action: LeafAction; groups: StaffGroup[]; staff: StaffMember[]; onChange: (a: LeafAction) => void;
+}) {
+  const inputCls = 'block w-full rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/30 transition';
+
+  const changeType = (t: LeafAction['type']) => {
+    const defs: Record<LeafAction['type'], LeafAction> = {
+      route_group:    { type:'route_group',    group_id:'',    distribution_strategy:'sequential', agent_order:[], retry:{...DEFAULT_RETRY} },
+      route_agent:    { type:'route_agent',    agent_id:'',    ring_duration:30 },
+      route_external: { type:'route_external', phone_number:'', label:'' },
+      play_message:   { type:'play_message',   message_text:'' },
+      voicemail:      { ...DEFAULT_VOICEMAIL },
+    };
+    onChange(defs[t]);
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Sélecteur de type action */}
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+        {(Object.keys(ACTION_LABELS).filter(t => t !== 'route_conditional') as LeafAction['type'][]).map(t => (
+          <button key={t} type="button" onClick={() => changeType(t)}
+            className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-center transition ${
+              action.type === t
+                ? 'border-[#141F28] bg-[#141F28]/8 text-[#141F28]'
+                : 'border-[#344453]/10 text-[#344453]/50 hover:bg-[#344453]/4'
+            }`}>
+            <ActionIcon type={t} />
+            <span className="text-[10px] font-medium leading-tight">{ACTION_LABELS[t]}</span>
+          </button>
+        ))}
+      </div>
+
+      {action.type === 'route_group' && (() => {
+        const a = action as RouteGroupAction;
+        const grp = groups.find(g => g.id === a.group_id);
+        return (
+          <div className="space-y-3">
+            <select value={a.group_id} onChange={e => {
+              const g = groups.find(x => x.id === e.target.value);
+              onChange({ ...a, group_id: e.target.value, agent_order: g?.members.map(m => m.id) ?? [] });
+            }} className={inputCls}>
+              <option value="">Sélectionner un groupe…</option>
+              {groups.map(g => <option key={g.id} value={g.id}>{g.name}{g.role ? ` (${g.role})` : ''}</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-1.5">
+              {(['sequential','simultaneous','random','round_robin'] as DistributionStrategy[]).map(s => (
+                <button key={s} type="button" onClick={() => onChange({ ...a, distribution_strategy: s })}
+                  className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-medium transition ${
+                    a.distribution_strategy === s ? 'border-[#344453] bg-[#344453] text-white' : 'border-[#344453]/10 text-[#344453]/55 hover:bg-[#344453]/5'
+                  }`}>
+                  <StratIcon strategy={s} />
+                  {STRATEGY_LABELS[s].label}
+                </button>
+              ))}
+            </div>
+            {/* Ordre agents */}
+            {a.distribution_strategy === 'sequential' && grp && grp.members.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">Ordre d'appel</p>
+                {(a.agent_order?.length ? a.agent_order : grp.members.map(m => m.id)).map((agentId, i, arr) => {
+                  const m = grp.members.find(x => x.id === agentId);
+                  if (!m) return null;
+                  const move = (dir: -1 | 1) => {
+                    const o = [...arr]; const ni = i + dir;
+                    if (ni < 0 || ni >= o.length) return;
+                    [o[i], o[ni]] = [o[ni], o[i]];
+                    onChange({ ...a, agent_order: o });
+                  };
+                  return (
+                    <div key={agentId} className="flex items-center gap-1.5 rounded-xl border border-[#344453]/8 bg-white px-2.5 py-1.5">
+                      <GripVertical className="h-3 w-3 text-[#344453]/25" />
+                      <span className="w-4 text-[10px] font-mono text-[#344453]/35">{i+1}</span>
+                      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#344453] text-[8px] font-bold text-white">
+                        {m.first_name[0]}{m.last_name[0]}
+                      </div>
+                      <span className="flex-1 text-[11px] font-medium text-[#141F28]">{m.first_name} {m.last_name}</span>
+                      <button type="button" onClick={() => move(-1)} disabled={i===0} className="flex h-5 w-5 items-center justify-center rounded border border-[#344453]/10 text-[#344453]/40 hover:bg-[#344453]/5 disabled:opacity-20 transition">
+                        <ChevronUp className="h-3 w-3" />
+                      </button>
+                      <button type="button" onClick={() => move(1)} disabled={i===arr.length-1} className="flex h-5 w-5 items-center justify-center rounded border border-[#344453]/10 text-[#344453]/40 hover:bg-[#344453]/5 disabled:opacity-20 transition">
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <RetryForm retry={a.retry} onChange={r => onChange({ ...a, retry: r })} />
+          </div>
+        );
+      })()}
+
+      {action.type === 'route_agent' && (() => {
+        const a = action as RouteAgentAction;
+        return (
+          <div className="space-y-2">
+            <select value={a.agent_id} onChange={e => onChange({ ...a, agent_id: e.target.value })} className={inputCls}>
+              <option value="">Sélectionner un agent…</option>
+              {staff.filter(s => s.enabled).map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} — {s.role}</option>)}
+            </select>
+            <div className="flex items-center gap-3">
+              <label className="text-xs text-[#344453]/55 whitespace-nowrap">Sonnerie</label>
+              <input type="range" min={5} max={120} step={5} value={a.ring_duration}
+                onChange={e => onChange({ ...a, ring_duration: Number(e.target.value) })}
+                className="flex-1 accent-[#C7601D]" />
+              <span className="w-12 text-right text-xs font-mono text-[#344453]/65">{a.ring_duration}s</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {action.type === 'route_external' && (() => {
+        const a = action as RouteExternalAction;
+        return (
+          <div className="space-y-2">
+            <input type="tel" value={a.phone_number} onChange={e => onChange({ ...a, phone_number: e.target.value })}
+              placeholder="+32499000000" className={inputCls} />
+            <input type="text" value={a.label ?? ''} onChange={e => onChange({ ...a, label: e.target.value })}
+              placeholder="Libellé (ex: Siège social)" className={inputCls} />
+          </div>
+        );
+      })()}
+
+      {action.type === 'play_message' && (() => {
+        const a = action as PlayMessageAction;
+        return (
+          <textarea rows={3} value={a.message_text} onChange={e => onChange({ ...a, message_text: e.target.value })}
+            placeholder="Message lu à l'appelant…"
+            className="block w-full resize-none rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/30 transition" />
+        );
+      })()}
+
+      {action.type === 'voicemail' && (() => {
+        const a = action as VoicemailAction;
+        return (
+          <textarea rows={2} value={a.greeting_text ?? ''} onChange={e => onChange({ ...a, greeting_text: e.target.value })}
+            placeholder="Message d'accueil avant le bip (optionnel)"
+            className="block w-full resize-none rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/30 transition" />
+        );
+      })()}
+    </div>
+  );
+}
+
+function NodeEditorPanel({ node, groups, staff, onUpdate, onDelete, onClose }: {
+  node: Node; groups: StaffGroup[]; staff: StaffMember[];
+  onUpdate: (n: Node) => void; onDelete: () => void; onClose: () => void;
+}) {
+  const isEntry = node.id === 'entry';
+
+  return (
+    <div className="flex w-80 shrink-0 flex-col border-l border-[#344453]/8 bg-white"
+      style={{ height: '100%', overflow: 'hidden' }}>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-[#344453]/8 px-4 py-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#344453]/40">
+            {node.type === 'condition' ? 'Condition' : node.type === 'action' ? 'Action' : node.type === 'end' ? 'Fin' : 'Entrée'}
+          </p>
+          <p className="text-sm font-semibold text-[#141F28]">
+            {node.type === 'condition' ? (node.data as FlowNodeData_Condition).label || 'Configuration'
+              : node.type === 'action' ? (node.data as FlowNodeData_Action).label || 'Configuration'
+              : node.type === 'end' ? 'Fin de flux'
+              : 'Appel entrant'}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {!isEntry && (
+            <button type="button" onClick={onDelete}
+              className="flex h-7 w-7 items-center justify-center rounded-xl border border-red-200 text-red-400 hover:bg-red-50 transition">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button type="button" onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-xl border border-[#344453]/12 text-[#344453]/50 hover:bg-[#344453]/5 transition">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Contenu */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Label */}
+        {!isEntry && node.type !== 'entry' && (
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">
+              Libellé
+            </label>
+            <input type="text"
+              value={(node.data as { label?: string }).label ?? ''}
+              onChange={e => onUpdate({ ...node, data: { ...node.data, label: e.target.value } })}
+              placeholder="Nom de ce nœud…"
+              className="block w-full rounded-xl border border-[#344453]/12 bg-[#F8F9FB] px-3 py-2 text-sm outline-none focus:border-[#344453]/30 transition" />
+          </div>
+        )}
+
+        {/* Formulaire selon le type */}
+        {node.type === 'condition' && (
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">
+              Type de condition
+            </label>
+            <ConditionForm
+              condition={(node.data as FlowNodeData_Condition).condition}
+              groups={groups}
+              onChange={c => onUpdate({ ...node, data: { ...node.data, condition: c } })}
+            />
+          </div>
+        )}
+
+        {node.type === 'action' && (
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">
+              Type d'action
+            </label>
+            <ActionForm
+              action={(node.data as FlowNodeData_Action).action}
+              groups={groups}
+              staff={staff}
+              onChange={a => onUpdate({ ...node, data: { ...node.data, action: a } })}
+            />
+          </div>
+        )}
+
+        {node.type === 'end' && (
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">
+              Message de fin (optionnel)
+            </label>
+            <input type="text"
+              value={(node.data as FlowNodeData_End).label ?? ''}
+              onChange={e => onUpdate({ ...node, data: { ...node.data, label: e.target.value } })}
+              placeholder="Aucune correspondance"
+              className="block w-full rounded-xl border border-[#344453]/12 bg-[#F8F9FB] px-3 py-2 text-sm outline-none focus:border-[#344453]/30 transition" />
+          </div>
+        )}
+
+        {node.type === 'entry' && (
+          <p className="text-sm text-[#344453]/50">
+            Le nœud d'entrée représente l'appel entrant. Il ne peut pas être supprimé ni configuré.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers : creation de nœud ──────────────────────────────────────────────
+
+function makeNode(nodeType: string, subType: string, position: { x: number; y: number }): Node {
+  const id = newNodeId();
+
+  if (nodeType === 'condition') {
+    const ct = subType as ConditionType;
+    const baseCond = { ...DEFAULT_CONDITIONS[ct], id: newConditionId() };
+    return {
+      id, type: 'condition', position,
+      data: { label: CONDITION_LABELS[ct], condition: baseCond },
+    };
+  }
+
+  if (nodeType === 'action') {
+    const at = subType as LeafAction['type'];
+    const defs: Record<LeafAction['type'], LeafAction> = {
+      route_group:    { type:'route_group',    group_id:'',    distribution_strategy:'sequential', agent_order:[], retry:{...DEFAULT_RETRY} },
+      route_agent:    { type:'route_agent',    agent_id:'',    ring_duration:30 },
+      route_external: { type:'route_external', phone_number:'', label:'' },
+      play_message:   { type:'play_message',   message_text:'' },
+      voicemail:      { ...DEFAULT_VOICEMAIL },
+    };
+    return {
+      id, type: 'action', position,
+      data: { label: ACTION_LABELS[at], action: defs[at] },
+    };
+  }
+
+  // end
+  return { id, type: 'end', position, data: { label: 'Aucune correspondance' } };
+}
+
+// ─── Helper : style des arêtes ───────────────────────────────────────────────
+
+function styledEdge(edge: Edge): Edge {
+  const handle = edge.sourceHandle;
+  const stroke = handle === 'yes' ? C.green : handle === 'no' ? C.red : C.grey;
+  const label  = handle === 'yes' ? 'Oui' : handle === 'no' ? 'Non' : handle === 'out' ? 'Sinon' : '';
+  return {
+    ...edge,
+    style: { stroke, strokeWidth: 2 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
+    label,
+    labelStyle: { fontSize: 10, fontWeight: 700, fill: 'white' },
+    labelBgStyle: { fill: stroke, rx: 6, padding: 3 },
+    labelBgPadding: [6, 3] as [number, number],
+  };
+}
+
+// ─── Composant principal (inner, a besoin de ReactFlowProvider) ───────────────
+
+function FlowBuilderInner({ groups, staff, nodes: initNodes, edges: initEdges, onSave, saving }: Props) {
+  const [nodes, setNodes, onNodesChange] = useNodesState(initNodes.map(n => ({
+    ...n,
+    data: { ...n.data, groups, staff },
+  })));
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges.map(styledEdge));
+  const [selectedId, setSelectedId]       = useState<string | null>(null);
+  const [dirty, setDirty]                 = useState(false);
+  const { screenToFlowPosition }          = useReactFlow();
+  const wrapperRef                        = useRef<HTMLDivElement>(null);
+
+  // Injecter groups/staff dans tous les nœuds quand ils changent
+  useEffect(() => {
+    setNodes(ns => ns.map(n => ({ ...n, data: { ...n.data, groups, staff } })));
+  }, [groups, staff, setNodes]);
+
+  const onConnect = useCallback((connection: Connection) => {
+    setEdges(eds => addEdge(styledEdge({
+      ...connection,
+      id: `edge-${Date.now()}`,
+    } as Edge), eds));
+    setDirty(true);
+  }, [setEdges]);
+
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    // Empêcher la suppression du nœud entry
+    const filtered = changes.filter(c => !(c.type === 'remove' && c.id === 'entry'));
+    onNodesChange(filtered);
+    if (filtered.some(c => c.type !== 'select')) setDirty(true);
+  }, [onNodesChange]);
+
+  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const nodeType = e.dataTransfer.getData('nodeType');
+    const subType  = e.dataTransfer.getData('subType');
+    if (!nodeType) return;
+
+    const rect = wrapperRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const newNode  = makeNode(nodeType, subType, position);
+
+    setNodes(ns => [...ns, { ...newNode, data: { ...newNode.data, groups, staff } }]);
+    setDirty(true);
+  }, [screenToFlowPosition, groups, staff, setNodes]);
+
+  const selectedNode = nodes.find(n => n.id === selectedId) ?? null;
+
+  const handleSave = useCallback(async () => {
+    // Nettoyer avant de sauvegarder (retirer groups/staff du data)
+    const cleanNodes = nodes.map(({ data, ...rest }) => {
+      const { groups: _g, staff: _s, ...cleanData } = data as Record<string, unknown>;
+      return { ...rest, data: cleanData };
+    });
+    await onSave(cleanNodes, edges);
+    setDirty(false);
+  }, [nodes, edges, onSave]);
+
+  return (
+    <div className="flex" style={{ height: '100%', overflow: 'hidden' }}>
+      <NodePalette />
+
+      <div ref={wrapperRef} className="relative flex-1"
+        onDrop={onDrop}
+        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={(changes) => { onEdgesChange(changes); setDirty(true); }}
+          onConnect={onConnect}
+          nodeTypes={nodeTypes}
+          onNodeClick={(_, node) => setSelectedId(node.id)}
+          onPaneClick={() => setSelectedId(null)}
+          deleteKeyCode={['Backspace', 'Delete']}
+          fitView
+          fitViewOptions={{ padding: 0.25, maxZoom: 1.2 }}
+        >
+          <Controls />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(52,68,83,0.08)" />
+          <MiniMap
+            nodeColor={n => n.type === 'condition' ? C.orange : n.type === 'action' ? C.navy : C.grey}
+            style={{ border: `1px solid ${C.border}`, borderRadius: 12 }}
+          />
+          <Panel position="top-right">
+            <div className="flex items-center gap-2">
+              {dirty && (
+                <span className="rounded-full bg-[#C7601D]/10 px-2.5 py-1 text-[11px] font-medium text-[#C7601D]">
+                  Modifications non sauvegardées
+                </span>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={!dirty || saving}
+                className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:opacity-40"
+                style={{ background: dirty && !saving ? C.navy : C.grey }}>
+                {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                Enregistrer
+              </button>
+            </div>
+          </Panel>
+        </ReactFlow>
+      </div>
+
+      {selectedNode && (
+        <NodeEditorPanel
+          node={selectedNode}
+          groups={groups}
+          staff={staff}
+          onUpdate={updated => {
+            setNodes(ns => ns.map(n => n.id === updated.id
+              ? { ...updated, data: { ...updated.data, groups, staff } }
+              : n
+            ));
+            setDirty(true);
+          }}
+          onDelete={() => {
+            setNodes(ns => ns.filter(n => n.id !== selectedId));
+            setEdges(es => es.filter(e => e.source !== selectedId && e.target !== selectedId));
+            setSelectedId(null);
+            setDirty(true);
+          }}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+export default function DispatchFlowBuilder(props: Props) {
+  return (
+    <ReactFlowProvider>
+      <FlowBuilderInner {...props} />
+    </ReactFlowProvider>
   );
 }
