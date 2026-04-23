@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import type {
   DispatchRule, Condition, Action, FallbackStep,
-  DistributionStrategy,
+  DistributionStrategy, RouteConditionalAction,
 } from '../types/dispatch';
 import {
   STRATEGY_LABELS,
@@ -65,11 +65,12 @@ function CondIcon({ type }: { type: Condition['type'] }) {
 function ActionIcon({ type }: { type: Action['type'] }) {
   const cls = 'h-4 w-4 shrink-0';
   switch (type) {
-    case 'route_group':    return <Users className={cls} />;
-    case 'route_agent':    return <User className={cls} />;
-    case 'route_external': return <PhoneCall className={cls} />;
-    case 'play_message':   return <MessageSquare className={cls} />;
-    case 'voicemail':      return <Voicemail className={cls} />;
+    case 'route_group':       return <Users className={cls} />;
+    case 'route_agent':       return <User className={cls} />;
+    case 'route_external':    return <PhoneCall className={cls} />;
+    case 'play_message':      return <MessageSquare className={cls} />;
+    case 'voicemail':         return <Voicemail className={cls} />;
+    case 'route_conditional': return <GitBranch className={cls} />;
   }
 }
 
@@ -135,6 +136,10 @@ function actionSummary(
       return `"${action.message_text.slice(0, 40)}${action.message_text.length > 40 ? '…' : ''}"`;
     case 'voicemail':
       return 'Messagerie vocale';
+    case 'route_conditional': {
+      const rc = action as RouteConditionalAction;
+      return `${rc.branches.length} branche${rc.branches.length > 1 ? 's' : ''} conditionnelle${rc.branches.length > 1 ? 's' : ''}`;
+    }
   }
 }
 
@@ -262,28 +267,58 @@ function RuleNode({ data }: NodeProps<RuleNodeData>) {
         <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-widest text-[#344453]/40">
           Action
         </p>
-        <div className="flex items-center gap-2">
-          <div
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl"
-            style={{ background: C.orange + '15', color: C.orange }}
-          >
-            <ActionIcon type={rule.action.type} />
-          </div>
-          <p className="text-xs font-medium text-[#141F28] leading-tight">
-            {actionSummary(rule.action, groups, staff)}
-          </p>
-          {rule.action.type === 'route_group' && (
-            <div
-              className="ml-auto flex items-center gap-0.5 shrink-0 rounded-full px-1.5 py-0.5"
-              style={{ background: C.bg, border: `1px solid ${C.border}` }}
-            >
-              <StratIcon strategy={rule.action.distribution_strategy} />
-              <span className="text-[9px] text-[#344453]/55 ml-0.5">
-                {STRATEGY_LABELS[rule.action.distribution_strategy]?.label}
-              </span>
+
+        {rule.action.type === 'route_conditional' ? (
+          /* Dispatch conditionnel : afficher les branches */
+          <div className="space-y-1">
+            {(rule.action as RouteConditionalAction).branches.slice(0, 3).map((branch, i) => (
+              <div key={branch.id} className="flex items-center gap-2">
+                <span
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold text-white"
+                  style={{ background: C.orange }}
+                >{i + 1}</span>
+                <span className="truncate text-[10px] text-[#344453]/60">
+                  {branch.label || conditionSummary(branch.condition)}
+                </span>
+                <ArrowRight className="h-2.5 w-2.5 shrink-0 text-[#344453]/25" />
+                <ActionIcon type={branch.action.type} />
+              </div>
+            ))}
+            {(rule.action as RouteConditionalAction).branches.length > 3 && (
+              <p className="text-[10px] text-[#344453]/35 pl-5">
+                +{(rule.action as RouteConditionalAction).branches.length - 3} autre{(rule.action as RouteConditionalAction).branches.length - 3 > 1 ? 's' : ''}
+              </p>
+            )}
+            <div className="flex items-center gap-2 pt-0.5 border-t border-[#344453]/6 mt-1">
+              <span className="text-[10px] text-[#344453]/35 italic">Par défaut :</span>
+              <ActionIcon type={(rule.action as RouteConditionalAction).default_action.type} />
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          /* Action simple */
+          <div className="flex items-center gap-2">
+            <div
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl"
+              style={{ background: C.orange + '15', color: C.orange }}
+            >
+              <ActionIcon type={rule.action.type} />
+            </div>
+            <p className="text-xs font-medium text-[#141F28] leading-tight">
+              {actionSummary(rule.action, groups, staff)}
+            </p>
+            {rule.action.type === 'route_group' && (
+              <div
+                className="ml-auto flex items-center gap-0.5 shrink-0 rounded-full px-1.5 py-0.5"
+                style={{ background: C.bg, border: `1px solid ${C.border}` }}
+              >
+                <StratIcon strategy={rule.action.distribution_strategy} />
+                <span className="text-[9px] text-[#344453]/55 ml-0.5">
+                  {STRATEGY_LABELS[rule.action.distribution_strategy]?.label}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ─── Chaîne de fallback (si définie) ───────────────────────────────── */}

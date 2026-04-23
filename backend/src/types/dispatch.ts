@@ -120,12 +120,31 @@ export interface VoicemailAction {
   greeting_text?: string;
 }
 
+/** Branche d'un dispatch conditionnel */
+export interface ConditionalBranch {
+  id: string;
+  label: string;
+  condition: Condition;
+  action: RouteGroupAction | RouteAgentAction | RouteExternalAction | PlayMessageAction | VoicemailAction;
+}
+
+/**
+ * Action composée : évalue des branches dans l'ordre et exécute
+ * la première dont la condition est satisfaite. Sinon : default_action.
+ */
+export interface RouteConditionalAction {
+  type: 'route_conditional';
+  branches: ConditionalBranch[];
+  default_action: RouteGroupAction | RouteAgentAction | RouteExternalAction | PlayMessageAction | VoicemailAction;
+}
+
 export type Action =
   | RouteGroupAction
   | RouteAgentAction
   | RouteExternalAction
   | PlayMessageAction
-  | VoicemailAction;
+  | VoicemailAction
+  | RouteConditionalAction;
 
 // ─── Étape de la chaîne de fallback ───────────────────────────────────────
 export interface FallbackStep {

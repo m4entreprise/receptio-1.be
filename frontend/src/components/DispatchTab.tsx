@@ -8,10 +8,10 @@ import {
 } from 'lucide-react';
 import DispatchFlowBuilder from './DispatchFlowBuilder';
 import type {
-  DispatchRule, Condition, ConditionType, Action, ActionType,
+  DispatchRule, Condition, ConditionType, Action, ActionType, LeafAction,
   FallbackStep, DistributionStrategy, RetryConfig,
   RouteGroupAction, RouteAgentAction, RouteExternalAction,
-  PlayMessageAction, VoicemailAction,
+  PlayMessageAction, VoicemailAction, ConditionalBranch, RouteConditionalAction,
   ScheduleCondition, HolidayCondition, LanguageCondition,
   CallerNumberCondition, IntentCondition, AgentAvailabilityCondition,
 } from '../types/dispatch';
@@ -389,21 +389,123 @@ function ConditionEditor({
   );
 }
 
+// ─── Dispatch conditionnel (branche par branche) ──────────────────────────────
+
+function newBranch(): ConditionalBranch {
+  return {
+    id: `branch-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+    label: '',
+    condition: { id: newConditionId(), type: 'intent', intents: [], match_mode: 'any' },
+    action: { ...DEFAULT_VOICEMAIL },
+  };
+}
+
+function ConditionalRouteSection({
+  action, groups, staff, onChange,
+}: {
+  action: RouteConditionalAction;
+  groups: StaffGroup[];
+  staff: StaffMember[];
+  onChange: (a: RouteConditionalAction) => void;
+}) {
+  const updateBranch = (idx: number, branch: ConditionalBranch) => {
+    const branches = [...action.branches];
+    branches[idx] = branch;
+    onChange({ ...action, branches });
+  };
+  const removeBranch = (idx: number) => {
+    onChange({ ...action, branches: action.branches.filter((_, i) => i !== idx) });
+  };
+  const moveBranch = (idx: number, dir: -1 | 1) => {
+    const branches = [...action.branches];
+    const ni = idx + dir;
+    if (ni < 0 || ni >= branches.length) return;
+    [branches[idx], branches[ni]] = [branches[ni], branches[idx]];
+    onChange({ ...action, branches });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-[#C7601D]/20 bg-[#C7601D]/4 px-3 py-2 text-xs text-[#C7601D]/80">
+        <strong>Dispatch conditionnel</strong> — les branches sont évaluées dans l'ordre. La première dont la condition est validée est exécutée. Si aucune ne correspond, l'action par défaut est utilisée.
+      </div>
+
+      {/* Branches */}
+      {action.branches.map((branch, idx) => (
+        <div key={branch.id} className="rounded-2xl border border-[#344453]/12 bg-white p-3 space-y-3">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => moveBranch(idx, -1)} disabled={idx === 0}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-[#344453]/10 text-[#344453]/35 hover:bg-[#344453]/5 disabled:opacity-20 transition">
+              <ChevronUp className="h-3 w-3" />
+            </button>
+            <button type="button" onClick={() => moveBranch(idx, 1)} disabled={idx === action.branches.length - 1}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-[#344453]/10 text-[#344453]/35 hover:bg-[#344453]/5 disabled:opacity-20 transition">
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C7601D] text-[9px] font-bold text-white">{idx + 1}</span>
+            <input type="text" value={branch.label}
+              onChange={e => updateBranch(idx, { ...branch, label: e.target.value })}
+              placeholder="Nom de la branche (ex: Département IT)"
+              className="flex-1 rounded-xl border border-[#344453]/12 bg-[#F8F9FB] px-2.5 py-1.5 text-xs outline-none focus:border-[#344453]/30 transition" />
+            <button type="button" onClick={() => removeBranch(idx)}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-red-200 text-red-400 hover:bg-red-50 transition">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">Condition</p>
+            <ConditionEditor cond={branch.condition} groups={groups}
+              onChange={c => updateBranch(idx, { ...branch, condition: c })}
+              onRemove={() => {}} />
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">Action</p>
+            <ActionEditor action={branch.action} groups={groups} staff={staff} allowConditional={false}
+              onChange={a => updateBranch(idx, { ...branch, action: a as LeafAction })} />
+          </div>
+        </div>
+      ))}
+
+      <button type="button"
+        onClick={() => onChange({ ...action, branches: [...action.branches, newBranch()] })}
+        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#C7601D]/30 py-2 text-xs font-medium text-[#C7601D]/70 hover:bg-[#C7601D]/4 transition">
+        <Plus className="h-3.5 w-3.5" /> Ajouter une branche
+      </button>
+
+      {/* Action par défaut */}
+      <div className="rounded-2xl border border-[#344453]/10 bg-[#F8F9FB] p-3 space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#344453]/40">
+          Action par défaut (aucune branche ne correspond)
+        </p>
+        <ActionEditor action={action.default_action} groups={groups} staff={staff} allowConditional={false}
+          onChange={a => onChange({ ...action, default_action: a as LeafAction })} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Éditeur d'action ─────────────────────────────────────────────────────────
 
 function ActionEditor({
-  action, groups, staff, label, onChange,
+  action, groups, staff, label, onChange, allowConditional = true,
 }: {
   action: Action;
   groups: StaffGroup[];
   staff: StaffMember[];
   label?: string;
   onChange: (a: Action) => void;
+  allowConditional?: boolean;
 }) {
   const inputCls = 'block w-full rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm text-[#141F28] outline-none focus:border-[#344453]/30 transition';
 
   const changeType = (t: ActionType) => {
-    const defaults: Record<ActionType, Action> = {
+    if (t === 'route_conditional') {
+      onChange({ type: 'route_conditional', branches: [newBranch()], default_action: { ...DEFAULT_VOICEMAIL } });
+      return;
+    }
+    const defaults: Record<Exclude<ActionType, 'route_conditional'>, Action> = {
       route_group:    { type: 'route_group', group_id: '', distribution_strategy: 'sequential', agent_order: [], retry: { ...DEFAULT_RETRY } },
       route_agent:    { type: 'route_agent', agent_id: '', ring_duration: 30 },
       route_external: { type: 'route_external', phone_number: '', label: '' },
@@ -413,12 +515,16 @@ function ActionEditor({
     onChange(defaults[t]);
   };
 
+  const allTypes = Object.keys(ACTION_LABELS) as ActionType[];
+  const visibleTypes = allowConditional ? allTypes : allTypes.filter(t => t !== 'route_conditional');
+
   const iconMap: Record<ActionType, JSX.Element> = {
-    route_group:    <Users className="h-3.5 w-3.5" />,
-    route_agent:    <User className="h-3.5 w-3.5" />,
-    route_external: <PhoneCall className="h-3.5 w-3.5" />,
-    play_message:   <MessageSquare className="h-3.5 w-3.5" />,
-    voicemail:      <Voicemail className="h-3.5 w-3.5" />,
+    route_group:       <Users className="h-3.5 w-3.5" />,
+    route_agent:       <User className="h-3.5 w-3.5" />,
+    route_external:    <PhoneCall className="h-3.5 w-3.5" />,
+    play_message:      <MessageSquare className="h-3.5 w-3.5" />,
+    voicemail:         <Voicemail className="h-3.5 w-3.5" />,
+    route_conditional: <GitBranch className="h-3.5 w-3.5" />,
   };
 
   const stratIcons: Record<DistributionStrategy, JSX.Element> = {
@@ -433,8 +539,8 @@ function ActionEditor({
       {label && <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#344453]/40">{label}</p>}
 
       {/* Sélecteur de type */}
-      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
-        {(Object.keys(ACTION_LABELS) as ActionType[]).map(t => (
+      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+        {visibleTypes.map(t => (
           <button key={t} type="button"
             onClick={() => changeType(t)}
             className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-center transition ${
@@ -584,6 +690,15 @@ function ActionEditor({
             className="block w-full resize-none rounded-xl border border-[#344453]/12 bg-white px-3 py-2 text-sm outline-none focus:border-[#344453]/30 transition" />
         );
       })()}
+
+      {action.type === 'route_conditional' && (
+        <ConditionalRouteSection
+          action={action as RouteConditionalAction}
+          groups={groups}
+          staff={staff}
+          onChange={a => onChange(a)}
+        />
+      )}
     </div>
   );
 }

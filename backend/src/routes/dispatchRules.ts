@@ -56,7 +56,7 @@ const retrySchema = z.object({
   between_attempts_delay: z.number().int().min(0).max(30),
 });
 
-const actionSchema = z.discriminatedUnion('type', [
+const leafActionSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('route_group'),
     group_id: z.string().uuid(),
@@ -81,6 +81,22 @@ const actionSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('voicemail'),
     greeting_text: z.string().optional(),
+  }),
+]);
+
+const conditionalBranchSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  condition: conditionSchema,
+  action: leafActionSchema,
+});
+
+const actionSchema = z.union([
+  leafActionSchema,
+  z.object({
+    type: z.literal('route_conditional'),
+    branches: z.array(conditionalBranchSchema),
+    default_action: leafActionSchema,
   }),
 ]);
 

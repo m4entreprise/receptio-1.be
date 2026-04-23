@@ -86,9 +86,24 @@ export interface VoicemailAction {
   greeting_text?: string;
 }
 
-export type Action =
+export type LeafAction =
   | RouteGroupAction | RouteAgentAction | RouteExternalAction
   | PlayMessageAction | VoicemailAction;
+
+export interface ConditionalBranch {
+  id: string;
+  label: string;
+  condition: Condition;
+  action: LeafAction;
+}
+
+export interface RouteConditionalAction {
+  type: 'route_conditional';
+  branches: ConditionalBranch[];
+  default_action: LeafAction;
+}
+
+export type Action = LeafAction | RouteConditionalAction;
 
 export type ActionType = Action['type'];
 
@@ -143,11 +158,12 @@ export const CONDITION_LABELS: Record<ConditionType, string> = {
 };
 
 export const ACTION_LABELS: Record<ActionType, string> = {
-  route_group:    'Groupe d\'agents',
-  route_agent:    'Agent spécifique',
-  route_external: 'Numéro externe',
-  play_message:   'Message vocal',
-  voicemail:      'Messagerie vocale',
+  route_group:       'Groupe d\'agents',
+  route_agent:       'Agent spécifique',
+  route_external:    'Numéro externe',
+  play_message:      'Message vocal',
+  voicemail:         'Messagerie vocale',
+  route_conditional: 'Dispatch conditionnel',
 };
 
 export const STRATEGY_LABELS: Record<DistributionStrategy, { label: string; desc: string }> = {

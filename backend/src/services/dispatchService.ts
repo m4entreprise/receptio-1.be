@@ -4,6 +4,7 @@ import type {
   DispatchRule, DispatchTarget, CallContext, Condition, Action, FallbackStep,
   ScheduleCondition, HolidayCondition, LanguageCondition,
   CallerNumberCondition, IntentCondition, AgentAvailabilityCondition,
+  RouteConditionalAction,
 } from '../types/dispatch';
 
 // ─── Calendriers des jours fériés (BE, FR, LU, NL, DE, CH) ─────────────────
@@ -163,24 +164,28 @@ async function evalAgentAvailability(
   return !open;
 }
 
+// ─── Évaluation d'une condition unique ────────────────────────────────────────
+
+async function evaluateSingleCondition(cond: Condition, ctx: CallContext): Promise<boolean> {
+  switch (cond.type) {
+    case 'always':             return true;
+    case 'schedule':           return evalSchedule(cond, ctx);
+    case 'holiday':            return evalHoliday(cond, ctx);
+    case 'language':           return evalLanguage(cond, ctx);
+    case 'caller_number':      return evalCallerNumber(cond, ctx);
+    case 'intent':             return evalIntent(cond, ctx);
+    case 'agent_availability': return evalAgentAvailability(cond, ctx);
+    default:                   return false;
+  }
+}
+
 // ─── Évaluation d'un ensemble de conditions ───────────────────────────────────
 
 async function evaluateConditions(rule: DispatchRule, ctx: CallContext): Promise<boolean> {
   if (rule.condition_operator === 'ALWAYS' || rule.conditions.length === 0) return true;
 
   const results = await Promise.all(
-    rule.conditions.map(async (cond: Condition): Promise<boolean> => {
-      switch (cond.type) {
-        case 'always':             return true;
-        case 'schedule':           return evalSchedule(cond, ctx);
-        case 'holiday':            return evalHoliday(cond, ctx);
-        case 'language':           return evalLanguage(cond, ctx);
-        case 'caller_number':      return evalCallerNumber(cond, ctx);
-        case 'intent':             return evalIntent(cond, ctx);
-        case 'agent_availability': return evalAgentAvailability(cond, ctx);
-        default:                   return false;
-      }
-    })
+    rule.conditions.map((cond: Condition) => evaluateSingleCondition(cond, ctx))
   );
 
   return rule.condition_operator === 'AND'
@@ -196,9 +201,24 @@ async function resolveActionNumbers(
   timezone: string,
   now: Date,
   ruleId: string,
+  ctx?: CallContext,
 ): Promise<{ numbers: string[]; strategy: 'sequential' | 'simultaneous' | 'random' } | null> {
 
   switch (action.type) {
+    case 'route_conditional': {
+      const cond = action as RouteConditionalAction;
+      if (ctx) {
+        for (const branch of cond.branches) {
+          const matches = await evaluateSingleCondition(branch.condition, ctx);
+          if (matches) {
+            logger.info('dispatch: conditional branch matched', { label: branch.label });
+            return resolveActionNumbers(branch.action, companyId, timezone, now, ruleId, ctx);
+          }
+        }
+      }
+      logger.info('dispatch: no conditional branch matched, using default');
+      return resolveActionNumbers(cond.default_action, companyId, timezone, now, ruleId, ctx);
+    }
     case 'route_group': {
       const grp = await query(
         `SELECT schedule FROM staff_groups WHERE id = $1 AND company_id = $2 AND enabled = true`,
@@ -362,7 +382,7 @@ export async function resolveDispatchTarget(
       continue;
     }
 
-    const resolved = await resolveActionNumbers(rule.action, companyId, timezone, now, rule.id);
+    const resolved = await resolveActionNumbers(rule.action, companyId, timezone, now, rule.id, ctx);
     const fallback = await resolveFallbackChain(rule.fallback_chain, companyId, timezone, now);
 
     if (!resolved || resolved.numbers.length === 0) {
