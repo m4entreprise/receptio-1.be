@@ -11,29 +11,6 @@ const router = Router();
 
 const positionSchema = z.object({ x: z.number(), y: z.number() });
 
-const conditionSchema = z.discriminatedUnion('type', [
-  z.object({ id: z.string(), type: z.literal('always') }),
-  z.object({ id: z.string(), type: z.literal('schedule'), days: z.array(z.string()), time_start: z.string(), time_end: z.string() }),
-  z.object({ id: z.string(), type: z.literal('holiday'), country: z.enum(['BE','FR','LU','NL','DE','CH']), match: z.enum(['on_holiday','not_on_holiday']) }),
-  z.object({ id: z.string(), type: z.literal('language'), languages: z.array(z.string()) }),
-  z.object({ id: z.string(), type: z.literal('caller_number'), mode: z.enum(['equals','starts_with','contains']), patterns: z.array(z.string()) }),
-  z.object({ id: z.string(), type: z.literal('intent'), intents: z.array(z.string()), match_mode: z.enum(['any','all']) }),
-  z.object({ id: z.string(), type: z.literal('agent_availability'), group_id: z.string(), check: z.enum(['any_available','all_unavailable']) }),
-]);
-
-const retrySchema = z.object({
-  max_attempts: z.number().int().min(0),
-  ring_duration: z.number().int().min(5),
-  between_attempts_delay: z.number().int().min(0),
-});
-
-const leafActionSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('route_group'), group_id: z.string(), distribution_strategy: z.enum(['sequential','simultaneous','random','round_robin']), agent_order: z.array(z.string()).optional(), retry: retrySchema }),
-  z.object({ type: z.literal('route_agent'), agent_id: z.string(), ring_duration: z.number() }),
-  z.object({ type: z.literal('route_external'), phone_number: z.string(), label: z.string().optional() }),
-  z.object({ type: z.literal('play_message'), message_text: z.string() }),
-  z.object({ type: z.literal('voicemail'), greeting_text: z.string().optional() }),
-]);
 
 const flowNodeSchema = z.object({
   id: z.string(),
@@ -65,11 +42,11 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response, next)
     );
 
     if (!result.rows.length) {
-      // Retourner un flow vide avec juste le nœud d'entrée
-      return res.json({
+      res.json({
         nodes: [{ id: 'entry', type: 'entry', position: { x: 400, y: 60 }, data: {} }],
         edges: [],
       });
+      return;
     }
 
     const row = result.rows[0];
