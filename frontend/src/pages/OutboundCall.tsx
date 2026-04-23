@@ -68,12 +68,53 @@ const KEYPAD_ROWS = [
   [{ d: '*', s: '' },    { d: '0', s: '+' },   { d: '#', s: '' }],
 ];
 
+const EU_COUNTRIES = [
+  { code: '+32',  flag: '🇧🇪', name: 'Belgique' },
+  { code: '+33',  flag: '🇫🇷', name: 'France' },
+  { code: '+352', flag: '🇱🇺', name: 'Luxembourg' },
+  { code: '+31',  flag: '🇳🇱', name: 'Pays-Bas' },
+  { code: '+49',  flag: '🇩🇪', name: 'Allemagne' },
+  { code: '+43',  flag: '🇦🇹', name: 'Autriche' },
+  { code: '+34',  flag: '🇪🇸', name: 'Espagne' },
+  { code: '+39',  flag: '🇮🇹', name: 'Italie' },
+  { code: '+351', flag: '🇵🇹', name: 'Portugal' },
+  { code: '+30',  flag: '🇬🇷', name: 'Grèce' },
+  { code: '+353', flag: '🇮🇪', name: 'Irlande' },
+  { code: '+45',  flag: '🇩🇰', name: 'Danemark' },
+  { code: '+46',  flag: '🇸🇪', name: 'Suède' },
+  { code: '+358', flag: '🇫🇮', name: 'Finlande' },
+  { code: '+48',  flag: '🇵🇱', name: 'Pologne' },
+  { code: '+420', flag: '🇨🇿', name: 'Tchéquie' },
+  { code: '+421', flag: '🇸🇰', name: 'Slovaquie' },
+  { code: '+36',  flag: '🇭🇺', name: 'Hongrie' },
+  { code: '+40',  flag: '🇷🇴', name: 'Roumanie' },
+  { code: '+359', flag: '🇧🇬', name: 'Bulgarie' },
+  { code: '+385', flag: '🇭🇷', name: 'Croatie' },
+  { code: '+386', flag: '🇸🇮', name: 'Slovénie' },
+  { code: '+372', flag: '🇪🇪', name: 'Estonie' },
+  { code: '+371', flag: '🇱🇻', name: 'Lettonie' },
+  { code: '+370', flag: '🇱🇹', name: 'Lituanie' },
+  { code: '+356', flag: '🇲🇹', name: 'Malte' },
+  { code: '+357', flag: '🇨🇾', name: 'Chypre' },
+];
+
+const COUNTRY_CODE_KEY = 'outbound_country_code';
+
+function buildEffectiveNumber(raw: string, countryCode: string): string {
+  if (raw.startsWith('+')) return raw;
+  const local = raw.startsWith('0') ? raw.slice(1) : raw;
+  return `${countryCode}${local}`;
+}
+
 // ---------------------------------------------------------------------------
 // Initiation panel — phone dialer UI
 // ---------------------------------------------------------------------------
 function InitiatePanel({ staff, onCallStarted }: { staff: StaffMember[]; onCallStarted: (id: string) => void }) {
   const [number, setNumber] = useState('');
   const [staffId, setStaffId] = useState('');
+  const [countryCode, setCountryCode] = useState<string>(
+    () => localStorage.getItem(COUNTRY_CODE_KEY) ?? '+32'
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -170,13 +211,20 @@ function InitiatePanel({ staff, onCallStarted }: { staff: StaffMember[]; onCallS
     }
   };
 
+  const effectiveNumber = number ? buildEffectiveNumber(number, countryCode) : '';
+
+  const handleCountryChange = (code: string) => {
+    setCountryCode(code);
+    localStorage.setItem(COUNTRY_CODE_KEY, code);
+  };
+
   // ── Call ──────────────────────────────────────────────────────────────────
   const handleCall = async () => {
-    if (!number.trim() || !staffId) return;
+    if (!effectiveNumber || !staffId) return;
     setError('');
     setLoading(true);
     try {
-      const res = await axios.post('/api/outbound-calls', { destinationNumber: number.trim(), staffId });
+      const res = await axios.post('/api/outbound-calls', { destinationNumber: effectiveNumber, staffId });
       onCallStarted(res.data.callId);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -186,21 +234,45 @@ function InitiatePanel({ staff, onCallStarted }: { staff: StaffMember[]; onCallS
     }
   };
 
-  const canCall = number.replace(/[^0-9+]/g, '').length >= 6 && !!staffId;
+  const canCall = effectiveNumber.replace(/[^0-9+]/g, '').length >= 6 && !!staffId;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="mx-auto max-w-xs">
       <div className="overflow-hidden rounded-3xl border border-[#344453]/12 bg-white shadow-[0_8px_32px_rgba(52,68,83,0.12)]">
 
-        {/* Screen — number display */}
-        <div className="relative bg-[#141F28] px-6 pt-10 pb-7">
+        {/* Screen — country selector + number display */}
+        <div className="relative bg-[#141F28] px-6 pt-6 pb-7">
+          {/* Country code selector */}
+          <div className="mb-3 flex justify-center">
+            <select
+              value={countryCode}
+              onChange={e => handleCountryChange(e.target.value)}
+              className="rounded-xl border border-white/15 bg-white/8 px-3 py-1.5 text-sm text-white outline-none focus:border-white/30 cursor-pointer"
+              title="Indicatif pays"
+            >
+              {EU_COUNTRIES.map(c => (
+                <option key={c.code} value={c.code} style={{ background: '#141F28', color: '#fff' }}>
+                  {c.flag} {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <p
             className="min-h-[2.75rem] text-center text-[1.75rem] font-light tracking-[0.12em] text-white transition-all"
             style={{ fontFamily: 'var(--font-mono)' }}
           >
             {number || <span className="text-white/15 text-2xl">_ _ _ _ _ _ _ _ _ _</span>}
           </p>
+
+          {/* Preview of effective number when user hasn't typed '+' */}
+          {number && !number.startsWith('+') && (
+            <p className="mt-1 text-center text-[11px] text-white/35" style={{ fontFamily: 'var(--font-mono)' }}>
+              → {effectiveNumber}
+            </p>
+          )}
+
           {/* Backspace */}
           <div className="absolute right-5 top-1/2 -translate-y-1/2">
             {number.length > 0 && (
