@@ -4,6 +4,7 @@ import ReactFlow, {
   useNodesState, useEdgesState, addEdge, Connection,
   MarkerType, NodeProps, Handle, Position, Panel,
   MiniMap, useReactFlow, ReactFlowProvider, NodeChange,
+  EdgeProps, getBezierPath, EdgeLabelRenderer,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import {
@@ -278,6 +279,94 @@ function EndNode({ data }: NodeProps<FlowNodeData_End>) {
     </div>
   );
 }
+
+// ─── Arête supprimable ────────────────────────────────────────────────────────
+
+function DeletableEdge({
+  id, sourceX, sourceY, targetX, targetY,
+  sourcePosition, targetPosition,
+  style, markerEnd, label,
+}: EdgeProps) {
+  const { setEdges } = useReactFlow();
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition,
+  });
+
+  const stroke = (style as React.CSSProperties & { stroke?: string })?.stroke ?? '#94A3B8';
+
+  return (
+    <>
+      <path id={id} d={edgePath} style={style}
+        className="react-flow__edge-path" markerEnd={markerEnd as string} />
+      {/* Zone de clic large invisible pour faciliter la sélection */}
+      <path d={edgePath} fill="none" stroke="transparent" strokeWidth={12} className="react-flow__edge-interaction" />
+
+      <EdgeLabelRenderer>
+        <div
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: 'all',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+          className="nodrag nopan"
+        >
+          {/* Label Oui / Non / Sinon */}
+          {label && (
+            <span style={{
+              background: stroke,
+              color: 'white',
+              borderRadius: 6,
+              fontSize: 10,
+              fontWeight: 700,
+              padding: '2px 7px',
+              lineHeight: 1.4,
+              userSelect: 'none',
+            }}>
+              {label as string}
+            </span>
+          )}
+
+          {/* Bouton supprimer */}
+          <button
+            type="button"
+            onClick={() => setEdges(es => es.filter(e => e.id !== id))}
+            title="Supprimer cette connexion"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 18,
+              height: 18,
+              borderRadius: '50%',
+              border: `1.5px solid ${stroke}`,
+              background: 'white',
+              color: stroke,
+              cursor: 'pointer',
+              padding: 0,
+              lineHeight: 1,
+              transition: 'background 0.15s, color 0.15s',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = stroke;
+              (e.currentTarget as HTMLButtonElement).style.color = 'white';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'white';
+              (e.currentTarget as HTMLButtonElement).style.color = stroke;
+            }}
+          >
+            <X style={{ width: 9, height: 9, strokeWidth: 3 }} />
+          </button>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const edgeTypes = { default: DeletableEdge };
 
 const nodeTypes = {
   entry:     EntryNode,
@@ -933,6 +1022,7 @@ function FlowBuilderInner({ groups, staff, nodes: initNodes, edges: initEdges, o
           onEdgesChange={(changes) => { onEdgesChange(changes); setDirty(true); }}
           onConnect={onConnect}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodeClick={(_, node) => setSelectedId(node.id)}
           onPaneClick={() => setSelectedId(null)}
           deleteKeyCode={['Backspace', 'Delete']}
