@@ -61,7 +61,7 @@ export default function DispatchTab() {
     ])
       .then(([groupsData, staffData, flowData]) => {
         if (cancelled) return;
-        setGroups(groupsData);
+        setGroups(groupsData.groups ?? groupsData ?? []);
         setStaff((staffData.staff ?? staffData ?? []).filter((s: StaffMember) => s.enabled));
 
         const flowNodes: Node[] = flowData.nodes ?? [ENTRY_NODE];
